@@ -20,7 +20,7 @@ async function init() {
   window.mapManager = mapManager;
   window.layerManager = layerManager;
 
-  console.log('Geospatial Viewer initialized');
+  console.log('Heimdall initialized');
 }
 
 // Start the app

@@ -1132,6 +1132,9 @@ export class LayerManager {
       const gStats = layer.band_stats[layer.rgbBands.g - 1] || { min: 0, max: 255 };
       const bStats = layer.band_stats[layer.rgbBands.b - 1] || { min: 0, max: 255 };
 
+      // Check if stretch controls should be shown (default hidden)
+      const showStretch = layer.showRgbStretch || false;
+
       controlsHtml += `
         <div class="control-section rgb-bands">
           <div class="rgb-channel-group">
@@ -1139,7 +1142,7 @@ export class LayerManager {
               <span class="rgb-label r">R</span>
               <select id="rgb-r">${rgbBandOptions(layer.rgbBands.r)}</select>
             </div>
-            <div class="rgb-stretch-controls">
+            <div class="rgb-stretch-controls ${showStretch ? '' : 'hidden'}">
               <div class="mini-control">
                 <span class="mini-label">Min</span>
                 <input type="range" id="rgb-r-min" min="${rStats.min}" max="${rStats.max}" value="${layer.rgbStretch.r.min}" step="0.1">
@@ -1157,7 +1160,7 @@ export class LayerManager {
               <span class="rgb-label g">G</span>
               <select id="rgb-g">${rgbBandOptions(layer.rgbBands.g)}</select>
             </div>
-            <div class="rgb-stretch-controls">
+            <div class="rgb-stretch-controls ${showStretch ? '' : 'hidden'}">
               <div class="mini-control">
                 <span class="mini-label">Min</span>
                 <input type="range" id="rgb-g-min" min="${gStats.min}" max="${gStats.max}" value="${layer.rgbStretch.g.min}" step="0.1">
@@ -1175,7 +1178,7 @@ export class LayerManager {
               <span class="rgb-label b">B</span>
               <select id="rgb-b">${rgbBandOptions(layer.rgbBands.b)}</select>
             </div>
-            <div class="rgb-stretch-controls">
+            <div class="rgb-stretch-controls ${showStretch ? '' : 'hidden'}">
               <div class="mini-control">
                 <span class="mini-label">Min</span>
                 <input type="range" id="rgb-b-min" min="${bStats.min}" max="${bStats.max}" value="${layer.rgbStretch.b.min}" step="0.1">
@@ -1188,6 +1191,12 @@ export class LayerManager {
               </div>
             </div>
           </div>
+        </div>
+        <div class="stretch-toggle-row">
+          <label class="stretch-toggle-label">
+            <input type="checkbox" id="show-rgb-stretch" ${showStretch ? 'checked' : ''}>
+            Show Stretch Controls
+          </label>
         </div>
         <button id="auto-stretch-rgb" class="control-btn">Auto Stretch All</button>
       `;
@@ -1345,6 +1354,18 @@ export class LayerManager {
 
           this.refreshLayerTiles(this.selectedLayerId);
           this.updateDynamicControls();
+        });
+      }
+
+      // Toggle stretch controls visibility
+      const showStretchCheckbox = document.getElementById('show-rgb-stretch');
+      if (showStretchCheckbox) {
+        showStretchCheckbox.addEventListener('change', (e) => {
+          layer.showRgbStretch = e.target.checked;
+          const stretchControls = document.querySelectorAll('.rgb-stretch-controls');
+          stretchControls.forEach(ctrl => {
+            ctrl.classList.toggle('hidden', !e.target.checked);
+          });
         });
       }
     }
@@ -1532,6 +1553,7 @@ export class LayerManager {
     const maxSpan = document.getElementById('histogram-max');
     const closeBtn = document.getElementById('histogram-panel-close');
     const bandSelect = document.getElementById('histogram-band');
+    const logScaleCheckbox = document.getElementById('histogram-log-scale');
     const tooltip = document.getElementById('histogram-tooltip');
 
     if (!panel || !canvas) return;
@@ -1575,15 +1597,39 @@ export class LayerManager {
         numBins: 256,
       });
 
+      // Store histogram data for redraw
+      this.currentHistogram = histogram;
+      this.currentHistogramLayerId = layerId;
+
       // Update stats
       minSpan.textContent = `Min: ${histogram.min.toFixed(2)}`;
       maxSpan.textContent = `Max: ${histogram.max.toFixed(2)}`;
 
+      // Auto-enable log scale for high dynamic range
+      const maxCount = Math.max(...histogram.counts);
+      if (logScaleCheckbox && maxCount > 1000) {
+        logScaleCheckbox.checked = true;
+      }
+
       // Draw histogram on canvas
-      this.drawHistogram(canvas, histogram, layer);
+      const useLogScale = logScaleCheckbox ? logScaleCheckbox.checked : false;
+      this.drawHistogram(canvas, histogram, layer, useLogScale);
 
       // Setup mouse hover for tooltip
-      this.setupHistogramHover(canvas, tooltip, histogram);
+      this.setupHistogramHover(canvas, tooltip, histogram, useLogScale);
+
+      // Setup log scale toggle handler
+      if (logScaleCheckbox) {
+        logScaleCheckbox.onchange = () => {
+          const currentLayer = this.layers.get(this.currentHistogramLayerId);
+          const currentCanvas = document.getElementById('histogram-canvas');
+          const currentTooltip = document.getElementById('histogram-tooltip');
+          if (this.currentHistogram && currentCanvas) {
+            this.drawHistogram(currentCanvas, this.currentHistogram, currentLayer, logScaleCheckbox.checked);
+            this.setupHistogramHover(currentCanvas, currentTooltip, this.currentHistogram, logScaleCheckbox.checked);
+          }
+        };
+      }
     } catch (error) {
       console.error('Failed to load histogram:', error);
       minSpan.textContent = 'Error loading histogram';
@@ -1591,7 +1637,7 @@ export class LayerManager {
     }
   }
 
-  setupHistogramHover(canvas, tooltip, histogram) {
+  setupHistogramHover(canvas, tooltip, histogram, useLogScale) {
     if (!tooltip) return;
 
     const padding = { top: 10, right: 10, bottom: 30, left: 50 };
@@ -1644,10 +1690,10 @@ export class LayerManager {
     });
 
     // Redraw the histogram on the new canvas
-    this.drawHistogram(newCanvas, histogram, this.layers.get(this.selectedLayerId));
+    this.drawHistogram(newCanvas, histogram, this.layers.get(this.selectedLayerId), useLogScale);
   }
 
-  drawHistogram(canvas, histogram, layer) {
+  drawHistogram(canvas, histogram, layer, useLogScale = false) {
     const ctx = canvas.getContext('2d');
     const width = canvas.width;
     const height = canvas.height;
@@ -1659,11 +1705,10 @@ export class LayerManager {
     ctx.fillStyle = '#1a1a1a';
     ctx.fillRect(0, 0, width, height);
 
-    // Find max count for scaling (use log scale for better visualization)
+    // Find max count for scaling
     const maxCount = Math.max(...histogram.counts);
     if (maxCount === 0) return;
 
-    const useLogScale = maxCount > 1000;
     const getScaledValue = (count) => {
       if (useLogScale) {
         return count > 0 ? Math.log10(count + 1) / Math.log10(maxCount + 1) : 0;

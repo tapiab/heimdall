@@ -1,5 +1,5 @@
 {
-  "name": "geo-viewer",
+  "name": "heimdall",
   "version": "0.1.0",
   "description": "Lightweight geospatial raster and vector viewer",
   "scripts": {

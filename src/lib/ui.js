@@ -28,6 +28,12 @@ export function setupUI(mapManager, layerManager) {
     });
   }
 
+  // Controls panel toggle button
+  const controlsPanelToggle = document.getElementById('controls-panel-toggle');
+  if (controlsPanelToggle) {
+    controlsPanelToggle.addEventListener('click', () => toggleControlsPanel());
+  }
+
   // Keyboard shortcuts
   document.addEventListener('keydown', (e) => {
     // Don't trigger shortcuts when typing in inputs
@@ -60,6 +66,10 @@ export function setupUI(mapManager, layerManager) {
     // L to toggle layer panel
     if (e.key === 'l' && !e.ctrlKey && !e.metaKey && !e.altKey) {
       toggleLayerPanel();
+    }
+    // D to toggle display/controls panel
+    if (e.key === 'd' && !e.ctrlKey && !e.metaKey && !e.altKey) {
+      toggleControlsPanel();
     }
     // Delete/Backspace to remove selected layer
     if ((e.key === 'Delete' || e.key === 'Backspace') && !e.ctrlKey && !e.metaKey) {
@@ -123,6 +133,17 @@ function toggleLayerPanel() {
   }
 }
 
+function toggleControlsPanel() {
+  const panel = document.getElementById('controls-panel');
+  const toggleBtn = document.getElementById('controls-panel-toggle');
+  if (panel) {
+    panel.classList.toggle('collapsed');
+    if (toggleBtn) {
+      toggleBtn.textContent = panel.classList.contains('collapsed') ? '+' : '−';
+    }
+  }
+}
+
 function showShortcutsHelp() {
   const existingHelp = document.getElementById('shortcuts-help');
   if (existingHelp) {
@@ -141,6 +162,7 @@ function showShortcutsHelp() {
         <div class="shortcut"><kbd>R</kbd> Reset rotation</div>
         <div class="shortcut"><kbd>B</kbd> Cycle basemap</div>
         <div class="shortcut"><kbd>L</kbd> Toggle layer panel</div>
+        <div class="shortcut"><kbd>D</kbd> Toggle display panel</div>
         <div class="shortcut"><kbd>V</kbd> Toggle layer visibility</div>
         <div class="shortcut"><kbd>A</kbd> Open attribute table</div>
         <div class="shortcut"><kbd>H</kbd> Show histogram</div>

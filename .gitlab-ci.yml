@@ -1,4 +1,4 @@
-# GitLab CI/CD configuration for Geo Viewer
+# GitLab CI/CD configuration for Heimdall
 # Builds for Linux, macOS, and Windows (x86_64 and ARM64)
 
 stages:
@@ -322,8 +322,8 @@ release:
     assets:
       links:
         - name: "Linux x86_64 AppImage"
-          url: "${CI_PROJECT_URL}/-/jobs/${CI_JOB_ID}/artifacts/file/src-tauri/target/release/bundle/appimage/geo-viewer_${CI_COMMIT_TAG}_amd64.AppImage"
+          url: "${CI_PROJECT_URL}/-/jobs/${CI_JOB_ID}/artifacts/file/src-tauri/target/release/bundle/appimage/heimdall_${CI_COMMIT_TAG}_amd64.AppImage"
         - name: "Linux x86_64 Deb"
-          url: "${CI_PROJECT_URL}/-/jobs/${CI_JOB_ID}/artifacts/file/src-tauri/target/release/bundle/deb/geo-viewer_${CI_COMMIT_TAG}_amd64.deb"
+          url: "${CI_PROJECT_URL}/-/jobs/${CI_JOB_ID}/artifacts/file/src-tauri/target/release/bundle/deb/heimdall_${CI_COMMIT_TAG}_amd64.deb"
   rules:
     - if: $CI_COMMIT_TAG

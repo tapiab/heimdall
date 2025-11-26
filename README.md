@@ -1,6 +1,16 @@
-# Geo Viewer
+# Heimdall
+
+<p align="center">
+  <img src="docs/logo.svg" alt="Heimdall Logo" width="128" height="128">
+</p>
 
 A lightweight, fast geospatial raster and vector viewer built with Tauri, Rust, and MapLibre GL. Designed as a modern replacement for OpenEV.
+
+## Why "Heimdall"?
+
+In Norse mythology, **Heimdall** is the watchman of the gods. Standing at the edge of Bifrost, the rainbow bridge, he possesses extraordinary sight - able to see for hundreds of miles across all the nine realms, by day or night. He requires less sleep than a bird and can hear grass growing on the earth.
+
+Just as Heimdall watches over the realms, this application lets you observe and explore your geospatial data - from satellite imagery spanning continents to the finest details of vector features.
 
 ## Features
 
@@ -23,6 +33,7 @@ A lightweight, fast geospatial raster and vector viewer built with Tauri, Rust, 
 | `R` | Reset rotation |
 | `B` | Cycle basemap (OSM → Satellite → None) |
 | `L` | Toggle layer panel |
+| `D` | Toggle display panel |
 | `V` | Toggle selected layer visibility |
 | `A` | Open attribute table (vector layers) |
 | `H` | Show histogram (raster layers) |
@@ -71,8 +82,8 @@ Any raster format supported by GDAL, including:
 
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/geo-viewer.git
-cd geo-viewer
+git clone https://github.com/yourusername/heimdall.git
+cd heimdall
 
 # Install dependencies
 npm install

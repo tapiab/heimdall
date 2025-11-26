@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Geospatial Viewer</title>
+    <title>Heimdall</title>
     <link rel="stylesheet" href="/src/styles/main.css" />
   </head>
   <body>
@@ -29,7 +29,10 @@
           <div id="layer-list"></div>
         </div>
         <div id="controls-panel">
-          <h3>Display</h3>
+          <div class="panel-header">
+            <h3>Display</h3>
+            <button id="controls-panel-toggle" class="panel-toggle" title="Toggle panel (D)">−</button>
+          </div>
           <div id="dynamic-controls">
             <div class="no-layer-selected">Select a layer to adjust</div>
           </div>
@@ -50,9 +53,17 @@
       <div id="histogram-panel">
         <div id="histogram-panel-header">
           <h4 id="histogram-panel-title">Histogram</h4>
-          <div id="histogram-band-selector">
-            <label for="histogram-band">Band:</label>
-            <select id="histogram-band"></select>
+          <div id="histogram-controls">
+            <div id="histogram-band-selector">
+              <label for="histogram-band">Band:</label>
+              <select id="histogram-band"></select>
+            </div>
+            <div id="histogram-scale-toggle">
+              <label for="histogram-log-scale">
+                <input type="checkbox" id="histogram-log-scale">
+                Log
+              </label>
+            </div>
           </div>
           <button id="histogram-panel-close">&times;</button>
         </div>

@@ -1,0 +1,62 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
+  <defs>
+    <!-- Gradient for the eye/globe -->
+    <linearGradient id="eyeGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#4a9eff"/>
+      <stop offset="100%" style="stop-color:#1a5fa8"/>
+    </linearGradient>
+    <!-- Gradient for the iris -->
+    <radialGradient id="irisGradient" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" style="stop-color:#ffd700"/>
+      <stop offset="70%" style="stop-color:#ff8c00"/>
+      <stop offset="100%" style="stop-color:#cc6600"/>
+    </radialGradient>
+    <!-- Gradient for the outer ring -->
+    <linearGradient id="ringGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#c0c0c0"/>
+      <stop offset="50%" style="stop-color:#808080"/>
+      <stop offset="100%" style="stop-color:#505050"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Outer Norse-inspired ring -->
+  <circle cx="64" cy="64" r="60" fill="none" stroke="url(#ringGradient)" stroke-width="6"/>
+
+  <!-- Runic notches on the ring (8 directions like compass) -->
+  <g stroke="#606060" stroke-width="2">
+    <line x1="64" y1="4" x2="64" y2="14"/>
+    <line x1="64" y1="114" x2="64" y2="124"/>
+    <line x1="4" y1="64" x2="14" y2="64"/>
+    <line x1="114" y1="64" x2="124" y2="64"/>
+    <line x1="21" y1="21" x2="28" y2="28"/>
+    <line x1="100" y1="100" x2="107" y2="107"/>
+    <line x1="107" y1="21" x2="100" y2="28"/>
+    <line x1="28" y1="100" x2="21" y2="107"/>
+  </g>
+
+  <!-- The all-seeing eye shape -->
+  <ellipse cx="64" cy="64" rx="45" ry="30" fill="url(#eyeGradient)"/>
+
+  <!-- Globe lines within the eye (latitude) -->
+  <g stroke="#ffffff" stroke-width="1" fill="none" opacity="0.3">
+    <ellipse cx="64" cy="64" rx="45" ry="10"/>
+    <ellipse cx="64" cy="54" rx="38" ry="8"/>
+    <ellipse cx="64" cy="74" rx="38" ry="8"/>
+  </g>
+
+  <!-- Globe lines (longitude) -->
+  <g stroke="#ffffff" stroke-width="1" fill="none" opacity="0.3">
+    <ellipse cx="64" cy="64" rx="15" ry="30"/>
+    <ellipse cx="64" cy="64" rx="30" ry="30"/>
+  </g>
+
+  <!-- Iris - golden like Heimdall's sight -->
+  <circle cx="64" cy="64" r="18" fill="url(#irisGradient)"/>
+
+  <!-- Pupil -->
+  <circle cx="64" cy="64" r="8" fill="#1a1a1a"/>
+
+  <!-- Light reflection -->
+  <circle cx="58" cy="58" r="4" fill="#ffffff" opacity="0.8"/>
+  <circle cx="70" cy="70" r="2" fill="#ffffff" opacity="0.5"/>
+</svg>
