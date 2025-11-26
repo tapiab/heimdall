@@ -12,6 +12,10 @@ In Norse mythology, **Heimdall** is the watchman of the gods. Standing at the ed
 
 Just as Heimdall watches over the realms, this application lets you observe and explore your geospatial data - from satellite imagery spanning continents to the finest details of vector features.
 
+<p align="center">
+  <img src="docs/screenshot.png" alt="Heimdall Screenshot" width="800">
+</p>
+
 ## Features
 
 - **Fast raster viewing** - GDAL-powered tile extraction with automatic reprojection
