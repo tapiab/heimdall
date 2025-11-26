@@ -36,3 +36,12 @@ src-tauri/bundle/
 *.hdf
 *.nc
 !test-data/small-sample.*
+
+# CI cache directories
+.cargo/
+.rustup/
+.npm/
+
+# Test coverage
+coverage/
+junit.xml

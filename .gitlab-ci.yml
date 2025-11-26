@@ -1,0 +1,329 @@
+# GitLab CI/CD configuration for Geo Viewer
+# Builds for Linux, macOS, and Windows (x86_64 and ARM64)
+
+stages:
+  - check
+  - test
+  - build
+
+variables:
+  CARGO_HOME: ${CI_PROJECT_DIR}/.cargo
+  RUSTUP_HOME: ${CI_PROJECT_DIR}/.rustup
+  NODE_VERSION: "20"
+  RUST_VERSION: "stable"
+
+# Cache configuration
+.cache-npm: &cache-npm
+  key: npm-${CI_JOB_NAME}
+  paths:
+    - node_modules/
+    - .npm/
+
+.cache-cargo: &cache-cargo
+  key: cargo-${CI_JOB_NAME}
+  paths:
+    - .cargo/
+    - src-tauri/target/
+
+# ====================
+# Check Stage
+# ====================
+
+lint:js:
+  stage: check
+  image: node:${NODE_VERSION}
+  cache:
+    <<: *cache-npm
+  script:
+    - npm ci --cache .npm --prefer-offline
+    - npm run test:run
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+
+lint:rust:
+  stage: check
+  image: rust:${RUST_VERSION}
+  cache:
+    <<: *cache-cargo
+  before_script:
+    - rustup component add clippy rustfmt
+    - apt-get update && apt-get install -y libgdal-dev
+  script:
+    - cd src-tauri
+    - cargo fmt --check
+    - cargo clippy -- -D warnings
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+
+# ====================
+# Test Stage
+# ====================
+
+test:js:
+  stage: test
+  image: node:${NODE_VERSION}
+  cache:
+    <<: *cache-npm
+  script:
+    - npm ci --cache .npm --prefer-offline
+    - npm run test:run
+  coverage: '/All files[^|]*\|[^|]*\s+([\d\.]+)/'
+  artifacts:
+    when: always
+    reports:
+      junit: junit.xml
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+
+test:rust:
+  stage: test
+  image: rust:${RUST_VERSION}
+  cache:
+    <<: *cache-cargo
+  before_script:
+    - apt-get update && apt-get install -y libgdal-dev
+  script:
+    - cd src-tauri
+    - cargo test --verbose
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+
+# ====================
+# Build Stage - Linux
+# ====================
+
+build:linux-x86_64:
+  stage: build
+  image: rust:${RUST_VERSION}
+  cache:
+    <<: *cache-cargo
+  before_script:
+    - apt-get update && apt-get install -y
+        libgdal-dev
+        libwebkit2gtk-4.1-dev
+        libappindicator3-dev
+        librsvg2-dev
+        patchelf
+        libssl-dev
+        libgtk-3-dev
+        libayatana-appindicator3-dev
+    - curl -fsSL https://deb.nodesource.com/setup_${NODE_VERSION}.x | bash -
+    - apt-get install -y nodejs
+    - npm ci
+  script:
+    - npm run tauri:build
+  artifacts:
+    paths:
+      - src-tauri/target/release/bundle/deb/*.deb
+      - src-tauri/target/release/bundle/rpm/*.rpm
+      - src-tauri/target/release/bundle/appimage/*.AppImage
+    expire_in: 1 week
+  rules:
+    - if: $CI_COMMIT_TAG
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+      when: manual
+
+build:linux-arm64:
+  stage: build
+  image: rust:${RUST_VERSION}
+  tags:
+    - arm64
+  cache:
+    <<: *cache-cargo
+  before_script:
+    - apt-get update && apt-get install -y
+        libgdal-dev
+        libwebkit2gtk-4.1-dev
+        libappindicator3-dev
+        librsvg2-dev
+        patchelf
+        libssl-dev
+        libgtk-3-dev
+        libayatana-appindicator3-dev
+    - curl -fsSL https://deb.nodesource.com/setup_${NODE_VERSION}.x | bash -
+    - apt-get install -y nodejs
+    - npm ci
+  script:
+    - npm run tauri:build
+  artifacts:
+    paths:
+      - src-tauri/target/release/bundle/deb/*.deb
+      - src-tauri/target/release/bundle/appimage/*.AppImage
+    expire_in: 1 week
+  rules:
+    - if: $CI_COMMIT_TAG
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+      when: manual
+
+# ====================
+# Build Stage - macOS
+# ====================
+
+build:macos-x86_64:
+  stage: build
+  tags:
+    - macos
+    - x86_64
+  cache:
+    key: macos-x86_64
+    paths:
+      - node_modules/
+      - .cargo/
+      - src-tauri/target/
+  before_script:
+    - brew install gdal
+    - curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+    - source $HOME/.cargo/env
+    - rustup target add x86_64-apple-darwin
+    - npm ci
+  script:
+    - npm run tauri:build -- --target x86_64-apple-darwin
+  artifacts:
+    paths:
+      - src-tauri/target/x86_64-apple-darwin/release/bundle/dmg/*.dmg
+      - src-tauri/target/x86_64-apple-darwin/release/bundle/macos/*.app
+    expire_in: 1 week
+  rules:
+    - if: $CI_COMMIT_TAG
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+      when: manual
+
+build:macos-arm64:
+  stage: build
+  tags:
+    - macos
+    - arm64
+  cache:
+    key: macos-arm64
+    paths:
+      - node_modules/
+      - .cargo/
+      - src-tauri/target/
+  before_script:
+    - brew install gdal
+    - curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+    - source $HOME/.cargo/env
+    - rustup target add aarch64-apple-darwin
+    - npm ci
+  script:
+    - npm run tauri:build -- --target aarch64-apple-darwin
+  artifacts:
+    paths:
+      - src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/*.dmg
+      - src-tauri/target/aarch64-apple-darwin/release/bundle/macos/*.app
+    expire_in: 1 week
+  rules:
+    - if: $CI_COMMIT_TAG
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+      when: manual
+
+# ====================
+# Build Stage - Windows
+# ====================
+
+build:windows-x86_64:
+  stage: build
+  tags:
+    - windows
+    - x86_64
+  cache:
+    key: windows-x86_64
+    paths:
+      - node_modules/
+      - .cargo/
+      - src-tauri/target/
+  variables:
+    GDAL_HOME: C:\OSGeo4W
+    PATH: ${GDAL_HOME}\bin;${PATH}
+  before_script:
+    - choco install -y osgeo4w
+    - choco install -y nodejs-lts rust
+    - refreshenv
+    - npm ci
+  script:
+    - npm run tauri:build
+  artifacts:
+    paths:
+      - src-tauri/target/release/bundle/msi/*.msi
+      - src-tauri/target/release/bundle/nsis/*.exe
+    expire_in: 1 week
+  rules:
+    - if: $CI_COMMIT_TAG
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+      when: manual
+
+build:windows-arm64:
+  stage: build
+  tags:
+    - windows
+    - arm64
+  cache:
+    key: windows-arm64
+    paths:
+      - node_modules/
+      - .cargo/
+      - src-tauri/target/
+  variables:
+    GDAL_HOME: C:\OSGeo4W
+    PATH: ${GDAL_HOME}\bin;${PATH}
+  before_script:
+    - choco install -y osgeo4w
+    - choco install -y nodejs-lts rust
+    - refreshenv
+    - rustup target add aarch64-pc-windows-msvc
+    - npm ci
+  script:
+    - npm run tauri:build -- --target aarch64-pc-windows-msvc
+  artifacts:
+    paths:
+      - src-tauri/target/aarch64-pc-windows-msvc/release/bundle/msi/*.msi
+      - src-tauri/target/aarch64-pc-windows-msvc/release/bundle/nsis/*.exe
+    expire_in: 1 week
+  rules:
+    - if: $CI_COMMIT_TAG
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+      when: manual
+
+# ====================
+# Release Job
+# ====================
+
+release:
+  stage: build
+  image: registry.gitlab.com/gitlab-org/release-cli:latest
+  needs:
+    - job: build:linux-x86_64
+      artifacts: true
+    - job: build:linux-arm64
+      artifacts: true
+      optional: true
+    - job: build:macos-x86_64
+      artifacts: true
+      optional: true
+    - job: build:macos-arm64
+      artifacts: true
+      optional: true
+    - job: build:windows-x86_64
+      artifacts: true
+      optional: true
+    - job: build:windows-arm64
+      artifacts: true
+      optional: true
+  script:
+    - echo "Creating release ${CI_COMMIT_TAG}"
+  release:
+    tag_name: ${CI_COMMIT_TAG}
+    name: "Release ${CI_COMMIT_TAG}"
+    description: "Release ${CI_COMMIT_TAG}"
+    assets:
+      links:
+        - name: "Linux x86_64 AppImage"
+          url: "${CI_PROJECT_URL}/-/jobs/${CI_JOB_ID}/artifacts/file/src-tauri/target/release/bundle/appimage/geo-viewer_${CI_COMMIT_TAG}_amd64.AppImage"
+        - name: "Linux x86_64 Deb"
+          url: "${CI_PROJECT_URL}/-/jobs/${CI_JOB_ID}/artifacts/file/src-tauri/target/release/bundle/deb/geo-viewer_${CI_COMMIT_TAG}_amd64.deb"
+  rules:
+    - if: $CI_COMMIT_TAG
