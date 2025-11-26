@@ -559,3 +559,201 @@ pub fn extract_pixel_tile(
 
     encode_png(&tile_data, tile_size)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ==================== Coordinate Conversion Tests ====================
+
+    #[test]
+    fn test_tile_to_geo_bounds_zoom_0() {
+        // At zoom 0, there's one tile covering the whole world
+        let bounds = tile_to_geo_bounds(0, 0, 0);
+        assert!((bounds[0] - (-180.0)).abs() < 0.001, "min_lon should be -180");
+        assert!((bounds[2] - 180.0).abs() < 0.001, "max_lon should be 180");
+        // Latitude is limited by Web Mercator projection (~85.05°)
+        assert!(bounds[1] > -90.0 && bounds[1] < -80.0, "min_lat should be around -85");
+        assert!(bounds[3] > 80.0 && bounds[3] < 90.0, "max_lat should be around 85");
+    }
+
+    #[test]
+    fn test_tile_to_geo_bounds_zoom_1() {
+        // At zoom 1, tile (0,0) should be NW quadrant
+        let bounds = tile_to_geo_bounds(0, 0, 1);
+        assert!((bounds[0] - (-180.0)).abs() < 0.001, "min_lon should be -180");
+        assert!((bounds[2] - 0.0).abs() < 0.001, "max_lon should be 0");
+        assert!(bounds[3] > 80.0, "max_lat should be > 80 (northern tile)");
+    }
+
+    #[test]
+    fn test_tile_to_web_mercator_bounds_zoom_0() {
+        let bounds = tile_to_web_mercator_bounds(0, 0, 0);
+        // Full extent in Web Mercator
+        let expected_extent = 20037508.342789244;
+        assert!((bounds[0] - (-expected_extent)).abs() < 1.0);
+        assert!((bounds[2] - expected_extent).abs() < 1.0);
+        assert!((bounds[1] - (-expected_extent)).abs() < 1.0);
+        assert!((bounds[3] - expected_extent).abs() < 1.0);
+    }
+
+    #[test]
+    fn test_tile_to_web_mercator_bounds_symmetry() {
+        // At zoom 1, tiles (0,0) and (1,1) should be symmetric about origin
+        let nw = tile_to_web_mercator_bounds(0, 0, 1);
+        let se = tile_to_web_mercator_bounds(1, 1, 1);
+
+        assert!((nw[0] + se[2]).abs() < 1.0, "bounds should be symmetric");
+        assert!((nw[3] + se[1]).abs() < 1.0, "bounds should be symmetric");
+    }
+
+    // ==================== Bounds Intersection Tests ====================
+
+    #[test]
+    fn test_bounds_intersect_overlapping() {
+        let a = [0.0, 0.0, 10.0, 10.0];
+        let b = [5.0, 5.0, 15.0, 15.0];
+        assert!(bounds_intersect(a, b), "overlapping bounds should intersect");
+    }
+
+    #[test]
+    fn test_bounds_intersect_contained() {
+        let a = [0.0, 0.0, 20.0, 20.0];
+        let b = [5.0, 5.0, 15.0, 15.0];
+        assert!(bounds_intersect(a, b), "contained bounds should intersect");
+    }
+
+    #[test]
+    fn test_bounds_intersect_touching() {
+        let a = [0.0, 0.0, 10.0, 10.0];
+        let b = [10.0, 0.0, 20.0, 10.0];
+        // Edge-touching bounds DO intersect in this implementation (non-strict inequality)
+        assert!(bounds_intersect(a, b), "edge-touching bounds should intersect");
+    }
+
+    #[test]
+    fn test_bounds_intersect_disjoint() {
+        let a = [0.0, 0.0, 10.0, 10.0];
+        let b = [20.0, 20.0, 30.0, 30.0];
+        assert!(!bounds_intersect(a, b), "disjoint bounds should not intersect");
+    }
+
+    #[test]
+    fn test_bounds_intersect_horizontal_gap() {
+        let a = [-180.0, -10.0, -170.0, 10.0];
+        let b = [170.0, -10.0, 180.0, 10.0];
+        assert!(!bounds_intersect(a, b), "bounds with horizontal gap should not intersect");
+    }
+
+    // ==================== Stretch Parameter Tests ====================
+
+    #[test]
+    fn test_stretch_params_default() {
+        let stretch = StretchParams::default();
+        assert_eq!(stretch.min, 0.0);
+        assert_eq!(stretch.max, 255.0);
+        assert_eq!(stretch.gamma, 1.0);
+    }
+
+    #[test]
+    fn test_apply_stretch_min_value() {
+        let stretch = StretchParams { min: 0.0, max: 100.0, gamma: 1.0 };
+        let result = apply_stretch(0.0, &stretch, None);
+        // 0.0 is treated as nodata/transparent
+        assert!(result.is_none(), "zero value should be treated as nodata");
+    }
+
+    #[test]
+    fn test_apply_stretch_max_value() {
+        let stretch = StretchParams { min: 0.0, max: 100.0, gamma: 1.0 };
+        let result = apply_stretch(100.0, &stretch, None);
+        assert_eq!(result, Some(255), "max value should map to 255");
+    }
+
+    #[test]
+    fn test_apply_stretch_mid_value() {
+        let stretch = StretchParams { min: 0.0, max: 100.0, gamma: 1.0 };
+        let result = apply_stretch(50.0, &stretch, None);
+        // 50% of range = 127 or 128
+        assert!(result.is_some());
+        let val = result.unwrap();
+        assert!(val >= 127 && val <= 128, "mid value should map to ~127-128");
+    }
+
+    #[test]
+    fn test_apply_stretch_with_nodata() {
+        let stretch = StretchParams { min: 0.0, max: 100.0, gamma: 1.0 };
+        let result = apply_stretch(-9999.0, &stretch, Some(-9999.0));
+        assert!(result.is_none(), "nodata value should return None");
+    }
+
+    #[test]
+    fn test_apply_stretch_gamma_low() {
+        let stretch = StretchParams { min: 0.0, max: 100.0, gamma: 0.5 };
+        let result = apply_stretch(25.0, &stretch, None);
+        // With gamma < 1, mid-tones should be brighter
+        // 25/100 = 0.25, with gamma 0.5: 0.25^(1/0.5) = 0.25^2 = 0.0625
+        // Wait, gamma correction: output = input^(1/gamma)
+        // 0.25^(1/0.5) = 0.25^2 = 0.0625... that's darker
+        // Actually gamma < 1 makes midtones darker, gamma > 1 makes them brighter
+        let val = result.unwrap();
+        // 0.25^2 = 0.0625 * 255 ≈ 16
+        assert!(val < 50, "low gamma should make mid-tones darker");
+    }
+
+    #[test]
+    fn test_apply_stretch_gamma_high() {
+        let stretch = StretchParams { min: 0.0, max: 100.0, gamma: 2.0 };
+        let result = apply_stretch(25.0, &stretch, None);
+        // 0.25^(1/2) = 0.5, * 255 ≈ 127
+        let val = result.unwrap();
+        assert!(val > 100, "high gamma should make mid-tones brighter");
+    }
+
+    #[test]
+    fn test_apply_stretch_clamp_below_min() {
+        let stretch = StretchParams { min: 10.0, max: 100.0, gamma: 1.0 };
+        let result = apply_stretch(5.0, &stretch, None);
+        // Value below min should clamp to 0
+        assert_eq!(result, Some(0), "value below min should clamp to 0");
+    }
+
+    #[test]
+    fn test_apply_stretch_clamp_above_max() {
+        let stretch = StretchParams { min: 0.0, max: 100.0, gamma: 1.0 };
+        let result = apply_stretch(150.0, &stretch, None);
+        // Value above max should clamp to 255
+        assert_eq!(result, Some(255), "value above max should clamp to 255");
+    }
+
+    #[test]
+    fn test_apply_stretch_nan() {
+        let stretch = StretchParams::default();
+        let result = apply_stretch(f64::NAN, &stretch, None);
+        assert!(result.is_none(), "NaN should return None");
+    }
+
+    #[test]
+    fn test_apply_stretch_infinity() {
+        let stretch = StretchParams::default();
+        let result = apply_stretch(f64::INFINITY, &stretch, None);
+        assert!(result.is_none(), "Infinity should return None");
+    }
+
+    // ==================== TileRequest Tests ====================
+
+    #[test]
+    fn test_tile_request_copy() {
+        let req = TileRequest {
+            x: 10,
+            y: 20,
+            z: 5,
+            band: 1,
+            tile_size: 256,
+        };
+        let copy = req;
+        assert_eq!(copy.x, 10);
+        assert_eq!(copy.y, 20);
+        assert_eq!(copy.z, 5);
+    }
+}

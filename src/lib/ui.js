@@ -73,9 +73,27 @@ export function setupUI(mapManager, layerManager) {
         layerManager.toggleLayerVisibility(layerManager.selectedLayerId);
       }
     }
+    // A to open attribute table for selected vector layer
+    if (e.key === 'a' && !e.ctrlKey && !e.metaKey && !e.altKey) {
+      if (layerManager.selectedLayerId) {
+        const layer = layerManager.layers.get(layerManager.selectedLayerId);
+        if (layer && layer.type === 'vector') {
+          layerManager.showAttributeTable(layerManager.selectedLayerId);
+        }
+      }
+    }
     // Escape to close panels
     if (e.key === 'Escape') {
-      // Could close modals or deselect
+      // Close attribute panel
+      const attrPanel = document.getElementById('attribute-panel');
+      if (attrPanel && attrPanel.classList.contains('visible')) {
+        attrPanel.classList.remove('visible');
+      }
+      // Close shortcuts help
+      const helpPanel = document.getElementById('shortcuts-help');
+      if (helpPanel) {
+        helpPanel.remove();
+      }
     }
     // ? to show help
     if (e.key === '?' || (e.shiftKey && e.key === '/')) {
@@ -110,7 +128,9 @@ function showShortcutsHelp() {
         <div class="shortcut"><kbd>B</kbd> Cycle basemap</div>
         <div class="shortcut"><kbd>L</kbd> Toggle layer panel</div>
         <div class="shortcut"><kbd>V</kbd> Toggle layer visibility</div>
+        <div class="shortcut"><kbd>A</kbd> Open attribute table</div>
         <div class="shortcut"><kbd>Del</kbd> Remove selected layer</div>
+        <div class="shortcut"><kbd>Esc</kbd> Close panels</div>
         <div class="shortcut"><kbd>?</kbd> Show/hide this help</div>
         <hr>
         <div class="shortcut"><kbd>Ctrl+Drag</kbd> Rotate map</div>

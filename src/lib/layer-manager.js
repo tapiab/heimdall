@@ -12,6 +12,99 @@ export class LayerManager {
     this.tileCache = new Map(); // tile key -> image data URL
     this.draggedItem = null;
     this.selectedLayerId = null; // Currently selected layer for controls
+    this.popup = null; // Feature info popup
+    this.setupFeatureInteraction();
+  }
+
+  setupFeatureInteraction() {
+    const map = this.mapManager.map;
+
+    // Change cursor to pointer when hovering over vector features
+    map.on('mouseenter', (e) => {
+      const features = map.queryRenderedFeatures(e.point);
+      const vectorFeature = features.find(f =>
+        f.layer.id.startsWith('vector-fill-') ||
+        f.layer.id.startsWith('vector-line-') ||
+        f.layer.id.startsWith('vector-circle-')
+      );
+      if (vectorFeature) {
+        map.getCanvas().style.cursor = 'pointer';
+      }
+    });
+
+    map.on('mouseleave', () => {
+      map.getCanvas().style.cursor = '';
+    });
+
+    map.on('mousemove', (e) => {
+      const features = map.queryRenderedFeatures(e.point);
+      const vectorFeature = features.find(f =>
+        f.layer.id.startsWith('vector-fill-') ||
+        f.layer.id.startsWith('vector-line-') ||
+        f.layer.id.startsWith('vector-circle-')
+      );
+      map.getCanvas().style.cursor = vectorFeature ? 'pointer' : '';
+    });
+
+    // Show popup on click
+    map.on('click', (e) => {
+      const features = map.queryRenderedFeatures(e.point);
+      const vectorFeature = features.find(f =>
+        f.layer.id.startsWith('vector-fill-') ||
+        f.layer.id.startsWith('vector-line-') ||
+        f.layer.id.startsWith('vector-circle-')
+      );
+
+      if (vectorFeature) {
+        this.showFeaturePopup(vectorFeature, e.lngLat);
+      } else if (this.popup) {
+        this.popup.remove();
+        this.popup = null;
+      }
+    });
+  }
+
+  showFeaturePopup(feature, lngLat) {
+    // Remove existing popup
+    if (this.popup) {
+      this.popup.remove();
+    }
+
+    const properties = feature.properties || {};
+    const layerId = feature.layer.id.replace(/^vector-(fill|line|circle)-/, '');
+    const layer = this.layers.get(layerId);
+    const layerName = layer ? layer.path.split('/').pop().split('\\').pop() : 'Feature';
+
+    // Build popup HTML
+    let html = `<div class="feature-popup">`;
+    html += `<div class="feature-popup-header">${layerName}</div>`;
+    html += `<div class="feature-popup-content">`;
+
+    const keys = Object.keys(properties);
+    if (keys.length === 0) {
+      html += `<div class="feature-popup-empty">No attributes</div>`;
+    } else {
+      for (const key of keys) {
+        const value = properties[key];
+        const displayValue = value === null || value === undefined ? '<em>null</em>' :
+          typeof value === 'object' ? JSON.stringify(value) : String(value);
+        html += `<div class="feature-popup-row">`;
+        html += `<span class="feature-popup-key">${key}</span>`;
+        html += `<span class="feature-popup-value">${displayValue}</span>`;
+        html += `</div>`;
+      }
+    }
+
+    html += `</div></div>`;
+
+    this.popup = new maplibregl.Popup({
+      closeButton: true,
+      closeOnClick: false,
+      maxWidth: '320px',
+    })
+      .setLngLat(lngLat)
+      .setHTML(html)
+      .addTo(this.mapManager.map);
   }
 
   async addRasterLayer(filePath) {
@@ -649,6 +742,75 @@ export class LayerManager {
     }
   }
 
+  setColorByField(id, fieldName) {
+    const layer = this.layers.get(id);
+    if (!layer || layer.type !== 'vector') return;
+
+    layer.style.colorByField = fieldName || null;
+
+    if (!fieldName) {
+      // Reset to solid color
+      const fillColor = layer.style.fillColor;
+      try {
+        this.mapManager.map.setPaintProperty(`vector-fill-${id}`, 'fill-color', fillColor);
+        this.mapManager.map.setPaintProperty(`vector-circle-${id}`, 'circle-color', fillColor);
+      } catch (e) {}
+      return;
+    }
+
+    // Get unique values for the field
+    const features = layer.geojson?.features || [];
+    const values = [...new Set(features.map(f => f.properties?.[fieldName]).filter(v => v !== null && v !== undefined))];
+
+    if (values.length === 0) return;
+
+    // Check if numeric or categorical
+    const isNumeric = values.every(v => typeof v === 'number');
+
+    let colorExpression;
+
+    if (isNumeric && values.length > 2) {
+      // Graduated color scheme for numeric values
+      const sortedValues = values.sort((a, b) => a - b);
+      const min = sortedValues[0];
+      const max = sortedValues[sortedValues.length - 1];
+
+      // Use interpolate for smooth color ramp (blue -> yellow -> red)
+      colorExpression = [
+        'interpolate',
+        ['linear'],
+        ['get', fieldName],
+        min, '#2166ac',  // Blue
+        (min + max) / 2, '#f7f7f7',  // White
+        max, '#b2182b'   // Red
+      ];
+    } else {
+      // Categorical color scheme
+      const colors = [
+        '#e41a1c', '#377eb8', '#4daf4a', '#984ea3', '#ff7f00',
+        '#ffff33', '#a65628', '#f781bf', '#999999', '#66c2a5'
+      ];
+
+      // Build match expression
+      const matchExpr = ['match', ['get', fieldName]];
+      values.forEach((val, idx) => {
+        matchExpr.push(val);
+        matchExpr.push(colors[idx % colors.length]);
+      });
+      matchExpr.push('#888888'); // Default color
+
+      colorExpression = matchExpr;
+    }
+
+    // Apply to layers
+    try {
+      this.mapManager.map.setPaintProperty(`vector-fill-${id}`, 'fill-color', colorExpression);
+    } catch (e) {}
+    try {
+      this.mapManager.map.setPaintProperty(`vector-circle-${id}`, 'circle-color', colorExpression);
+    } catch (e) {}
+  }
+
   reorderLayers(fromIndex, toIndex) {
     if (fromIndex === toIndex) return;
 
@@ -769,10 +931,28 @@ export class LayerManager {
 
     // Vector layer controls
     if (layer.type === 'vector') {
+      // Build field options for styling
+      const fields = layer.fields || [];
+      const fieldOptions = fields.map(f =>
+        `<option value="${f.name}" ${layer.style.colorByField === f.name ? 'selected' : ''}>${f.name}</option>`
+      ).join('');
+
       controlsPanel.innerHTML = `
         <div class="control-section">
           <label>Layer Type</label>
           <span style="color: #888; font-size: 12px;">Vector (${layer.geometry_type})</span>
+        </div>
+        <div class="control-section">
+          <label>Features</label>
+          <span style="color: #888; font-size: 12px;">${layer.feature_count} features</span>
+        </div>
+        <button id="show-attributes" class="control-btn">Open Attribute Table</button>
+        <div class="control-section" style="margin-top: 12px;">
+          <label>Color By Field</label>
+          <select id="color-by-field">
+            <option value="">-- Solid Color --</option>
+            ${fieldOptions}
+          </select>
         </div>
         <div class="control-section">
           <label>Fill Color</label>
@@ -802,10 +982,25 @@ export class LayerManager {
       const strokeColorInput = document.getElementById('vector-stroke-color');
       const strokeWidthInput = document.getElementById('vector-stroke-width');
       const pointRadiusInput = document.getElementById('vector-point-radius');
+      const showAttributesBtn = document.getElementById('show-attributes');
+      const colorByFieldSelect = document.getElementById('color-by-field');
 
+      if (showAttributesBtn) {
+        showAttributesBtn.addEventListener('click', () => {
+          this.showAttributeTable(this.selectedLayerId);
+        });
+      }
+      if (colorByFieldSelect) {
+        colorByFieldSelect.addEventListener('change', (e) => {
+          this.setColorByField(this.selectedLayerId, e.target.value);
+        });
+      }
       if (fillColorInput) {
         fillColorInput.addEventListener('change', (e) => {
           this.setVectorStyle(this.selectedLayerId, 'fillColor', e.target.value);
+          // Reset color-by-field when manually setting color
+          layer.style.colorByField = null;
+          if (colorByFieldSelect) colorByFieldSelect.value = '';
         });
       }
       if (fillOpacityInput) {
@@ -1217,5 +1412,104 @@ export class LayerManager {
       [minX, minY],
       [maxX, maxY],
     ]);
+  }
+
+  showAttributeTable(layerId) {
+    const layer = this.layers.get(layerId);
+    if (!layer || layer.type !== 'vector') return;
+
+    const panel = document.getElementById('attribute-panel');
+    const title = document.getElementById('attribute-panel-title');
+    const thead = document.querySelector('#attribute-table thead');
+    const tbody = document.querySelector('#attribute-table tbody');
+    const closeBtn = document.getElementById('attribute-panel-close');
+
+    if (!panel || !thead || !tbody) return;
+
+    // Set title
+    const layerName = layer.path.split('/').pop().split('\\').pop();
+    title.textContent = `${layerName} (${layer.feature_count} features)`;
+
+    // Get field names from layer metadata
+    const fields = layer.fields || [];
+    const fieldNames = fields.map(f => f.name);
+
+    // Build header row
+    thead.innerHTML = '<tr>' + fieldNames.map(name =>
+      `<th>${name}</th>`
+    ).join('') + '</tr>';
+
+    // Build body rows from geojson features
+    const features = layer.geojson?.features || [];
+    tbody.innerHTML = features.map((feature, idx) => {
+      const props = feature.properties || {};
+      return '<tr data-feature-idx="' + idx + '">' + fieldNames.map(name => {
+        const value = props[name];
+        const displayValue = value === null || value === undefined ? '' :
+          typeof value === 'object' ? JSON.stringify(value) : String(value);
+        return `<td title="${displayValue}">${displayValue}</td>`;
+      }).join('') + '</tr>';
+    }).join('');
+
+    // Add click handler for row selection and zoom
+    tbody.querySelectorAll('tr').forEach((row, idx) => {
+      row.addEventListener('click', () => {
+        // Highlight row
+        tbody.querySelectorAll('tr').forEach(r => r.classList.remove('selected'));
+        row.classList.add('selected');
+
+        // Zoom to feature
+        const feature = features[idx];
+        if (feature?.geometry) {
+          const bounds = this.getFeatureBounds(feature.geometry);
+          if (bounds) {
+            this.mapManager.fitBounds(bounds, { padding: 100, maxZoom: 18 });
+          }
+        }
+      });
+    });
+
+    // Setup close button
+    closeBtn.onclick = () => {
+      panel.classList.remove('visible');
+    };
+
+    // Show panel
+    panel.classList.add('visible');
+  }
+
+  getFeatureBounds(geometry) {
+    if (!geometry || !geometry.coordinates) return null;
+
+    let coords = [];
+    const extractCoords = (c) => {
+      if (typeof c[0] === 'number') {
+        coords.push(c);
+      } else {
+        c.forEach(extractCoords);
+      }
+    };
+    extractCoords(geometry.coordinates);
+
+    if (coords.length === 0) return null;
+
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    for (const [x, y] of coords) {
+      minX = Math.min(minX, x);
+      minY = Math.min(minY, y);
+      maxX = Math.max(maxX, x);
+      maxY = Math.max(maxY, y);
+    }
+
+    // Add small buffer for points
+    if (minX === maxX && minY === maxY) {
+      const buffer = 0.001;
+      minX -= buffer;
+      minY -= buffer;
+      maxX += buffer;
+      maxY += buffer;
+    }
+
+    return [[minX, minY], [maxX, maxY]];
   }
 }
