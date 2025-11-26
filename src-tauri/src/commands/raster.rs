@@ -1,5 +1,9 @@
+#![allow(clippy::too_many_arguments)]
+
 use crate::gdal::dataset_cache::DatasetCache;
-use crate::gdal::tile_extractor::{extract_tile, extract_tile_with_stretch, extract_rgb_tile, TileRequest, StretchParams};
+use crate::gdal::tile_extractor::{
+    extract_rgb_tile, extract_tile, extract_tile_with_stretch, StretchParams, TileRequest,
+};
 use gdal::spatial_ref::{CoordTransform, SpatialRef};
 use gdal::Dataset;
 use serde::{Deserialize, Serialize};
@@ -18,7 +22,7 @@ pub struct RasterMetadata {
     pub pixel_size: [f64; 2],
     pub nodata: Option<f64>,
     pub band_stats: Vec<BandStats>, // Stats for each band
-    pub is_georeferenced: bool, // true if image has valid geotransform/projection
+    pub is_georeferenced: bool,     // true if image has valid geotransform/projection
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -98,12 +102,12 @@ fn is_georeferenced(dataset: &Dataset) -> bool {
     };
 
     // Identity geotransform means no real georeferencing
-    let is_identity = (gt[0].abs() < 1e-10) &&
-                      ((gt[1] - 1.0).abs() < 1e-10) &&
-                      (gt[2].abs() < 1e-10) &&
-                      (gt[3].abs() < 1e-10) &&
-                      (gt[4].abs() < 1e-10) &&
-                      ((gt[5] + 1.0).abs() < 1e-10 || (gt[5] - 1.0).abs() < 1e-10);
+    let is_identity = (gt[0].abs() < 1e-10)
+        && ((gt[1] - 1.0).abs() < 1e-10)
+        && (gt[2].abs() < 1e-10)
+        && (gt[3].abs() < 1e-10)
+        && (gt[4].abs() < 1e-10)
+        && ((gt[5] + 1.0).abs() < 1e-10 || (gt[5] - 1.0).abs() < 1e-10);
 
     has_projection || !is_identity
 }
@@ -127,7 +131,10 @@ fn calculate_native_bounds(dataset: &Dataset) -> Result<[f64; 4], String> {
 }
 
 /// Transform bounds from native CRS to EPSG:4326
-fn transform_bounds_to_4326(dataset: &Dataset, native_bounds: [f64; 4]) -> Result<[f64; 4], String> {
+fn transform_bounds_to_4326(
+    dataset: &Dataset,
+    native_bounds: [f64; 4],
+) -> Result<[f64; 4], String> {
     let projection = dataset.projection();
 
     // If no projection or already in geographic CRS, assume it's lat/lon
@@ -147,16 +154,28 @@ fn transform_bounds_to_4326(dataset: &Dataset, native_bounds: [f64; 4]) -> Resul
         .map_err(|e| format!("Failed to create EPSG:4326 SRS: {}", e))?;
 
     // Force traditional GIS axis order (lon, lat) instead of authority-compliant (lat, lon)
-    target_srs.set_axis_mapping_strategy(gdal::spatial_ref::AxisMappingStrategy::TraditionalGisOrder);
+    target_srs
+        .set_axis_mapping_strategy(gdal::spatial_ref::AxisMappingStrategy::TraditionalGisOrder);
 
     let transform = CoordTransform::new(&source_srs, &target_srs)
         .map_err(|e| format!("Failed to create coordinate transform: {}", e))?;
 
     // Transform corners (x=easting, y=northing in UTM)
-    let mut xs = vec![native_bounds[0], native_bounds[2], native_bounds[0], native_bounds[2]];
-    let mut ys = vec![native_bounds[1], native_bounds[1], native_bounds[3], native_bounds[3]];
+    let mut xs = vec![
+        native_bounds[0],
+        native_bounds[2],
+        native_bounds[0],
+        native_bounds[2],
+    ];
+    let mut ys = vec![
+        native_bounds[1],
+        native_bounds[1],
+        native_bounds[3],
+        native_bounds[3],
+    ];
 
-    transform.transform_coords(&mut xs, &mut ys, &mut [])
+    transform
+        .transform_coords(&mut xs, &mut ys, &mut [])
         .map_err(|e| format!("Failed to transform coordinates: {}", e))?;
 
     // After transform with TraditionalGisOrder: xs = longitudes, ys = latitudes
@@ -202,7 +221,7 @@ pub async fn open_raster(
     let dataset = Dataset::open(&path).map_err(|e| format!("Failed to open raster: {}", e))?;
 
     let (width, height) = dataset.raster_size();
-    let bands = dataset.raster_count() as usize;
+    let bands = dataset.raster_count();
     let georeferenced = is_georeferenced(&dataset);
 
     let (bounds, native_bounds, pixel_size) = if georeferenced {
@@ -220,10 +239,7 @@ pub async fn open_raster(
 
     let projection = dataset.projection();
 
-    let nodata = dataset
-        .rasterband(1)
-        .ok()
-        .and_then(|b| b.no_data_value());
+    let nodata = dataset.rasterband(1).ok().and_then(|b| b.no_data_value());
 
     // Compute stats for all bands
     let band_stats = compute_band_stats(&dataset);
@@ -338,9 +354,21 @@ pub async fn get_rgb_tile(
         tile_size: 256,
     };
 
-    let red_stretch = StretchParams { min: red_min, max: red_max, gamma: red_gamma };
-    let green_stretch = StretchParams { min: green_min, max: green_max, gamma: green_gamma };
-    let blue_stretch = StretchParams { min: blue_min, max: blue_max, gamma: blue_gamma };
+    let red_stretch = StretchParams {
+        min: red_min,
+        max: red_max,
+        gamma: red_gamma,
+    };
+    let green_stretch = StretchParams {
+        min: green_min,
+        max: green_max,
+        gamma: green_gamma,
+    };
+    let blue_stretch = StretchParams {
+        min: blue_min,
+        max: blue_max,
+        gamma: blue_gamma,
+    };
 
     extract_rgb_tile(
         &dataset,
@@ -420,7 +448,10 @@ pub async fn get_histogram(
 
     let (read_width, read_height) = if width > max_sample_size || height > max_sample_size {
         let scale = (max_sample_size as f64 / width.max(height) as f64).min(1.0);
-        ((width as f64 * scale) as usize, (height as f64 * scale) as usize)
+        (
+            (width as f64 * scale) as usize,
+            (height as f64 * scale) as usize,
+        )
     } else {
         (width, height)
     };
@@ -479,9 +510,12 @@ pub async fn get_cross_layer_rgb_tile(
     let green_path = state.get_path(&green_id).ok_or("Green dataset not found")?;
     let blue_path = state.get_path(&blue_id).ok_or("Blue dataset not found")?;
 
-    let red_ds = Dataset::open(&red_path).map_err(|e| format!("Failed to open red raster: {}", e))?;
-    let green_ds = Dataset::open(&green_path).map_err(|e| format!("Failed to open green raster: {}", e))?;
-    let blue_ds = Dataset::open(&blue_path).map_err(|e| format!("Failed to open blue raster: {}", e))?;
+    let red_ds =
+        Dataset::open(&red_path).map_err(|e| format!("Failed to open red raster: {}", e))?;
+    let green_ds =
+        Dataset::open(&green_path).map_err(|e| format!("Failed to open green raster: {}", e))?;
+    let blue_ds =
+        Dataset::open(&blue_path).map_err(|e| format!("Failed to open blue raster: {}", e))?;
 
     let request = TileRequest {
         x,
@@ -491,14 +525,29 @@ pub async fn get_cross_layer_rgb_tile(
         tile_size: 256,
     };
 
-    let red_stretch = StretchParams { min: red_min, max: red_max, gamma: red_gamma };
-    let green_stretch = StretchParams { min: green_min, max: green_max, gamma: green_gamma };
-    let blue_stretch = StretchParams { min: blue_min, max: blue_max, gamma: blue_gamma };
+    let red_stretch = StretchParams {
+        min: red_min,
+        max: red_max,
+        gamma: red_gamma,
+    };
+    let green_stretch = StretchParams {
+        min: green_min,
+        max: green_max,
+        gamma: green_gamma,
+    };
+    let blue_stretch = StretchParams {
+        min: blue_min,
+        max: blue_max,
+        gamma: blue_gamma,
+    };
 
     extract_cross_layer_rgb_tile(
-        &red_ds, red_band,
-        &green_ds, green_band,
-        &blue_ds, blue_band,
+        &red_ds,
+        red_band,
+        &green_ds,
+        green_band,
+        &blue_ds,
+        blue_band,
         &request,
         &red_stretch,
         &green_stretch,
@@ -560,15 +609,20 @@ pub async fn get_cross_layer_pixel_rgb_tile(
     blue_gamma: f64,
     state: State<'_, DatasetCache>,
 ) -> Result<Vec<u8>, String> {
-    use crate::gdal::tile_extractor::{extract_cross_layer_pixel_rgb_tile, StretchParams, TileRequest};
+    use crate::gdal::tile_extractor::{
+        extract_cross_layer_pixel_rgb_tile, StretchParams, TileRequest,
+    };
 
     let red_path = state.get_path(&red_id).ok_or("Red dataset not found")?;
     let green_path = state.get_path(&green_id).ok_or("Green dataset not found")?;
     let blue_path = state.get_path(&blue_id).ok_or("Blue dataset not found")?;
 
-    let red_ds = Dataset::open(&red_path).map_err(|e| format!("Failed to open red raster: {}", e))?;
-    let green_ds = Dataset::open(&green_path).map_err(|e| format!("Failed to open green raster: {}", e))?;
-    let blue_ds = Dataset::open(&blue_path).map_err(|e| format!("Failed to open blue raster: {}", e))?;
+    let red_ds =
+        Dataset::open(&red_path).map_err(|e| format!("Failed to open red raster: {}", e))?;
+    let green_ds =
+        Dataset::open(&green_path).map_err(|e| format!("Failed to open green raster: {}", e))?;
+    let blue_ds =
+        Dataset::open(&blue_path).map_err(|e| format!("Failed to open blue raster: {}", e))?;
 
     let request = TileRequest {
         x,
@@ -578,14 +632,29 @@ pub async fn get_cross_layer_pixel_rgb_tile(
         tile_size: 256,
     };
 
-    let red_stretch = StretchParams { min: red_min, max: red_max, gamma: red_gamma };
-    let green_stretch = StretchParams { min: green_min, max: green_max, gamma: green_gamma };
-    let blue_stretch = StretchParams { min: blue_min, max: blue_max, gamma: blue_gamma };
+    let red_stretch = StretchParams {
+        min: red_min,
+        max: red_max,
+        gamma: red_gamma,
+    };
+    let green_stretch = StretchParams {
+        min: green_min,
+        max: green_max,
+        gamma: green_gamma,
+    };
+    let blue_stretch = StretchParams {
+        min: blue_min,
+        max: blue_max,
+        gamma: blue_gamma,
+    };
 
     extract_cross_layer_pixel_rgb_tile(
-        &red_ds, red_band,
-        &green_ds, green_band,
-        &blue_ds, blue_band,
+        &red_ds,
+        red_band,
+        &green_ds,
+        green_band,
+        &blue_ds,
+        blue_band,
         &request,
         &red_stretch,
         &green_stretch,
