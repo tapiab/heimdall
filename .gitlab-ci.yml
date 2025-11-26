@@ -47,6 +47,7 @@ lint:rust:
   cache:
     <<: *cache-cargo
   before_script:
+    - rustup default stable
     - rustup component add clippy rustfmt
     - apt-get update && apt-get install -y libgdal-dev
   script:
