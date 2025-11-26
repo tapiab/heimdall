@@ -10,7 +10,7 @@ variables:
   CARGO_HOME: ${CI_PROJECT_DIR}/.cargo
   RUSTUP_HOME: ${CI_PROJECT_DIR}/.rustup
   NODE_VERSION: "20"
-  RUST_VERSION: "stable"
+  RUST_VERSION: "latest"
 
 # Cache configuration
 .cache-npm: &cache-npm
