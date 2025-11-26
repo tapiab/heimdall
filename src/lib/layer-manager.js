@@ -139,6 +139,180 @@ export class LayerManager {
     }
   }
 
+  async addVectorLayer(filePath) {
+    try {
+      // Open the vector in the backend
+      const data = await invoke('open_vector', { path: filePath });
+      const metadata = data.metadata;
+      const geojson = data.geojson;
+
+      console.log('Opened vector:', metadata);
+      console.log('GeoJSON:', JSON.stringify(geojson, null, 2));
+
+      // Store layer info
+      const layerData = {
+        ...metadata,
+        visible: true,
+        opacity: 1.0,
+        type: 'vector',
+        geojson: geojson,
+        // Styling
+        style: {
+          fillColor: '#ff0000',
+          fillOpacity: 0.5,
+          strokeColor: '#ff0000',
+          strokeWidth: 3,
+          pointRadius: 8,
+        },
+      };
+
+      this.layers.set(metadata.id, layerData);
+      this.layerOrder.push(metadata.id);
+
+      // Add to map as GeoJSON source
+      const sourceId = `vector-source-${metadata.id}`;
+
+      this.mapManager.addSource(sourceId, {
+        type: 'geojson',
+        data: geojson,
+      });
+
+      // Determine what layer types to add based on geometry
+      const geomType = metadata.geometry_type.toLowerCase();
+
+      // For unknown/mixed geometry types, add all layer types
+      if (geomType.includes('unknown') || geomType === '') {
+        // Add fill layer for polygons
+        this.mapManager.addLayer({
+          id: `vector-fill-${metadata.id}`,
+          type: 'fill',
+          source: sourceId,
+          filter: ['==', '$type', 'Polygon'],
+          paint: {
+            'fill-color': layerData.style.fillColor,
+            'fill-opacity': layerData.style.fillOpacity,
+          },
+        });
+        // Add line layer for lines and polygon outlines
+        this.mapManager.addLayer({
+          id: `vector-line-${metadata.id}`,
+          type: 'line',
+          source: sourceId,
+          filter: ['any', ['==', '$type', 'LineString'], ['==', '$type', 'Polygon']],
+          paint: {
+            'line-color': layerData.style.strokeColor,
+            'line-width': layerData.style.strokeWidth,
+          },
+        });
+        // Add circle layer for points
+        this.mapManager.addLayer({
+          id: `vector-circle-${metadata.id}`,
+          type: 'circle',
+          source: sourceId,
+          filter: ['==', '$type', 'Point'],
+          paint: {
+            'circle-color': layerData.style.fillColor,
+            'circle-radius': layerData.style.pointRadius,
+            'circle-stroke-color': layerData.style.strokeColor,
+            'circle-stroke-width': 1,
+          },
+        });
+      } else if (geomType.includes('polygon') || geomType.includes('multipolygon')) {
+        // Add fill layer
+        this.mapManager.addLayer({
+          id: `vector-fill-${metadata.id}`,
+          type: 'fill',
+          source: sourceId,
+          paint: {
+            'fill-color': layerData.style.fillColor,
+            'fill-opacity': layerData.style.fillOpacity,
+          },
+        });
+        // Add outline
+        this.mapManager.addLayer({
+          id: `vector-line-${metadata.id}`,
+          type: 'line',
+          source: sourceId,
+          paint: {
+            'line-color': layerData.style.strokeColor,
+            'line-width': layerData.style.strokeWidth,
+          },
+        });
+      } else if (geomType.includes('line') || geomType.includes('multiline')) {
+        this.mapManager.addLayer({
+          id: `vector-line-${metadata.id}`,
+          type: 'line',
+          source: sourceId,
+          paint: {
+            'line-color': layerData.style.strokeColor,
+            'line-width': layerData.style.strokeWidth,
+          },
+        });
+      } else if (geomType.includes('point') || geomType.includes('multipoint')) {
+        this.mapManager.addLayer({
+          id: `vector-circle-${metadata.id}`,
+          type: 'circle',
+          source: sourceId,
+          paint: {
+            'circle-color': layerData.style.fillColor,
+            'circle-radius': layerData.style.pointRadius,
+            'circle-stroke-color': layerData.style.strokeColor,
+            'circle-stroke-width': 1,
+          },
+        });
+      } else {
+        // Unknown geometry - add both fill and line as fallback
+        this.mapManager.addLayer({
+          id: `vector-fill-${metadata.id}`,
+          type: 'fill',
+          source: sourceId,
+          paint: {
+            'fill-color': layerData.style.fillColor,
+            'fill-opacity': layerData.style.fillOpacity,
+          },
+        });
+        this.mapManager.addLayer({
+          id: `vector-line-${metadata.id}`,
+          type: 'line',
+          source: sourceId,
+          paint: {
+            'line-color': layerData.style.strokeColor,
+            'line-width': layerData.style.strokeWidth,
+          },
+        });
+        this.mapManager.addLayer({
+          id: `vector-circle-${metadata.id}`,
+          type: 'circle',
+          source: sourceId,
+          paint: {
+            'circle-color': layerData.style.fillColor,
+            'circle-radius': layerData.style.pointRadius,
+            'circle-stroke-color': layerData.style.strokeColor,
+            'circle-stroke-width': 1,
+          },
+        });
+      }
+
+      // Select this layer for controls
+      this.selectedLayerId = metadata.id;
+
+      // Update UI
+      this.updateLayerPanel();
+      this.updateDynamicControls();
+
+      // Fit to layer bounds
+      this.mapManager.fitBounds([
+        [metadata.bounds[0], metadata.bounds[1]],
+        [metadata.bounds[2], metadata.bounds[3]],
+      ]);
+
+      return metadata;
+    } catch (error) {
+      console.error('Failed to add vector layer:', error);
+      throw error;
+    }
+  }
+
   setupTileProtocol(protocolName, datasetId, layerData) {
     // Remove existing protocol if any
     if (registeredProtocols.has(protocolName)) {
@@ -283,25 +457,43 @@ export class LayerManager {
     const layer = this.layers.get(id);
     if (!layer) return;
 
-    const sourceId = `raster-source-${id}`;
-    const layerId = `raster-layer-${id}`;
-    const protocolName = `raster-${id}`;
+    if (layer.type === 'vector') {
+      // Remove vector layers
+      const sourceId = `vector-source-${id}`;
+      const possibleLayerIds = [
+        `vector-fill-${id}`,
+        `vector-line-${id}`,
+        `vector-circle-${id}`,
+      ];
+      for (const layerId of possibleLayerIds) {
+        try {
+          this.mapManager.removeLayer(layerId);
+        } catch (e) {
+          // Layer might not exist
+        }
+      }
+      this.mapManager.removeSource(sourceId);
+    } else {
+      // Remove raster layer
+      const sourceId = `raster-source-${id}`;
+      const layerId = `raster-layer-${id}`;
+      const protocolName = `raster-${id}`;
 
-    // Remove from map
-    this.mapManager.removeLayer(layerId);
-    this.mapManager.removeSource(sourceId);
+      this.mapManager.removeLayer(layerId);
+      this.mapManager.removeSource(sourceId);
 
-    // Remove protocol
-    if (registeredProtocols.has(protocolName)) {
-      maplibregl.removeProtocol(protocolName);
-      registeredProtocols.delete(protocolName);
-    }
+      // Remove protocol
+      if (registeredProtocols.has(protocolName)) {
+        maplibregl.removeProtocol(protocolName);
+        registeredProtocols.delete(protocolName);
+      }
 
-    // Close dataset in backend
-    try {
-      await invoke('close_dataset', { id });
-    } catch (error) {
-      console.error('Failed to close dataset:', error);
+      // Close dataset in backend
+      try {
+        await invoke('close_dataset', { id });
+      } catch (error) {
+        console.error('Failed to close dataset:', error);
+      }
     }
 
     // Remove from local state
@@ -328,8 +520,24 @@ export class LayerManager {
     if (!layer) return;
 
     layer.visible = !layer.visible;
-    const layerId = `raster-layer-${id}`;
-    this.mapManager.setLayerVisibility(layerId, layer.visible);
+
+    if (layer.type === 'vector') {
+      const layerIds = [
+        `vector-fill-${id}`,
+        `vector-line-${id}`,
+        `vector-circle-${id}`,
+      ];
+      for (const layerId of layerIds) {
+        try {
+          this.mapManager.setLayerVisibility(layerId, layer.visible);
+        } catch (e) {
+          // Layer might not exist
+        }
+      }
+    } else {
+      const layerId = `raster-layer-${id}`;
+      this.mapManager.setLayerVisibility(layerId, layer.visible);
+    }
     this.updateLayerPanel();
   }
 
@@ -338,8 +546,22 @@ export class LayerManager {
     if (!layer) return;
 
     layer.opacity = opacity;
-    const layerId = `raster-layer-${id}`;
-    this.mapManager.setLayerOpacity(layerId, opacity);
+
+    if (layer.type === 'vector') {
+      // For vector layers, adjust fill and line opacity
+      try {
+        this.mapManager.map.setPaintProperty(`vector-fill-${id}`, 'fill-opacity', layer.style.fillOpacity * opacity);
+      } catch (e) {}
+      try {
+        this.mapManager.map.setPaintProperty(`vector-line-${id}`, 'line-opacity', opacity);
+      } catch (e) {}
+      try {
+        this.mapManager.map.setPaintProperty(`vector-circle-${id}`, 'circle-opacity', opacity);
+      } catch (e) {}
+    } else {
+      const layerId = `raster-layer-${id}`;
+      this.mapManager.setLayerOpacity(layerId, opacity);
+    }
   }
 
   setLayerStretch(id, min, max, gamma) {
@@ -401,6 +623,32 @@ export class LayerManager {
     this.refreshLayerTiles(id);
   }
 
+  setVectorStyle(id, property, value) {
+    const layer = this.layers.get(id);
+    if (!layer || layer.type !== 'vector') return;
+
+    layer.style[property] = value;
+
+    // Apply style changes to map
+    try {
+      if (property === 'fillColor') {
+        this.mapManager.map.setPaintProperty(`vector-fill-${id}`, 'fill-color', value);
+        this.mapManager.map.setPaintProperty(`vector-circle-${id}`, 'circle-color', value);
+      } else if (property === 'fillOpacity') {
+        this.mapManager.map.setPaintProperty(`vector-fill-${id}`, 'fill-opacity', value * layer.opacity);
+      } else if (property === 'strokeColor') {
+        this.mapManager.map.setPaintProperty(`vector-line-${id}`, 'line-color', value);
+        this.mapManager.map.setPaintProperty(`vector-circle-${id}`, 'circle-stroke-color', value);
+      } else if (property === 'strokeWidth') {
+        this.mapManager.map.setPaintProperty(`vector-line-${id}`, 'line-width', value);
+      } else if (property === 'pointRadius') {
+        this.mapManager.map.setPaintProperty(`vector-circle-${id}`, 'circle-radius', value);
+      }
+    } catch (e) {
+      // Layer might not exist for this geometry type
+    }
+  }
+
   reorderLayers(fromIndex, toIndex) {
     if (fromIndex === toIndex) return;
 
@@ -459,7 +707,11 @@ export class LayerManager {
       name.className = 'layer-name';
       const fileName = layer.path.split('/').pop().split('\\').pop();
       name.textContent = fileName;
-      name.title = `${layer.path}\n${layer.width}x${layer.height}, ${layer.bands} band(s)`;
+      if (layer.type === 'vector') {
+        name.title = `${layer.path}\n${layer.feature_count} features, ${layer.geometry_type}`;
+      } else {
+        name.title = `${layer.path}\n${layer.width}x${layer.height}, ${layer.bands} band(s)`;
+      }
 
       const removeBtn = document.createElement('button');
       removeBtn.className = 'layer-remove';
@@ -515,6 +767,78 @@ export class LayerManager {
       return;
     }
 
+    // Vector layer controls
+    if (layer.type === 'vector') {
+      controlsPanel.innerHTML = `
+        <div class="control-section">
+          <label>Layer Type</label>
+          <span style="color: #888; font-size: 12px;">Vector (${layer.geometry_type})</span>
+        </div>
+        <div class="control-section">
+          <label>Fill Color</label>
+          <input type="color" id="vector-fill-color" value="${layer.style.fillColor}">
+        </div>
+        <div class="control-section">
+          <label>Fill Opacity <span class="value-display">${(layer.style.fillOpacity * 100).toFixed(0)}%</span></label>
+          <input type="range" id="vector-fill-opacity" min="0" max="100" value="${layer.style.fillOpacity * 100}">
+        </div>
+        <div class="control-section">
+          <label>Stroke Color</label>
+          <input type="color" id="vector-stroke-color" value="${layer.style.strokeColor}">
+        </div>
+        <div class="control-section">
+          <label>Stroke Width <span class="value-display">${layer.style.strokeWidth}px</span></label>
+          <input type="range" id="vector-stroke-width" min="0.5" max="10" value="${layer.style.strokeWidth}" step="0.5">
+        </div>
+        <div class="control-section">
+          <label>Point Radius <span class="value-display">${layer.style.pointRadius}px</span></label>
+          <input type="range" id="vector-point-radius" min="1" max="20" value="${layer.style.pointRadius}">
+        </div>
+      `;
+
+      // Attach vector styling event listeners
+      const fillColorInput = document.getElementById('vector-fill-color');
+      const fillOpacityInput = document.getElementById('vector-fill-opacity');
+      const strokeColorInput = document.getElementById('vector-stroke-color');
+      const strokeWidthInput = document.getElementById('vector-stroke-width');
+      const pointRadiusInput = document.getElementById('vector-point-radius');
+
+      if (fillColorInput) {
+        fillColorInput.addEventListener('change', (e) => {
+          this.setVectorStyle(this.selectedLayerId, 'fillColor', e.target.value);
+        });
+      }
+      if (fillOpacityInput) {
+        fillOpacityInput.addEventListener('input', (e) => {
+          const opacity = parseInt(e.target.value) / 100;
+          e.target.previousElementSibling.querySelector('.value-display').textContent = `${e.target.value}%`;
+          this.setVectorStyle(this.selectedLayerId, 'fillOpacity', opacity);
+        });
+      }
+      if (strokeColorInput) {
+        strokeColorInput.addEventListener('change', (e) => {
+          this.setVectorStyle(this.selectedLayerId, 'strokeColor', e.target.value);
+        });
+      }
+      if (strokeWidthInput) {
+        strokeWidthInput.addEventListener('input', (e) => {
+          const width = parseFloat(e.target.value);
+          e.target.previousElementSibling.querySelector('.value-display').textContent = `${width}px`;
+          this.setVectorStyle(this.selectedLayerId, 'strokeWidth', width);
+        });
+      }
+      if (pointRadiusInput) {
+        pointRadiusInput.addEventListener('input', (e) => {
+          const radius = parseInt(e.target.value);
+          e.target.previousElementSibling.querySelector('.value-display').textContent = `${radius}px`;
+          this.setVectorStyle(this.selectedLayerId, 'pointRadius', radius);
+        });
+      }
+
+      return;
+    }
+
+    // Raster layer controls
     const bandOptions = Array.from({ length: layer.bands }, (_, i) =>
       `<option value="${i + 1}" ${layer.band === i + 1 ? 'selected' : ''}>Band ${i + 1}</option>`
     ).join('');

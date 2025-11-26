@@ -136,6 +136,14 @@ async function openFileDialog(layerManager) {
       multiple: true,
       filters: [
         {
+          name: 'Geospatial Files',
+          extensions: ['tif', 'tiff', 'geotiff', 'img', 'vrt', 'ntf', 'nitf', 'dt0', 'dt1', 'dt2', 'hgt', 'ers', 'ecw', 'jp2', 'j2k', 'sid', 'png', 'jpg', 'jpeg', 'gif', 'bmp', 'hdr', 'bil', 'bsq', 'bip', 'grd', 'asc', 'dem', 'nc', 'hdf', 'h5', 'shp', 'geojson', 'json', 'gpkg', 'kml', 'kmz', 'gml', 'gpx', 'fgb', 'tab', 'mif'],
+        },
+        {
+          name: 'Vector Files',
+          extensions: ['shp', 'geojson', 'json', 'gpkg', 'kml', 'kmz', 'gml', 'gpx', 'fgb', 'tab', 'mif'],
+        },
+        {
           name: 'Raster Images',
           extensions: ['tif', 'tiff', 'geotiff', 'img', 'vrt', 'ntf', 'nitf', 'dt0', 'dt1', 'dt2', 'hgt', 'ers', 'ecw', 'jp2', 'j2k', 'sid', 'png', 'jpg', 'jpeg', 'gif', 'bmp', 'hdr', 'bil', 'bsq', 'bip', 'grd', 'asc', 'dem', 'nc', 'hdf', 'h5'],
         },
@@ -149,8 +157,15 @@ async function openFileDialog(layerManager) {
     if (selected) {
       // Handle both single and multiple file selection
       const files = Array.isArray(selected) ? selected : [selected];
+      const vectorExtensions = ['shp', 'geojson', 'json', 'gpkg', 'kml', 'kmz', 'gml', 'gpx', 'fgb', 'tab', 'mif'];
+
       for (const file of files) {
-        await layerManager.addRasterLayer(file);
+        const ext = file.split('.').pop().toLowerCase();
+        if (vectorExtensions.includes(ext)) {
+          await layerManager.addVectorLayer(file);
+        } else {
+          await layerManager.addRasterLayer(file);
+        }
       }
     }
   } catch (error) {

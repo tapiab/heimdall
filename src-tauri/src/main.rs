@@ -5,6 +5,7 @@ mod commands;
 mod gdal;
 
 use commands::raster::{close_dataset, get_raster_stats, get_tile, get_tile_stretched, get_rgb_tile, get_cross_layer_rgb_tile, get_cross_layer_pixel_rgb_tile, get_pixel_tile, open_raster};
+use commands::vector::open_vector;
 use gdal::dataset_cache::DatasetCache;
 
 fn main() {
@@ -21,7 +22,8 @@ fn main() {
             get_cross_layer_pixel_rgb_tile,
             get_pixel_tile,
             get_raster_stats,
-            close_dataset
+            close_dataset,
+            open_vector
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
