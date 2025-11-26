@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Geospatial Viewer</title>
+    <link rel="stylesheet" href="/src/styles/main.css" />
+  </head>
+  <body>
+    <div id="app">
+      <div id="map"></div>
+      <div id="toolbar">
+        <button id="open-file" title="Open GeoTIFF (Ctrl+O)">Open File</button>
+        <button id="fit-bounds" title="Fit to layer extent (F)" disabled>Fit Bounds</button>
+        <button id="reset-rotation" title="Reset rotation (R)">Reset North</button>
+        <button id="help-btn" title="Keyboard shortcuts (?)" onclick="document.dispatchEvent(new KeyboardEvent('keydown', {key: '?', shiftKey: true}))">?</button>
+      </div>
+      <div id="left-panel">
+        <div id="layer-panel">
+          <h3>Layers</h3>
+          <div id="basemap-row" class="layer-item basemap-item">
+            <span class="layer-name">Basemap</span>
+            <select id="basemap-select">
+              <option value="osm">OSM</option>
+              <option value="satellite">Satellite</option>
+              <option value="none">None</option>
+            </select>
+          </div>
+          <div id="layer-list"></div>
+        </div>
+        <div id="controls-panel">
+          <h3>Display</h3>
+          <div id="dynamic-controls">
+            <div class="no-layer-selected">Select a layer to adjust</div>
+          </div>
+        </div>
+      </div>
+      <div id="status-bar">
+        <span id="coordinates">--</span>
+        <span id="bearing-display">
+          <span id="compass-arrow">N</span>
+          <span id="bearing">0.0°</span>
+        </span>
+        <span id="zoom-level">Zoom: --</span>
+      </div>
+    </div>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>

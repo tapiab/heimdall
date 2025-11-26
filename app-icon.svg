@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#2563eb"/>
+      <stop offset="100%" style="stop-color:#1e40af"/>
+    </linearGradient>
+  </defs>
+  <!-- Background circle -->
+  <circle cx="256" cy="256" r="240" fill="url(#bg)"/>
+  <!-- Globe grid lines -->
+  <g fill="none" stroke="#ffffff" stroke-width="8" opacity="0.3">
+    <!-- Horizontal lines -->
+    <ellipse cx="256" cy="256" rx="200" ry="60"/>
+    <ellipse cx="256" cy="256" rx="200" ry="130"/>
+    <line x1="56" y1="256" x2="456" y2="256"/>
+    <!-- Vertical line -->
+    <ellipse cx="256" cy="256" rx="60" ry="200"/>
+    <line x1="256" y1="56" x2="256" y2="456"/>
+  </g>
+  <!-- Outer ring -->
+  <circle cx="256" cy="256" r="200" fill="none" stroke="#ffffff" stroke-width="12" opacity="0.5"/>
+  <!-- Layer stack icon in center -->
+  <g transform="translate(256, 256)">
+    <!-- Bottom layer -->
+    <path d="M-70,40 L0,80 L70,40 L0,0 Z" fill="#10b981" opacity="0.9"/>
+    <!-- Middle layer -->
+    <path d="M-70,10 L0,50 L70,10 L0,-30 Z" fill="#34d399" opacity="0.9"/>
+    <!-- Top layer -->
+    <path d="M-70,-20 L0,20 L70,-20 L0,-60 Z" fill="#6ee7b7" opacity="0.9"/>
+  </g>
+</svg>
