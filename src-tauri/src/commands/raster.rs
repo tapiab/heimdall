@@ -30,6 +30,62 @@ pub struct BandStats {
     pub std_dev: f64,
 }
 
+#[derive(Clone, Serialize, Deserialize)]
+pub struct HistogramData {
+    pub band: usize,
+    pub min: f64,
+    pub max: f64,
+    pub bin_count: usize,
+    pub counts: Vec<u64>,
+    pub bin_edges: Vec<f64>,
+}
+
+/// Compute histogram bins from raw pixel values
+/// Returns (counts, bin_edges)
+pub fn compute_histogram_bins(
+    values: &[f64],
+    min: f64,
+    max: f64,
+    bin_count: usize,
+    nodata: Option<f64>,
+) -> (Vec<u64>, Vec<f64>) {
+    let mut counts = vec![0u64; bin_count];
+    let range = max - min;
+
+    if range > 0.0 {
+        for &value in values {
+            // Skip nodata values
+            if let Some(nd) = nodata {
+                if (value - nd).abs() < 1e-10 {
+                    continue;
+                }
+            }
+
+            if value >= min && value <= max {
+                let bin_idx = ((value - min) / range * (bin_count - 1) as f64).floor() as usize;
+                let bin_idx = bin_idx.min(bin_count - 1);
+                counts[bin_idx] += 1;
+            }
+        }
+    } else {
+        // All values are the same - count non-nodata values
+        let valid_count = if let Some(nd) = nodata {
+            values.iter().filter(|&&v| (v - nd).abs() >= 1e-10).count()
+        } else {
+            values.len()
+        };
+        counts[0] = valid_count as u64;
+    }
+
+    // Compute bin edges
+    let bin_width = range / bin_count as f64;
+    let bin_edges: Vec<f64> = (0..=bin_count)
+        .map(|i| min + i as f64 * bin_width)
+        .collect();
+
+    (counts, bin_edges)
+}
+
 /// Check if a dataset has valid georeferencing
 fn is_georeferenced(dataset: &Dataset) -> bool {
     // Check if there's a projection
@@ -332,6 +388,68 @@ pub async fn get_raster_stats(
     })
 }
 
+/// Get histogram for a band
+#[tauri::command]
+pub async fn get_histogram(
+    id: String,
+    band: i32,
+    num_bins: Option<usize>,
+    state: State<'_, DatasetCache>,
+) -> Result<HistogramData, String> {
+    use gdal::raster::ResampleAlg;
+
+    let path = state.get_path(&id).ok_or("Dataset not found")?;
+    let dataset = Dataset::open(&path).map_err(|e| format!("Failed to open raster: {}", e))?;
+
+    let rasterband = dataset
+        .rasterband(band as usize)
+        .map_err(|e| format!("Failed to get band {}: {}", band, e))?;
+
+    // Get band statistics for range
+    let stats = rasterband
+        .compute_raster_min_max(true)
+        .map_err(|e| format!("Failed to compute statistics: {}", e))?;
+
+    let min = stats.min;
+    let max = stats.max;
+    let bin_count = num_bins.unwrap_or(256);
+
+    // For large rasters, use decimation to sample
+    let (width, height) = dataset.raster_size();
+    let max_sample_size = 1024;
+
+    let (read_width, read_height) = if width > max_sample_size || height > max_sample_size {
+        let scale = (max_sample_size as f64 / width.max(height) as f64).min(1.0);
+        ((width as f64 * scale) as usize, (height as f64 * scale) as usize)
+    } else {
+        (width, height)
+    };
+
+    // Read band data with resampling if needed
+    let nodata = rasterband.no_data_value();
+
+    let buffer = rasterband
+        .read_as::<f64>(
+            (0, 0),
+            (width, height),
+            (read_width, read_height),
+            Some(ResampleAlg::NearestNeighbour),
+        )
+        .map_err(|e| format!("Failed to read band data: {}", e))?;
+
+    // Compute histogram bins using extracted function
+    let (counts, bin_edges) = compute_histogram_bins(buffer.data(), min, max, bin_count, nodata);
+
+    Ok(HistogramData {
+        band: band as usize,
+        min,
+        max,
+        bin_count,
+        counts,
+        bin_edges,
+    })
+}
+
 /// Get a cross-layer RGB composite tile (bands from different datasets)
 #[tauri::command]
 pub async fn get_cross_layer_rgb_tile(
@@ -480,4 +598,118 @@ pub async fn get_cross_layer_pixel_rgb_tile(
 pub async fn close_dataset(id: String, state: State<'_, DatasetCache>) -> Result<(), String> {
     state.remove(&id);
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_histogram_bins_uniform_distribution() {
+        let values: Vec<f64> = (0..100).map(|i| i as f64).collect();
+        let (counts, bin_edges) = compute_histogram_bins(&values, 0.0, 99.0, 10, None);
+
+        assert_eq!(counts.len(), 10);
+        assert_eq!(bin_edges.len(), 11);
+
+        // Each bin should have roughly 10 values
+        let total: u64 = counts.iter().sum();
+        assert_eq!(total, 100);
+
+        // First bin edge should be min, last should be max
+        assert!((bin_edges[0] - 0.0).abs() < 1e-10);
+        assert!((bin_edges[10] - 99.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_histogram_bins_all_same_value() {
+        let values = vec![42.0; 100];
+        let (counts, bin_edges) = compute_histogram_bins(&values, 42.0, 42.0, 10, None);
+
+        // When range is 0, all values go in first bin
+        assert_eq!(counts[0], 100);
+        for i in 1..10 {
+            assert_eq!(counts[i], 0);
+        }
+
+        // Bin edges should all be the same value
+        for edge in &bin_edges {
+            assert!((edge - 42.0).abs() < 1e-10);
+        }
+    }
+
+    #[test]
+    fn test_histogram_bins_with_nodata() {
+        let values = vec![1.0, 2.0, -9999.0, 3.0, -9999.0, 4.0, 5.0];
+        let (counts, _) = compute_histogram_bins(&values, 1.0, 5.0, 5, Some(-9999.0));
+
+        // Should only count 5 valid values (skip 2 nodata)
+        let total: u64 = counts.iter().sum();
+        assert_eq!(total, 5);
+    }
+
+    #[test]
+    fn test_histogram_bins_values_outside_range() {
+        let values = vec![-10.0, 0.0, 5.0, 10.0, 100.0];
+        let (counts, _) = compute_histogram_bins(&values, 0.0, 10.0, 10, None);
+
+        // Only values 0, 5, 10 are within range
+        let total: u64 = counts.iter().sum();
+        assert_eq!(total, 3);
+    }
+
+    #[test]
+    fn test_histogram_bins_single_value() {
+        let values = vec![5.0];
+        let (counts, bin_edges) = compute_histogram_bins(&values, 0.0, 10.0, 10, None);
+
+        let total: u64 = counts.iter().sum();
+        assert_eq!(total, 1);
+
+        // 5.0 should be in the middle bin (bin 4 or 5 depending on rounding)
+        let non_zero_bins: Vec<_> = counts.iter().enumerate().filter(|(_, &c)| c > 0).collect();
+        assert_eq!(non_zero_bins.len(), 1);
+    }
+
+    #[test]
+    fn test_histogram_bins_min_max_edge_values() {
+        let values = vec![0.0, 10.0];
+        let (counts, _) = compute_histogram_bins(&values, 0.0, 10.0, 10, None);
+
+        // Min value should be in first bin
+        assert!(counts[0] > 0);
+        // Max value should be in last bin
+        assert!(counts[9] > 0);
+
+        let total: u64 = counts.iter().sum();
+        assert_eq!(total, 2);
+    }
+
+    #[test]
+    fn test_histogram_bin_edges_count() {
+        let values = vec![0.0, 5.0, 10.0];
+        let (counts, bin_edges) = compute_histogram_bins(&values, 0.0, 10.0, 256, None);
+
+        // Should have bin_count bins and bin_count + 1 edges
+        assert_eq!(counts.len(), 256);
+        assert_eq!(bin_edges.len(), 257);
+    }
+
+    #[test]
+    fn test_histogram_empty_values() {
+        let values: Vec<f64> = vec![];
+        let (counts, _) = compute_histogram_bins(&values, 0.0, 10.0, 10, None);
+
+        let total: u64 = counts.iter().sum();
+        assert_eq!(total, 0);
+    }
+
+    #[test]
+    fn test_histogram_all_nodata() {
+        let values = vec![-9999.0; 10];
+        let (counts, _) = compute_histogram_bins(&values, 0.0, 10.0, 10, Some(-9999.0));
+
+        let total: u64 = counts.iter().sum();
+        assert_eq!(total, 0);
+    }
 }

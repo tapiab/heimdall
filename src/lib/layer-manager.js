@@ -1075,6 +1075,7 @@ export class LayerManager {
           <input type="range" id="stretch-gamma" min="0.1" max="3.0" value="${layer.stretch.gamma}" step="0.05">
         </div>
         <button id="auto-stretch" class="control-btn">Auto Stretch</button>
+        <button id="show-histogram" class="control-btn">Show Histogram</button>
       `;
     } else if (layer.displayMode === 'crossLayerRgb') {
       // Cross-layer RGB mode - select layers for each channel
@@ -1255,6 +1256,13 @@ export class LayerManager {
             this.setLayerStretch(this.selectedLayerId, bandStats.min, bandStats.max, 1.0);
             this.updateDynamicControls();
           }
+        });
+      }
+
+      const showHistogramBtn = document.getElementById('show-histogram');
+      if (showHistogramBtn) {
+        showHistogramBtn.addEventListener('click', () => {
+          this.showHistogram(this.selectedLayerId, layer.band);
         });
       }
     } else if (layer.displayMode === 'crossLayerRgb') {
@@ -1511,5 +1519,230 @@ export class LayerManager {
     }
 
     return [[minX, minY], [maxX, maxY]];
+  }
+
+  async showHistogram(layerId, band) {
+    const layer = this.layers.get(layerId);
+    if (!layer || layer.type !== 'raster') return;
+
+    const panel = document.getElementById('histogram-panel');
+    const title = document.getElementById('histogram-panel-title');
+    const canvas = document.getElementById('histogram-canvas');
+    const minSpan = document.getElementById('histogram-min');
+    const maxSpan = document.getElementById('histogram-max');
+    const closeBtn = document.getElementById('histogram-panel-close');
+    const bandSelect = document.getElementById('histogram-band');
+    const tooltip = document.getElementById('histogram-tooltip');
+
+    if (!panel || !canvas) return;
+
+    // Set title
+    const layerName = layer.path.split('/').pop().split('\\').pop();
+    title.textContent = `Histogram - ${layerName}`;
+
+    // Populate band selector
+    if (bandSelect) {
+      bandSelect.innerHTML = Array.from({ length: layer.bands }, (_, i) =>
+        `<option value="${i + 1}" ${band === i + 1 ? 'selected' : ''}>Band ${i + 1}</option>`
+      ).join('');
+
+      // Store current layer ID for band change handler
+      bandSelect.dataset.layerId = layerId;
+
+      // Setup band change handler (remove old listener first)
+      bandSelect.onchange = async (e) => {
+        const newBand = parseInt(e.target.value);
+        await this.showHistogram(layerId, newBand);
+      };
+    }
+
+    // Show panel with loading state
+    panel.classList.add('visible');
+    minSpan.textContent = 'Loading...';
+    maxSpan.textContent = '';
+
+    // Setup close button
+    closeBtn.onclick = () => {
+      panel.classList.remove('visible');
+      if (tooltip) tooltip.classList.remove('visible');
+    };
+
+    try {
+      // Fetch histogram data from backend
+      const histogram = await invoke('get_histogram', {
+        id: layerId,
+        band: band,
+        numBins: 256,
+      });
+
+      // Update stats
+      minSpan.textContent = `Min: ${histogram.min.toFixed(2)}`;
+      maxSpan.textContent = `Max: ${histogram.max.toFixed(2)}`;
+
+      // Draw histogram on canvas
+      this.drawHistogram(canvas, histogram, layer);
+
+      // Setup mouse hover for tooltip
+      this.setupHistogramHover(canvas, tooltip, histogram);
+    } catch (error) {
+      console.error('Failed to load histogram:', error);
+      minSpan.textContent = 'Error loading histogram';
+      maxSpan.textContent = '';
+    }
+  }
+
+  setupHistogramHover(canvas, tooltip, histogram) {
+    if (!tooltip) return;
+
+    const padding = { top: 10, right: 10, bottom: 30, left: 50 };
+    const chartWidth = canvas.width - padding.left - padding.right;
+
+    // Remove old listeners by replacing with cloned node
+    const newCanvas = canvas.cloneNode(true);
+    canvas.parentNode.replaceChild(newCanvas, canvas);
+
+    newCanvas.addEventListener('mousemove', (e) => {
+      const rect = newCanvas.getBoundingClientRect();
+      const scaleX = newCanvas.width / rect.width;
+      const x = (e.clientX - rect.left) * scaleX;
+
+      // Check if within chart area
+      if (x < padding.left || x > newCanvas.width - padding.right) {
+        tooltip.classList.remove('visible');
+        return;
+      }
+
+      // Calculate which bin we're over
+      const chartX = x - padding.left;
+      const binIndex = Math.floor((chartX / chartWidth) * histogram.counts.length);
+
+      if (binIndex >= 0 && binIndex < histogram.counts.length) {
+        const count = histogram.counts[binIndex];
+        const binWidth = (histogram.max - histogram.min) / histogram.counts.length;
+        const valueStart = histogram.min + binIndex * binWidth;
+        const valueEnd = valueStart + binWidth;
+
+        // Format the tooltip content
+        tooltip.innerHTML = `
+          <div>Value: ${valueStart.toFixed(2)} - ${valueEnd.toFixed(2)}</div>
+          <div>Count: ${count.toLocaleString()}</div>
+        `;
+
+        // Position tooltip near cursor but keep within bounds
+        const tooltipX = Math.min(e.clientX - rect.left + 10, rect.width - 120);
+        const tooltipY = Math.max(e.clientY - rect.top - 50, 5);
+        tooltip.style.left = `${tooltipX}px`;
+        tooltip.style.top = `${tooltipY}px`;
+        tooltip.classList.add('visible');
+      } else {
+        tooltip.classList.remove('visible');
+      }
+    });
+
+    newCanvas.addEventListener('mouseleave', () => {
+      tooltip.classList.remove('visible');
+    });
+
+    // Redraw the histogram on the new canvas
+    this.drawHistogram(newCanvas, histogram, this.layers.get(this.selectedLayerId));
+  }
+
+  drawHistogram(canvas, histogram, layer) {
+    const ctx = canvas.getContext('2d');
+    const width = canvas.width;
+    const height = canvas.height;
+    const padding = { top: 10, right: 10, bottom: 30, left: 50 };
+    const chartWidth = width - padding.left - padding.right;
+    const chartHeight = height - padding.top - padding.bottom;
+
+    // Clear canvas
+    ctx.fillStyle = '#1a1a1a';
+    ctx.fillRect(0, 0, width, height);
+
+    // Find max count for scaling (use log scale for better visualization)
+    const maxCount = Math.max(...histogram.counts);
+    if (maxCount === 0) return;
+
+    const useLogScale = maxCount > 1000;
+    const getScaledValue = (count) => {
+      if (useLogScale) {
+        return count > 0 ? Math.log10(count + 1) / Math.log10(maxCount + 1) : 0;
+      }
+      return count / maxCount;
+    };
+
+    // Draw grid lines
+    ctx.strokeStyle = '#333';
+    ctx.lineWidth = 1;
+    for (let i = 0; i <= 4; i++) {
+      const y = padding.top + (chartHeight * i) / 4;
+      ctx.beginPath();
+      ctx.moveTo(padding.left, y);
+      ctx.lineTo(width - padding.right, y);
+      ctx.stroke();
+    }
+
+    // Draw histogram bars
+    const barWidth = chartWidth / histogram.counts.length;
+    ctx.fillStyle = '#4a9eff';
+
+    histogram.counts.forEach((count, i) => {
+      const barHeight = getScaledValue(count) * chartHeight;
+      const x = padding.left + i * barWidth;
+      const y = padding.top + chartHeight - barHeight;
+      ctx.fillRect(x, y, Math.max(barWidth - 0.5, 1), barHeight);
+    });
+
+    // Draw stretch markers (current min/max)
+    if (layer && layer.stretch) {
+      const stretchMin = layer.stretch.min;
+      const stretchMax = layer.stretch.max;
+      const range = histogram.max - histogram.min;
+
+      if (range > 0) {
+        // Min marker
+        const minX = padding.left + ((stretchMin - histogram.min) / range) * chartWidth;
+        ctx.strokeStyle = '#ff6b6b';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(minX, padding.top);
+        ctx.lineTo(minX, height - padding.bottom);
+        ctx.stroke();
+
+        // Max marker
+        const maxX = padding.left + ((stretchMax - histogram.min) / range) * chartWidth;
+        ctx.strokeStyle = '#51cf66';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(maxX, padding.top);
+        ctx.lineTo(maxX, height - padding.bottom);
+        ctx.stroke();
+      }
+    }
+
+    // Draw axes
+    ctx.strokeStyle = '#666';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(padding.left, padding.top);
+    ctx.lineTo(padding.left, height - padding.bottom);
+    ctx.lineTo(width - padding.right, height - padding.bottom);
+    ctx.stroke();
+
+    // Draw labels
+    ctx.fillStyle = '#888';
+    ctx.font = '10px monospace';
+    ctx.textAlign = 'center';
+
+    // X-axis labels (min and max values)
+    ctx.fillText(histogram.min.toFixed(1), padding.left, height - 8);
+    ctx.fillText(histogram.max.toFixed(1), width - padding.right, height - 8);
+
+    // Y-axis label
+    ctx.save();
+    ctx.translate(12, height / 2);
+    ctx.rotate(-Math.PI / 2);
+    ctx.fillText(useLogScale ? 'Count (log)' : 'Count', 0, 0);
+    ctx.restore();
   }
 }

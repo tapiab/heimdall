@@ -17,6 +17,10 @@ Geo Viewer is a desktop application built with Tauri, combining a Rust backend f
 │  │  │  - Grayscale with stretch                        │  │ │
 │  │  │  - RGB composite                                 │  │ │
 │  │  │  - Cross-layer RGB                               │  │ │
+│  │  ├──────────────────────────────────────────────────┤  │ │
+│  │  │  Vector Layers (GeoJSON source)                  │  │ │
+│  │  │  - Fill, Line, Circle layers                     │  │ │
+│  │  │  - Categorical/graduated styling                 │  │ │
 │  │  └──────────────────────────────────────────────────┘  │ │
 │  └────────────────────────────────────────────────────────┘ │
 │                                                              │
@@ -33,10 +37,10 @@ Geo Viewer is a desktop application built with Tauri, combining a Rust backend f
 │                                                              │
 │  ┌────────────────────────────────────────────────────────┐ │
 │  │                   Tauri Commands                        │ │
-│  │  open_raster, get_tile, get_tile_stretched,            │ │
-│  │  get_rgb_tile, get_cross_layer_rgb_tile,               │ │
-│  │  get_cross_layer_pixel_rgb_tile, get_pixel_tile,       │ │
-│  │  get_raster_stats, close_dataset                       │ │
+│  │  Raster: open_raster, get_tile, get_tile_stretched,   │ │
+│  │    get_rgb_tile, get_cross_layer_rgb_tile,            │ │
+│  │    get_pixel_tile, get_raster_stats, close_dataset    │ │
+│  │  Vector: open_vector (returns GeoJSON)                │ │
 │  └────────────────────────────────────────────────────────┘ │
 │                            ↓                                 │
 │  ┌────────────────────────────────────────────────────────┐ │
@@ -62,7 +66,12 @@ geo-viewer/
 │   ├── lib/
 │   │   ├── map-manager.js        # MapLibre initialization & controls
 │   │   ├── layer-manager.js      # Layer state, tile protocols, UI
-│   │   └── ui.js                 # Keyboard shortcuts, file dialog
+│   │   ├── geo-utils.js          # Geospatial utility functions
+│   │   ├── ui.js                 # Keyboard shortcuts, file dialog
+│   │   └── __tests__/            # JavaScript unit tests
+│   │       ├── geo-utils.test.js # Utility function tests
+│   │       ├── fixtures.test.js  # Fixture-based tests
+│   │       └── fixtures.js       # Test data fixtures
 │   └── styles/
 │       └── main.css              # Application styles
 │
@@ -73,15 +82,18 @@ geo-viewer/
 │       ├── main.rs               # Tauri app setup, command registration
 │       ├── commands/
 │       │   ├── mod.rs            # Module exports
-│       │   └── raster.rs         # Raster commands (open, tile, stats)
+│       │   ├── raster.rs         # Raster commands (open, tile, stats)
+│       │   └── vector.rs         # Vector commands (open, read features)
 │       └── gdal/
 │           ├── mod.rs            # Module exports
 │           ├── dataset_cache.rs  # LRU cache for dataset paths
-│           └── tile_extractor.rs # Core tile extraction logic
+│           └── tile_extractor.rs # Core tile extraction logic + tests
 │
 ├── docs/                         # Documentation
 │   └── ARCHITECTURE.md           # This file
 │
+├── .gitlab-ci.yml                # CI/CD pipeline configuration
+├── vitest.config.js              # JavaScript test configuration
 ├── index.html                    # HTML entry point
 ├── package.json                  # Node.js dependencies
 └── README.md                     # Project overview
@@ -186,6 +198,7 @@ MapLibre renders tile
 - `get_pixel_tile` - Non-georeferenced grayscale
 - `get_cross_layer_pixel_rgb_tile` - Non-geo cross-layer RGB
 - `get_raster_stats` - Band statistics
+- `get_histogram` - Histogram data for band
 - `close_dataset` - Remove from cache
 
 ## Coordinate Systems
@@ -210,10 +223,27 @@ MapLibre renders tile
 4. **Decimation Reading** - RasterIO resamples to tile size
 5. **PNG Encoding** - Efficient image crate encoding
 
+## Testing
+
+### JavaScript Tests (Vitest)
+- Located in `src/lib/__tests__/`
+- Test geospatial utilities, color expressions, file utilities
+- Run with: `npm run test:run`
+
+### Rust Tests
+- Located in `src-tauri/src/gdal/tile_extractor.rs`
+- Test coordinate conversion, bounds intersection, stretch calculations
+- Run with: `cd src-tauri && cargo test`
+
+## CI/CD
+
+GitLab CI pipeline (`.gitlab-ci.yml`) provides:
+- **Check stage**: Linting (clippy, fmt) and JS tests
+- **Test stage**: Full unit test suites
+- **Build stage**: Multi-platform builds (Linux/macOS/Windows, x86_64/ARM64)
+
 ## Future Enhancements
 
-- Vector layer support (OGR → GeoJSON → MapLibre)
-- Histogram display
 - Band math (NDVI, etc.)
 - Measurement tools
 - Export/screenshot

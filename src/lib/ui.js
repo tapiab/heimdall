@@ -82,12 +82,26 @@ export function setupUI(mapManager, layerManager) {
         }
       }
     }
+    // H to show histogram for selected raster layer
+    if (e.key === 'h' && !e.ctrlKey && !e.metaKey && !e.altKey) {
+      if (layerManager.selectedLayerId) {
+        const layer = layerManager.layers.get(layerManager.selectedLayerId);
+        if (layer && layer.type === 'raster') {
+          layerManager.showHistogram(layerManager.selectedLayerId, layer.band || 1);
+        }
+      }
+    }
     // Escape to close panels
     if (e.key === 'Escape') {
       // Close attribute panel
       const attrPanel = document.getElementById('attribute-panel');
       if (attrPanel && attrPanel.classList.contains('visible')) {
         attrPanel.classList.remove('visible');
+      }
+      // Close histogram panel
+      const histPanel = document.getElementById('histogram-panel');
+      if (histPanel && histPanel.classList.contains('visible')) {
+        histPanel.classList.remove('visible');
       }
       // Close shortcuts help
       const helpPanel = document.getElementById('shortcuts-help');
@@ -129,6 +143,7 @@ function showShortcutsHelp() {
         <div class="shortcut"><kbd>L</kbd> Toggle layer panel</div>
         <div class="shortcut"><kbd>V</kbd> Toggle layer visibility</div>
         <div class="shortcut"><kbd>A</kbd> Open attribute table</div>
+        <div class="shortcut"><kbd>H</kbd> Show histogram</div>
         <div class="shortcut"><kbd>Del</kbd> Remove selected layer</div>
         <div class="shortcut"><kbd>Esc</kbd> Close panels</div>
         <div class="shortcut"><kbd>?</kbd> Show/hide this help</div>

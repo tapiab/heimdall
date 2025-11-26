@@ -11,6 +11,11 @@ import {
   parseFilename,
   getFileExtension,
   isVectorExtension,
+  shouldUseLogScale,
+  logScaleValue,
+  calculateHistogramBarHeights,
+  calculateHistogramXPosition,
+  formatHistogramValue,
 } from '../geo-utils.js';
 
 describe('getFeatureBounds', () => {
@@ -341,5 +346,168 @@ describe('isVectorExtension', () => {
   it('is case insensitive', () => {
     expect(isVectorExtension('SHP')).toBe(true);
     expect(isVectorExtension('GeoJSON')).toBe(true);
+  });
+});
+
+// ==================== Histogram Utility Tests ====================
+
+describe('shouldUseLogScale', () => {
+  it('returns false for small counts', () => {
+    expect(shouldUseLogScale(100)).toBe(false);
+    expect(shouldUseLogScale(500)).toBe(false);
+    expect(shouldUseLogScale(1000)).toBe(false);
+  });
+
+  it('returns true for large counts', () => {
+    expect(shouldUseLogScale(1001)).toBe(true);
+    expect(shouldUseLogScale(10000)).toBe(true);
+    expect(shouldUseLogScale(1000000)).toBe(true);
+  });
+
+  it('uses custom threshold', () => {
+    expect(shouldUseLogScale(500, 100)).toBe(true);
+    expect(shouldUseLogScale(500, 1000)).toBe(false);
+  });
+
+  it('returns false for zero', () => {
+    expect(shouldUseLogScale(0)).toBe(false);
+  });
+});
+
+describe('logScaleValue', () => {
+  it('returns 0 for count of 0', () => {
+    expect(logScaleValue(0)).toBe(0);
+  });
+
+  it('returns 1 for count of 9', () => {
+    expect(logScaleValue(9)).toBeCloseTo(1, 5);
+  });
+
+  it('returns 2 for count of 99', () => {
+    expect(logScaleValue(99)).toBeCloseTo(2, 5);
+  });
+
+  it('returns 3 for count of 999', () => {
+    expect(logScaleValue(999)).toBeCloseTo(3, 5);
+  });
+
+  it('handles large values', () => {
+    expect(logScaleValue(999999)).toBeCloseTo(6, 5);
+  });
+});
+
+describe('calculateHistogramBarHeights', () => {
+  it('returns empty array for empty counts', () => {
+    expect(calculateHistogramBarHeights([], 200)).toEqual([]);
+  });
+
+  it('returns empty array for null counts', () => {
+    expect(calculateHistogramBarHeights(null, 200)).toEqual([]);
+  });
+
+  it('returns all zeros for all-zero counts', () => {
+    const heights = calculateHistogramBarHeights([0, 0, 0], 200);
+    expect(heights).toEqual([0, 0, 0]);
+  });
+
+  it('normalizes heights to canvas height minus padding', () => {
+    // canvas height 200, padding 10 each side = 180 drawable
+    // max count is 100, so 100 should be full height (180)
+    const heights = calculateHistogramBarHeights([50, 100, 25], 200, 10, false);
+    expect(heights[0]).toBe(90);  // 50/100 * 180
+    expect(heights[1]).toBe(180); // 100/100 * 180
+    expect(heights[2]).toBe(45);  // 25/100 * 180
+  });
+
+  it('applies log scale when requested', () => {
+    const counts = [1, 10, 100, 1000];
+    const heights = calculateHistogramBarHeights(counts, 220, 10, true);
+    const drawHeight = 200;
+
+    // log10(1001) is the max (~3.0004)
+    const maxLog = Math.log10(1001);
+    expect(heights[0]).toBeCloseTo((Math.log10(2) / maxLog) * drawHeight, 1);
+    expect(heights[3]).toBeCloseTo(drawHeight, 1); // max value = full height
+  });
+
+  it('uses default padding of 10', () => {
+    const heights = calculateHistogramBarHeights([100], 200);
+    expect(heights[0]).toBe(180); // 200 - 10*2 = 180
+  });
+});
+
+describe('calculateHistogramXPosition', () => {
+  it('returns center for zero range', () => {
+    // canvas 400, padding 10, drawable 380, center = 10 + 190 = 200
+    const x = calculateHistogramXPosition(5, 5, 5, 400, 10);
+    expect(x).toBe(200);
+  });
+
+  it('returns left edge for min value', () => {
+    const x = calculateHistogramXPosition(0, 0, 100, 420, 10);
+    expect(x).toBe(10);
+  });
+
+  it('returns right edge for max value', () => {
+    // canvas 420, padding 10, drawable 400
+    const x = calculateHistogramXPosition(100, 0, 100, 420, 10);
+    expect(x).toBe(410); // 10 + 400
+  });
+
+  it('returns middle for mid value', () => {
+    const x = calculateHistogramXPosition(50, 0, 100, 420, 10);
+    expect(x).toBe(210); // 10 + 200
+  });
+
+  it('handles negative ranges', () => {
+    const x = calculateHistogramXPosition(0, -100, 100, 420, 10);
+    expect(x).toBe(210); // middle
+  });
+
+  it('uses default padding of 10', () => {
+    const x = calculateHistogramXPosition(0, 0, 100, 420);
+    expect(x).toBe(10);
+  });
+});
+
+describe('formatHistogramValue', () => {
+  it('returns -- for null', () => {
+    expect(formatHistogramValue(null)).toBe('--');
+  });
+
+  it('returns -- for undefined', () => {
+    expect(formatHistogramValue(undefined)).toBe('--');
+  });
+
+  it('returns -- for NaN', () => {
+    expect(formatHistogramValue(NaN)).toBe('--');
+  });
+
+  it('returns -- for Infinity', () => {
+    expect(formatHistogramValue(Infinity)).toBe('--');
+  });
+
+  it('formats millions with M suffix', () => {
+    expect(formatHistogramValue(1000000)).toBe('1.0M');
+    expect(formatHistogramValue(2500000)).toBe('2.5M');
+    expect(formatHistogramValue(-1500000)).toBe('-1.5M');
+  });
+
+  it('formats thousands with K suffix', () => {
+    expect(formatHistogramValue(1000)).toBe('1.0K');
+    expect(formatHistogramValue(2500)).toBe('2.5K');
+    expect(formatHistogramValue(-1500)).toBe('-1.5K');
+  });
+
+  it('formats integers without decimals', () => {
+    expect(formatHistogramValue(42)).toBe('42');
+    expect(formatHistogramValue(0)).toBe('0');
+    expect(formatHistogramValue(-7)).toBe('-7');
+  });
+
+  it('formats decimals with up to 2 places', () => {
+    expect(formatHistogramValue(3.14159)).toBe('3.14');
+    expect(formatHistogramValue(0.5)).toBe('0.50');
+    expect(formatHistogramValue(-2.7)).toBe('-2.70');
   });
 });

@@ -47,6 +47,26 @@
           </table>
         </div>
       </div>
+      <div id="histogram-panel">
+        <div id="histogram-panel-header">
+          <h4 id="histogram-panel-title">Histogram</h4>
+          <div id="histogram-band-selector">
+            <label for="histogram-band">Band:</label>
+            <select id="histogram-band"></select>
+          </div>
+          <button id="histogram-panel-close">&times;</button>
+        </div>
+        <div id="histogram-content">
+          <div id="histogram-canvas-container">
+            <canvas id="histogram-canvas" width="400" height="200"></canvas>
+            <div id="histogram-tooltip"></div>
+          </div>
+          <div id="histogram-stats">
+            <span id="histogram-min">Min: --</span>
+            <span id="histogram-max">Max: --</span>
+          </div>
+        </div>
+      </div>
       <div id="status-bar">
         <span id="coordinates">--</span>
         <span id="bearing-display">

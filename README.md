@@ -25,6 +25,7 @@ A lightweight, fast geospatial raster and vector viewer built with Tauri, Rust, 
 | `L` | Toggle layer panel |
 | `V` | Toggle selected layer visibility |
 | `A` | Open attribute table (vector layers) |
+| `H` | Show histogram (raster layers) |
 | `Del` | Remove selected layer |
 | `Esc` | Close panels |
 | `?` | Show keyboard shortcuts |

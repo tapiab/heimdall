@@ -187,3 +187,98 @@ export function isVectorExtension(ext) {
   const vectorExtensions = ['shp', 'geojson', 'json', 'gpkg', 'kml', 'kmz', 'gml', 'gpx', 'fgb', 'tab', 'mif'];
   return vectorExtensions.includes(ext.toLowerCase());
 }
+
+// ==================== Histogram Utilities ====================
+
+/**
+ * Determine if log scale should be used for histogram display
+ * @param {number} maxCount - Maximum bin count
+ * @param {number} threshold - Threshold for switching to log scale (default 1000)
+ * @returns {boolean}
+ */
+export function shouldUseLogScale(maxCount, threshold = 1000) {
+  return maxCount > threshold;
+}
+
+/**
+ * Apply log scale transformation to a count value
+ * @param {number} count - Original count
+ * @returns {number} Log-scaled value (log10(count + 1))
+ */
+export function logScaleValue(count) {
+  return Math.log10(count + 1);
+}
+
+/**
+ * Calculate histogram bar heights normalized to canvas height
+ * @param {Array<number>} counts - Array of bin counts
+ * @param {number} canvasHeight - Height of canvas in pixels
+ * @param {number} padding - Padding from top and bottom (default 10)
+ * @param {boolean} useLogScale - Whether to use log scale
+ * @returns {Array<number>} Array of bar heights in pixels
+ */
+export function calculateHistogramBarHeights(counts, canvasHeight, padding = 10, useLogScale = false) {
+  if (!counts || counts.length === 0) return [];
+
+  const drawHeight = canvasHeight - padding * 2;
+  const maxCount = Math.max(...counts);
+
+  if (maxCount === 0) {
+    return counts.map(() => 0);
+  }
+
+  const maxValue = useLogScale ? logScaleValue(maxCount) : maxCount;
+
+  return counts.map(count => {
+    const value = useLogScale ? logScaleValue(count) : count;
+    return (value / maxValue) * drawHeight;
+  });
+}
+
+/**
+ * Calculate the x position for a value on the histogram
+ * @param {number} value - The value to position
+ * @param {number} min - Histogram minimum
+ * @param {number} max - Histogram maximum
+ * @param {number} canvasWidth - Width of canvas in pixels
+ * @param {number} padding - Padding from left and right (default 10)
+ * @returns {number} X position in pixels
+ */
+export function calculateHistogramXPosition(value, min, max, canvasWidth, padding = 10) {
+  const drawWidth = canvasWidth - padding * 2;
+  const range = max - min;
+
+  if (range === 0) {
+    return padding + drawWidth / 2;
+  }
+
+  const normalizedPosition = (value - min) / range;
+  return padding + normalizedPosition * drawWidth;
+}
+
+/**
+ * Format a number for histogram display (compact notation for large numbers)
+ * @param {number} value - Value to format
+ * @returns {string} Formatted string
+ */
+export function formatHistogramValue(value) {
+  if (value === null || value === undefined || !isFinite(value)) {
+    return '--';
+  }
+
+  // Use compact notation for large numbers
+  if (Math.abs(value) >= 1000000) {
+    return (value / 1000000).toFixed(1) + 'M';
+  }
+  if (Math.abs(value) >= 1000) {
+    return (value / 1000).toFixed(1) + 'K';
+  }
+
+  // For small numbers, show appropriate precision
+  if (Number.isInteger(value)) {
+    return value.toString();
+  }
+
+  // For decimals, show up to 2 decimal places
+  return value.toFixed(2);
+}

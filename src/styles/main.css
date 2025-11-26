@@ -783,3 +783,136 @@ html, body, #app {
 #attribute-table tr.selected td {
   background: #3d4a5a;
 }
+
+/* Histogram panel */
+#histogram-panel {
+  position: absolute;
+  top: 60px;
+  right: 10px;
+  width: 420px;
+  background: #252525;
+  border: 1px solid #3a3a3a;
+  border-radius: 4px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
+  z-index: 1000;
+  display: none;
+  flex-direction: column;
+}
+
+#histogram-panel.visible {
+  display: flex;
+}
+
+#histogram-panel-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 12px;
+  background: #2a2a2a;
+  border-bottom: 1px solid #3a3a3a;
+  gap: 8px;
+}
+
+#histogram-panel-header h4 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: #e0e0e0;
+  flex: 1;
+}
+
+#histogram-band-selector {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: #888;
+}
+
+#histogram-band-selector label {
+  white-space: nowrap;
+}
+
+#histogram-band {
+  padding: 2px 6px;
+  font-size: 12px;
+  background: #1a1a1a;
+  border: 1px solid #3a3a3a;
+  border-radius: 3px;
+  color: #e0e0e0;
+  cursor: pointer;
+}
+
+#histogram-band:hover {
+  border-color: #4a4a4a;
+}
+
+#histogram-panel-close {
+  background: none;
+  border: none;
+  color: #888;
+  font-size: 18px;
+  cursor: pointer;
+  padding: 0 4px;
+}
+
+#histogram-panel-close:hover {
+  color: #fff;
+}
+
+#histogram-content {
+  padding: 12px;
+}
+
+#histogram-canvas-container {
+  position: relative;
+}
+
+#histogram-canvas {
+  width: 100%;
+  height: 180px;
+  background: #1a1a1a;
+  border-radius: 4px;
+  cursor: crosshair;
+}
+
+#histogram-tooltip {
+  position: absolute;
+  background: rgba(0, 0, 0, 0.85);
+  color: #fff;
+  padding: 6px 10px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-family: monospace;
+  pointer-events: none;
+  white-space: nowrap;
+  z-index: 10;
+  display: none;
+  border: 1px solid #4a9eff;
+}
+
+#histogram-tooltip.visible {
+  display: block;
+}
+
+#histogram-stats {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 8px;
+  font-size: 11px;
+  color: #888;
+  font-family: monospace;
+}
+
+#histogram-stats span {
+  color: #4a9eff;
+}
+
+#histogram-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 180px;
+  color: #666;
+  font-size: 13px;
+}
