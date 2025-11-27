@@ -1,3 +1,5 @@
+#![allow(clippy::too_many_arguments)]
+
 use gdal::raster::reproject;
 use gdal::spatial_ref::SpatialRef;
 use gdal::{Dataset, DriverManager};
@@ -92,7 +94,8 @@ fn get_dataset_geo_bounds(dataset: &Dataset) -> Result<[f64; 4], String> {
     // Transform to EPSG:4326
     let mut target_srs = SpatialRef::from_epsg(4326)
         .map_err(|e| format!("Failed to create EPSG:4326 SRS: {}", e))?;
-    target_srs.set_axis_mapping_strategy(gdal::spatial_ref::AxisMappingStrategy::TraditionalGisOrder);
+    target_srs
+        .set_axis_mapping_strategy(gdal::spatial_ref::AxisMappingStrategy::TraditionalGisOrder);
 
     let transform = gdal::spatial_ref::CoordTransform::new(&source_srs, &target_srs)
         .map_err(|e| format!("Failed to create transform: {}", e))?;
@@ -100,7 +103,8 @@ fn get_dataset_geo_bounds(dataset: &Dataset) -> Result<[f64; 4], String> {
     let mut xs = vec![native_min_x, native_max_x, native_min_x, native_max_x];
     let mut ys = vec![native_min_y, native_min_y, native_max_y, native_max_y];
 
-    transform.transform_coords(&mut xs, &mut ys, &mut [])
+    transform
+        .transform_coords(&mut xs, &mut ys, &mut [])
         .map_err(|e| format!("Failed to transform: {}", e))?;
 
     let min_lon = xs.iter().cloned().fold(f64::INFINITY, f64::min);
@@ -147,15 +151,14 @@ fn extract_raw_tile(dataset: &Dataset, request: &TileRequest) -> Result<Vec<f64>
         .map_err(|e| format!("Failed to set geotransform: {}", e))?;
 
     // Set output projection to Web Mercator
-    let web_mercator = SpatialRef::from_epsg(3857)
-        .map_err(|e| format!("Failed to create EPSG:3857: {}", e))?;
+    let web_mercator =
+        SpatialRef::from_epsg(3857).map_err(|e| format!("Failed to create EPSG:3857: {}", e))?;
     output_ds
         .set_projection(&web_mercator.to_wkt().unwrap_or_default())
         .map_err(|e| format!("Failed to set projection: {}", e))?;
 
     // Use GDAL's warp to reproject all bands
-    reproject(dataset, &output_ds)
-        .map_err(|e| format!("Failed to reproject: {}", e))?;
+    reproject(dataset, &output_ds).map_err(|e| format!("Failed to reproject: {}", e))?;
 
     // Read the requested band from the reprojected output
     let output_band = output_ds
@@ -172,11 +175,15 @@ fn extract_raw_tile(dataset: &Dataset, request: &TileRequest) -> Result<Vec<f64>
 /// Apply stretch and gamma to a value
 fn apply_stretch(val: f64, stretch: &StretchParams, nodata: Option<f64>) -> Option<u8> {
     // Check for nodata or invalid values
-    if val == 0.0 || nodata.map_or(false, |nd| (val - nd).abs() < 1e-10) || !val.is_finite() {
+    if val == 0.0 || nodata.is_some_and(|nd| (val - nd).abs() < 1e-10) || !val.is_finite() {
         return None;
     }
 
-    let range = if stretch.max > stretch.min { stretch.max - stretch.min } else { 1.0 };
+    let range = if stretch.max > stretch.min {
+        stretch.max - stretch.min
+    } else {
+        1.0
+    };
     let normalized = (val - stretch.min) / range;
     let clamped = normalized.clamp(0.0, 1.0);
 
@@ -216,8 +223,7 @@ pub fn extract_tile_with_stretch(
     // Create RGBA output
     let mut tile_data = vec![0u8; tile_size * tile_size * 4];
 
-    for i in 0..data.len() {
-        let val = data[i];
+    for (i, &val) in data.iter().enumerate() {
         let idx = i * 4;
 
         if let Some(stretched) = apply_stretch(val, stretch, nodata) {
@@ -273,14 +279,32 @@ pub fn extract_rgb_tile(
     }
 
     // Get nodata values for each band
-    let r_nodata = dataset.rasterband(red_band as usize).ok().and_then(|b| b.no_data_value());
-    let g_nodata = dataset.rasterband(green_band as usize).ok().and_then(|b| b.no_data_value());
-    let b_nodata = dataset.rasterband(blue_band as usize).ok().and_then(|b| b.no_data_value());
+    let r_nodata = dataset
+        .rasterband(red_band as usize)
+        .ok()
+        .and_then(|b| b.no_data_value());
+    let g_nodata = dataset
+        .rasterband(green_band as usize)
+        .ok()
+        .and_then(|b| b.no_data_value());
+    let b_nodata = dataset
+        .rasterband(blue_band as usize)
+        .ok()
+        .and_then(|b| b.no_data_value());
 
     // Extract raw data for each band
-    let r_request = TileRequest { band: red_band, ..*request };
-    let g_request = TileRequest { band: green_band, ..*request };
-    let b_request = TileRequest { band: blue_band, ..*request };
+    let r_request = TileRequest {
+        band: red_band,
+        ..*request
+    };
+    let g_request = TileRequest {
+        band: green_band,
+        ..*request
+    };
+    let b_request = TileRequest {
+        band: blue_band,
+        ..*request
+    };
 
     let r_data = extract_raw_tile(dataset, &r_request)?;
     let g_data = extract_raw_tile(dataset, &g_request)?;
@@ -339,7 +363,12 @@ fn extract_raw_pixel_tile(dataset: &Dataset, request: &TileRequest) -> Result<Ve
     let clamped_half_height = half_height.min(85.0);
 
     let tile_geo_bounds = tile_to_geo_bounds(request.x, request.y, request.z);
-    let img_geo_bounds = [-half_width, -clamped_half_height, half_width, clamped_half_height];
+    let img_geo_bounds = [
+        -half_width,
+        -clamped_half_height,
+        half_width,
+        clamped_half_height,
+    ];
 
     if !bounds_intersect(tile_geo_bounds, img_geo_bounds) {
         return Ok(vec![0.0; tile_size * tile_size]);
@@ -364,7 +393,11 @@ fn extract_raw_pixel_tile(dataset: &Dataset, request: &TileRequest) -> Result<Ve
     let src_width = (src_x_end - src_x).max(1) as usize;
     let src_height = (src_y_end - src_y).max(1) as usize;
 
-    if src_width == 0 || src_height == 0 || src_x >= img_width as isize || src_y >= img_height as isize {
+    if src_width == 0
+        || src_height == 0
+        || src_x >= img_width as isize
+        || src_y >= img_height as isize
+    {
         return Ok(vec![0.0; tile_size * tile_size]);
     }
 
@@ -373,7 +406,12 @@ fn extract_raw_pixel_tile(dataset: &Dataset, request: &TileRequest) -> Result<Ve
         .map_err(|e| format!("Failed to get band: {}", e))?;
 
     let buffer = band
-        .read_as::<f64>((src_x, src_y), (src_width, src_height), (tile_size, tile_size), None)
+        .read_as::<f64>(
+            (src_x, src_y),
+            (src_width, src_height),
+            (tile_size, tile_size),
+            None,
+        )
         .map_err(|e| format!("Failed to read: {}", e))?;
 
     Ok(buffer.data().to_vec())
@@ -394,17 +432,35 @@ pub fn extract_cross_layer_pixel_rgb_tile(
 ) -> Result<Vec<u8>, String> {
     let tile_size = request.tile_size;
 
-    let r_request = TileRequest { band: red_band, ..*request };
-    let g_request = TileRequest { band: green_band, ..*request };
-    let b_request = TileRequest { band: blue_band, ..*request };
+    let r_request = TileRequest {
+        band: red_band,
+        ..*request
+    };
+    let g_request = TileRequest {
+        band: green_band,
+        ..*request
+    };
+    let b_request = TileRequest {
+        band: blue_band,
+        ..*request
+    };
 
     let r_data = extract_raw_pixel_tile(red_ds, &r_request)?;
     let g_data = extract_raw_pixel_tile(green_ds, &g_request)?;
     let b_data = extract_raw_pixel_tile(blue_ds, &b_request)?;
 
-    let r_nodata = red_ds.rasterband(red_band as usize).ok().and_then(|b| b.no_data_value());
-    let g_nodata = green_ds.rasterband(green_band as usize).ok().and_then(|b| b.no_data_value());
-    let b_nodata = blue_ds.rasterband(blue_band as usize).ok().and_then(|b| b.no_data_value());
+    let r_nodata = red_ds
+        .rasterband(red_band as usize)
+        .ok()
+        .and_then(|b| b.no_data_value());
+    let g_nodata = green_ds
+        .rasterband(green_band as usize)
+        .ok()
+        .and_then(|b| b.no_data_value());
+    let b_nodata = blue_ds
+        .rasterband(blue_band as usize)
+        .ok()
+        .and_then(|b| b.no_data_value());
 
     let mut tile_data = vec![0u8; tile_size * tile_size * 4];
 
@@ -442,18 +498,36 @@ pub fn extract_cross_layer_rgb_tile(
     let tile_size = request.tile_size;
 
     // Extract raw data from each dataset
-    let r_request = TileRequest { band: red_band, ..*request };
-    let g_request = TileRequest { band: green_band, ..*request };
-    let b_request = TileRequest { band: blue_band, ..*request };
+    let r_request = TileRequest {
+        band: red_band,
+        ..*request
+    };
+    let g_request = TileRequest {
+        band: green_band,
+        ..*request
+    };
+    let b_request = TileRequest {
+        band: blue_band,
+        ..*request
+    };
 
     let r_data = extract_raw_tile(red_ds, &r_request)?;
     let g_data = extract_raw_tile(green_ds, &g_request)?;
     let b_data = extract_raw_tile(blue_ds, &b_request)?;
 
     // Get nodata values
-    let r_nodata = red_ds.rasterband(red_band as usize).ok().and_then(|b| b.no_data_value());
-    let g_nodata = green_ds.rasterband(green_band as usize).ok().and_then(|b| b.no_data_value());
-    let b_nodata = blue_ds.rasterband(blue_band as usize).ok().and_then(|b| b.no_data_value());
+    let r_nodata = red_ds
+        .rasterband(red_band as usize)
+        .ok()
+        .and_then(|b| b.no_data_value());
+    let g_nodata = green_ds
+        .rasterband(green_band as usize)
+        .ok()
+        .and_then(|b| b.no_data_value());
+    let b_nodata = blue_ds
+        .rasterband(blue_band as usize)
+        .ok()
+        .and_then(|b| b.no_data_value());
 
     let mut tile_data = vec![0u8; tile_size * tile_size * 4];
 
@@ -496,7 +570,12 @@ pub fn extract_pixel_tile(
     let tile_geo_bounds = tile_to_geo_bounds(request.x, request.y, request.z);
 
     // Image bounds in synthetic geographic coordinates
-    let img_geo_bounds = [-half_width, -clamped_half_height, half_width, clamped_half_height];
+    let img_geo_bounds = [
+        -half_width,
+        -clamped_half_height,
+        half_width,
+        clamped_half_height,
+    ];
 
     // Check intersection
     if !bounds_intersect(tile_geo_bounds, img_geo_bounds) {
@@ -527,7 +606,11 @@ pub fn extract_pixel_tile(
     let src_width = (src_x_end - src_x).max(1) as usize;
     let src_height = (src_y_end - src_y).max(1) as usize;
 
-    if src_width == 0 || src_height == 0 || src_x >= img_width as isize || src_y >= img_height as isize {
+    if src_width == 0
+        || src_height == 0
+        || src_x >= img_width as isize
+        || src_y >= img_height as isize
+    {
         return create_empty_tile(tile_size);
     }
 
@@ -539,14 +622,18 @@ pub fn extract_pixel_tile(
 
     // Read and resample to tile size
     let buffer = band
-        .read_as::<f64>((src_x, src_y), (src_width, src_height), (tile_size, tile_size), None)
+        .read_as::<f64>(
+            (src_x, src_y),
+            (src_width, src_height),
+            (tile_size, tile_size),
+            None,
+        )
         .map_err(|e| format!("Failed to read: {}", e))?;
 
     let data = buffer.data();
     let mut tile_data = vec![0u8; tile_size * tile_size * 4];
 
-    for i in 0..data.len() {
-        let val = data[i];
+    for (i, &val) in data.iter().enumerate() {
         let idx = i * 4;
 
         if let Some(stretched) = apply_stretch(val, stretch, nodata) {
@@ -570,18 +657,30 @@ mod tests {
     fn test_tile_to_geo_bounds_zoom_0() {
         // At zoom 0, there's one tile covering the whole world
         let bounds = tile_to_geo_bounds(0, 0, 0);
-        assert!((bounds[0] - (-180.0)).abs() < 0.001, "min_lon should be -180");
+        assert!(
+            (bounds[0] - (-180.0)).abs() < 0.001,
+            "min_lon should be -180"
+        );
         assert!((bounds[2] - 180.0).abs() < 0.001, "max_lon should be 180");
         // Latitude is limited by Web Mercator projection (~85.05°)
-        assert!(bounds[1] > -90.0 && bounds[1] < -80.0, "min_lat should be around -85");
-        assert!(bounds[3] > 80.0 && bounds[3] < 90.0, "max_lat should be around 85");
+        assert!(
+            bounds[1] > -90.0 && bounds[1] < -80.0,
+            "min_lat should be around -85"
+        );
+        assert!(
+            bounds[3] > 80.0 && bounds[3] < 90.0,
+            "max_lat should be around 85"
+        );
     }
 
     #[test]
     fn test_tile_to_geo_bounds_zoom_1() {
         // At zoom 1, tile (0,0) should be NW quadrant
         let bounds = tile_to_geo_bounds(0, 0, 1);
-        assert!((bounds[0] - (-180.0)).abs() < 0.001, "min_lon should be -180");
+        assert!(
+            (bounds[0] - (-180.0)).abs() < 0.001,
+            "min_lon should be -180"
+        );
         assert!((bounds[2] - 0.0).abs() < 0.001, "max_lon should be 0");
         assert!(bounds[3] > 80.0, "max_lat should be > 80 (northern tile)");
     }
@@ -613,7 +712,10 @@ mod tests {
     fn test_bounds_intersect_overlapping() {
         let a = [0.0, 0.0, 10.0, 10.0];
         let b = [5.0, 5.0, 15.0, 15.0];
-        assert!(bounds_intersect(a, b), "overlapping bounds should intersect");
+        assert!(
+            bounds_intersect(a, b),
+            "overlapping bounds should intersect"
+        );
     }
 
     #[test]
@@ -628,21 +730,30 @@ mod tests {
         let a = [0.0, 0.0, 10.0, 10.0];
         let b = [10.0, 0.0, 20.0, 10.0];
         // Edge-touching bounds DO intersect in this implementation (non-strict inequality)
-        assert!(bounds_intersect(a, b), "edge-touching bounds should intersect");
+        assert!(
+            bounds_intersect(a, b),
+            "edge-touching bounds should intersect"
+        );
     }
 
     #[test]
     fn test_bounds_intersect_disjoint() {
         let a = [0.0, 0.0, 10.0, 10.0];
         let b = [20.0, 20.0, 30.0, 30.0];
-        assert!(!bounds_intersect(a, b), "disjoint bounds should not intersect");
+        assert!(
+            !bounds_intersect(a, b),
+            "disjoint bounds should not intersect"
+        );
     }
 
     #[test]
     fn test_bounds_intersect_horizontal_gap() {
         let a = [-180.0, -10.0, -170.0, 10.0];
         let b = [170.0, -10.0, 180.0, 10.0];
-        assert!(!bounds_intersect(a, b), "bounds with horizontal gap should not intersect");
+        assert!(
+            !bounds_intersect(a, b),
+            "bounds with horizontal gap should not intersect"
+        );
     }
 
     // ==================== Stretch Parameter Tests ====================
@@ -657,7 +768,11 @@ mod tests {
 
     #[test]
     fn test_apply_stretch_min_value() {
-        let stretch = StretchParams { min: 0.0, max: 100.0, gamma: 1.0 };
+        let stretch = StretchParams {
+            min: 0.0,
+            max: 100.0,
+            gamma: 1.0,
+        };
         let result = apply_stretch(0.0, &stretch, None);
         // 0.0 is treated as nodata/transparent
         assert!(result.is_none(), "zero value should be treated as nodata");
@@ -665,14 +780,22 @@ mod tests {
 
     #[test]
     fn test_apply_stretch_max_value() {
-        let stretch = StretchParams { min: 0.0, max: 100.0, gamma: 1.0 };
+        let stretch = StretchParams {
+            min: 0.0,
+            max: 100.0,
+            gamma: 1.0,
+        };
         let result = apply_stretch(100.0, &stretch, None);
         assert_eq!(result, Some(255), "max value should map to 255");
     }
 
     #[test]
     fn test_apply_stretch_mid_value() {
-        let stretch = StretchParams { min: 0.0, max: 100.0, gamma: 1.0 };
+        let stretch = StretchParams {
+            min: 0.0,
+            max: 100.0,
+            gamma: 1.0,
+        };
         let result = apply_stretch(50.0, &stretch, None);
         // 50% of range = 127 or 128
         assert!(result.is_some());
@@ -682,14 +805,22 @@ mod tests {
 
     #[test]
     fn test_apply_stretch_with_nodata() {
-        let stretch = StretchParams { min: 0.0, max: 100.0, gamma: 1.0 };
+        let stretch = StretchParams {
+            min: 0.0,
+            max: 100.0,
+            gamma: 1.0,
+        };
         let result = apply_stretch(-9999.0, &stretch, Some(-9999.0));
         assert!(result.is_none(), "nodata value should return None");
     }
 
     #[test]
     fn test_apply_stretch_gamma_low() {
-        let stretch = StretchParams { min: 0.0, max: 100.0, gamma: 0.5 };
+        let stretch = StretchParams {
+            min: 0.0,
+            max: 100.0,
+            gamma: 0.5,
+        };
         let result = apply_stretch(25.0, &stretch, None);
         // With gamma < 1, mid-tones should be brighter
         // 25/100 = 0.25, with gamma 0.5: 0.25^(1/0.5) = 0.25^2 = 0.0625
@@ -703,7 +834,11 @@ mod tests {
 
     #[test]
     fn test_apply_stretch_gamma_high() {
-        let stretch = StretchParams { min: 0.0, max: 100.0, gamma: 2.0 };
+        let stretch = StretchParams {
+            min: 0.0,
+            max: 100.0,
+            gamma: 2.0,
+        };
         let result = apply_stretch(25.0, &stretch, None);
         // 0.25^(1/2) = 0.5, * 255 ≈ 127
         let val = result.unwrap();
@@ -712,7 +847,11 @@ mod tests {
 
     #[test]
     fn test_apply_stretch_clamp_below_min() {
-        let stretch = StretchParams { min: 10.0, max: 100.0, gamma: 1.0 };
+        let stretch = StretchParams {
+            min: 10.0,
+            max: 100.0,
+            gamma: 1.0,
+        };
         let result = apply_stretch(5.0, &stretch, None);
         // Value below min should clamp to 0
         assert_eq!(result, Some(0), "value below min should clamp to 0");
@@ -720,7 +859,11 @@ mod tests {
 
     #[test]
     fn test_apply_stretch_clamp_above_max() {
-        let stretch = StretchParams { min: 0.0, max: 100.0, gamma: 1.0 };
+        let stretch = StretchParams {
+            min: 0.0,
+            max: 100.0,
+            gamma: 1.0,
+        };
         let result = apply_stretch(150.0, &stretch, None);
         // Value above max should clamp to 255
         assert_eq!(result, Some(255), "value above max should clamp to 255");

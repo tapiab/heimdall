@@ -2,6 +2,7 @@
 # Builds for Linux, macOS, and Windows (x86_64 and ARM64)
 
 stages:
+  - docker
   - check
   - test
   - build
@@ -10,20 +11,30 @@ variables:
   CARGO_HOME: ${CI_PROJECT_DIR}/.cargo
   RUSTUP_HOME: ${CI_PROJECT_DIR}/.rustup
   NODE_VERSION: "20"
-  RUST_VERSION: "latest"
+  RUST_TAURI_IMAGE: ${CI_REGISTRY_IMAGE}/rust-tauri:latest
 
-# Cache configuration
-.cache-npm: &cache-npm
-  key: npm-${CI_JOB_NAME}
-  paths:
-    - node_modules/
-    - .npm/
+# ====================
+# Docker Stage
+# ====================
 
-.cache-cargo: &cache-cargo
-  key: cargo-${CI_JOB_NAME}
-  paths:
-    - .cargo/
-    - src-tauri/target/
+docker:rust-tauri:
+  stage: docker
+  image:
+    name: gcr.io/kaniko-project/executor:debug
+    entrypoint: [""]
+  script:
+    - mkdir -p /kaniko/.docker
+    - echo "{\"auths\":{\"${CI_REGISTRY}\":{\"auth\":\"$(echo -n ${CI_REGISTRY_USER}:${CI_REGISTRY_PASSWORD} | base64)\"}}}" > /kaniko/.docker/config.json
+    - /kaniko/executor
+      --context ${CI_PROJECT_DIR}
+      --dockerfile ${CI_PROJECT_DIR}/docker/rust-tauri.Dockerfile
+      --destination ${RUST_TAURI_IMAGE}
+  rules:
+    - changes:
+        - docker/rust-tauri.Dockerfile
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+      when: manual
+      allow_failure: true
 
 # ====================
 # Check Stage
@@ -32,10 +43,8 @@ variables:
 lint:js:
   stage: check
   image: node:${NODE_VERSION}
-  cache:
-    <<: *cache-npm
   script:
-    - npm ci --cache .npm --prefer-offline
+    - npm ci
     - npm run test:run
   rules:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
@@ -43,14 +52,10 @@ lint:js:
 
 lint:rust:
   stage: check
-  image: rust:${RUST_VERSION}
-  cache:
-    <<: *cache-cargo
-  before_script:
-    - rustup component add clippy rustfmt
-    - apt-get update && apt-get install -y libgdal-dev
+  image: $RUST_TAURI_IMAGE
   script:
     - cd src-tauri
+    - rustup default stable
     - cargo fmt --check
     - cargo clippy -- -D warnings
   rules:
@@ -64,10 +69,8 @@ lint:rust:
 test:js:
   stage: test
   image: node:${NODE_VERSION}
-  cache:
-    <<: *cache-npm
   script:
-    - npm ci --cache .npm --prefer-offline
+    - npm ci
     - npm run test:run
   coverage: '/All files[^|]*\|[^|]*\s+([\d\.]+)/'
   artifacts:
@@ -80,13 +83,10 @@ test:js:
 
 test:rust:
   stage: test
-  image: rust:${RUST_VERSION}
-  cache:
-    <<: *cache-cargo
-  before_script:
-    - apt-get update && apt-get install -y libgdal-dev
+  image: $RUST_TAURI_IMAGE
   script:
     - cd src-tauri
+    - rustup default stable
     - cargo test --verbose
   rules:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
@@ -98,19 +98,8 @@ test:rust:
 
 build:linux-x86_64:
   stage: build
-  image: rust:${RUST_VERSION}
-  cache:
-    <<: *cache-cargo
+  image: $RUST_TAURI_IMAGE
   before_script:
-    - apt-get update && apt-get install -y
-        libgdal-dev
-        libwebkit2gtk-4.1-dev
-        libappindicator3-dev
-        librsvg2-dev
-        patchelf
-        libssl-dev
-        libgtk-3-dev
-        libayatana-appindicator3-dev
     - curl -fsSL https://deb.nodesource.com/setup_${NODE_VERSION}.x | bash -
     - apt-get install -y nodejs
     - npm ci
@@ -129,21 +118,10 @@ build:linux-x86_64:
 
 build:linux-arm64:
   stage: build
-  image: rust:${RUST_VERSION}
+  image: $RUST_TAURI_IMAGE
   tags:
     - arm64
-  cache:
-    <<: *cache-cargo
   before_script:
-    - apt-get update && apt-get install -y
-        libgdal-dev
-        libwebkit2gtk-4.1-dev
-        libappindicator3-dev
-        librsvg2-dev
-        patchelf
-        libssl-dev
-        libgtk-3-dev
-        libayatana-appindicator3-dev
     - curl -fsSL https://deb.nodesource.com/setup_${NODE_VERSION}.x | bash -
     - apt-get install -y nodejs
     - npm ci
@@ -168,12 +146,6 @@ build:macos-x86_64:
   tags:
     - macos
     - x86_64
-  cache:
-    key: macos-x86_64
-    paths:
-      - node_modules/
-      - .cargo/
-      - src-tauri/target/
   before_script:
     - brew install gdal
     - curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
@@ -197,12 +169,6 @@ build:macos-arm64:
   tags:
     - macos
     - arm64
-  cache:
-    key: macos-arm64
-    paths:
-      - node_modules/
-      - .cargo/
-      - src-tauri/target/
   before_script:
     - brew install gdal
     - curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
@@ -230,12 +196,6 @@ build:windows-x86_64:
   tags:
     - windows
     - x86_64
-  cache:
-    key: windows-x86_64
-    paths:
-      - node_modules/
-      - .cargo/
-      - src-tauri/target/
   variables:
     GDAL_HOME: C:\OSGeo4W
     PATH: ${GDAL_HOME}\bin;${PATH}
@@ -261,12 +221,6 @@ build:windows-arm64:
   tags:
     - windows
     - arm64
-  cache:
-    key: windows-arm64
-    paths:
-      - node_modules/
-      - .cargo/
-      - src-tauri/target/
   variables:
     GDAL_HOME: C:\OSGeo4W
     PATH: ${GDAL_HOME}\bin;${PATH}

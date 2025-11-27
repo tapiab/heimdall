@@ -4,7 +4,10 @@
 mod commands;
 mod gdal;
 
-use commands::raster::{close_dataset, get_histogram, get_raster_stats, get_tile, get_tile_stretched, get_rgb_tile, get_cross_layer_rgb_tile, get_cross_layer_pixel_rgb_tile, get_pixel_tile, open_raster};
+use commands::raster::{
+    close_dataset, get_cross_layer_pixel_rgb_tile, get_cross_layer_rgb_tile, get_histogram,
+    get_pixel_tile, get_raster_stats, get_rgb_tile, get_tile, get_tile_stretched, open_raster,
+};
 use commands::vector::open_vector;
 use gdal::dataset_cache::DatasetCache;
 

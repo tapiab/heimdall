@@ -98,7 +98,8 @@ fn transform_vector_bounds(
 
     let mut target_srs =
         SpatialRef::from_epsg(4326).map_err(|e| format!("Failed to create EPSG:4326: {}", e))?;
-    target_srs.set_axis_mapping_strategy(gdal::spatial_ref::AxisMappingStrategy::TraditionalGisOrder);
+    target_srs
+        .set_axis_mapping_strategy(gdal::spatial_ref::AxisMappingStrategy::TraditionalGisOrder);
 
     let transform = CoordTransform::new(&spatial_ref, &target_srs)
         .map_err(|e| format!("Failed to create transform: {}", e))?;
@@ -145,7 +146,8 @@ fn convert_to_geojson(dataset: &Dataset, layer_idx: usize) -> Result<Value, Stri
         let source = source_srs.as_ref().unwrap();
         let mut target = SpatialRef::from_epsg(4326)
             .map_err(|e| format!("Failed to create EPSG:4326: {}", e))?;
-        target.set_axis_mapping_strategy(gdal::spatial_ref::AxisMappingStrategy::TraditionalGisOrder);
+        target
+            .set_axis_mapping_strategy(gdal::spatial_ref::AxisMappingStrategy::TraditionalGisOrder);
         Some(
             CoordTransform::new(source, &target)
                 .map_err(|e| format!("Failed to create transform: {}", e))?,
@@ -219,10 +221,8 @@ fn convert_to_geojson(dataset: &Dataset, layer_idx: usize) -> Result<Value, Stri
 fn geometry_to_geojson(geom: &gdal::vector::Geometry) -> Result<Value, String> {
     // Use GDAL's built-in JSON export - much more reliable
     match geom.json() {
-        Ok(json_str) => {
-            serde_json::from_str(&json_str)
-                .map_err(|e| format!("Failed to parse geometry JSON: {}", e))
-        }
+        Ok(json_str) => serde_json::from_str(&json_str)
+            .map_err(|e| format!("Failed to parse geometry JSON: {}", e)),
         Err(e) => {
             // Fallback: return null geometry
             eprintln!("Warning: Failed to convert geometry to JSON: {}", e);
