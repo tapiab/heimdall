@@ -4,6 +4,7 @@
 mod commands;
 mod gdal;
 
+use commands::app::get_version;
 use commands::raster::{
     close_dataset, get_cross_layer_pixel_rgb_tile, get_cross_layer_rgb_tile, get_histogram,
     get_pixel_tile, get_raster_stats, get_rgb_tile, get_tile, get_tile_stretched, open_raster,
@@ -17,6 +18,7 @@ fn main() {
         .plugin(tauri_plugin_opener::init())
         .manage(DatasetCache::new(10))
         .invoke_handler(tauri::generate_handler![
+            get_version,
             open_raster,
             get_tile,
             get_tile_stretched,

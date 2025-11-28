@@ -28,6 +28,51 @@ export function setupUI(mapManager, layerManager) {
     });
   }
 
+  // Reset view button
+  const resetViewBtn = document.getElementById('reset-view');
+  if (resetViewBtn) {
+    resetViewBtn.addEventListener('click', () => mapManager.resetView());
+  }
+
+  // Terrain controls
+  const terrainToggle = document.getElementById('terrain-toggle');
+  const terrainExaggeration = document.getElementById('terrain-exaggeration');
+  const exaggerationSlider = document.getElementById('exaggeration-slider');
+  const exaggerationValue = document.getElementById('exaggeration-value');
+
+  if (terrainToggle) {
+    terrainToggle.addEventListener('change', (e) => {
+      if (e.target.checked) {
+        const result = mapManager.enableTerrain();
+        if (!result.success) {
+          // Terrain not available (e.g., in pixel coord mode or network error)
+          e.target.checked = false;
+          console.warn('Failed to enable terrain:', result.error);
+          alert(`3D terrain is not available: ${result.error}`);
+          return;
+        }
+        if (terrainExaggeration) {
+          terrainExaggeration.classList.remove('hidden');
+        }
+      } else {
+        mapManager.disableTerrain();
+        if (terrainExaggeration) {
+          terrainExaggeration.classList.add('hidden');
+        }
+      }
+    });
+  }
+
+  if (exaggerationSlider) {
+    exaggerationSlider.addEventListener('input', (e) => {
+      const value = parseFloat(e.target.value);
+      if (exaggerationValue) {
+        exaggerationValue.textContent = value.toFixed(1);
+      }
+      mapManager.setTerrainExaggeration(value);
+    });
+  }
+
   // Controls panel toggle button
   const controlsPanelToggle = document.getElementById('controls-panel-toggle');
   if (controlsPanelToggle) {
@@ -61,6 +106,29 @@ export function setupUI(mapManager, layerManager) {
       mapManager.setBasemap(next);
       if (basemapSelect) {
         basemapSelect.value = next;
+      }
+    }
+    // T to toggle 3D terrain
+    if (e.key === 't' && !e.ctrlKey && !e.metaKey && !e.altKey) {
+      const result = mapManager.toggleTerrain();
+      const terrainToggle = document.getElementById('terrain-toggle');
+      const terrainExaggeration = document.getElementById('terrain-exaggeration');
+
+      if (!result.success && result.error) {
+        console.warn('Failed to toggle terrain:', result.error);
+        return;
+      }
+
+      const enabled = result.enabled;
+      if (terrainToggle) {
+        terrainToggle.checked = enabled;
+      }
+      if (terrainExaggeration) {
+        if (enabled) {
+          terrainExaggeration.classList.remove('hidden');
+        } else {
+          terrainExaggeration.classList.add('hidden');
+        }
       }
     }
     // L to toggle layer panel
@@ -153,6 +221,9 @@ function showShortcutsHelp() {
 
   const helpDiv = document.createElement('div');
   helpDiv.id = 'shortcuts-help';
+  const versionEl = document.getElementById('version-display');
+  const versionText = versionEl ? versionEl.textContent : 'Heimdall';
+
   helpDiv.innerHTML = `
     <div class="shortcuts-content">
       <h3>Keyboard Shortcuts</h3>
@@ -161,6 +232,7 @@ function showShortcutsHelp() {
         <div class="shortcut"><kbd>F</kbd> Fit to extent</div>
         <div class="shortcut"><kbd>R</kbd> Reset rotation</div>
         <div class="shortcut"><kbd>B</kbd> Cycle basemap</div>
+        <div class="shortcut"><kbd>T</kbd> Toggle 3D terrain</div>
         <div class="shortcut"><kbd>L</kbd> Toggle layer panel</div>
         <div class="shortcut"><kbd>D</kbd> Toggle display panel</div>
         <div class="shortcut"><kbd>V</kbd> Toggle layer visibility</div>
@@ -171,9 +243,11 @@ function showShortcutsHelp() {
         <div class="shortcut"><kbd>?</kbd> Show/hide this help</div>
         <hr>
         <div class="shortcut"><kbd>Ctrl+Drag</kbd> Rotate map</div>
+        <div class="shortcut"><kbd>Right-Drag</kbd> Pitch/tilt (3D)</div>
         <div class="shortcut"><kbd>Scroll</kbd> Zoom in/out</div>
         <div class="shortcut"><kbd>Drag</kbd> Pan map</div>
       </div>
+      <div class="help-version">${versionText}</div>
       <button class="close-help">Close</button>
     </div>
   `;

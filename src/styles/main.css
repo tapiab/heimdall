@@ -240,6 +240,84 @@ html, body, #app {
   border-color: #4a9eff;
 }
 
+/* Terrain controls */
+.terrain-item {
+  flex-direction: column;
+  cursor: default;
+  border-bottom: 1px solid #3a3a3a;
+  border-radius: 0;
+  margin: -4px -8px 8px -8px;
+  padding: 10px 16px;
+  background: #2a2a2a;
+}
+
+.terrain-toggle-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.terrain-toggle-label input[type="checkbox"] {
+  cursor: pointer;
+  accent-color: #4a9eff;
+}
+
+.terrain-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+  padding-left: 24px;
+}
+
+.terrain-controls.hidden {
+  display: none;
+}
+
+.terrain-controls label {
+  font-size: 11px;
+  color: #888;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+#exaggeration-value {
+  color: #4a9eff;
+  font-family: monospace;
+}
+
+#exaggeration-slider {
+  flex: 1;
+  height: 4px;
+  -webkit-appearance: none;
+  appearance: none;
+  background: #444;
+  border-radius: 2px;
+  cursor: pointer;
+}
+
+#exaggeration-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  background: #4a9eff;
+  border-radius: 50%;
+  cursor: pointer;
+}
+
+#exaggeration-slider::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  background: #4a9eff;
+  border-radius: 50%;
+  cursor: pointer;
+  border: none;
+}
+
 .layer-header {
   display: flex;
   align-items: center;
@@ -673,6 +751,21 @@ html, body, #app {
 
 .close-help:hover {
   background: #4a4a4a;
+}
+
+.help-version {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid #3a3a3a;
+  font-size: 11px;
+  color: #666;
+  text-align: center;
+}
+
+/* Version display in status bar */
+#version-display {
+  color: #555;
+  font-size: 11px;
 }
 
 /* Feature popup styles */
