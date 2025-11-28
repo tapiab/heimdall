@@ -120,13 +120,16 @@ Build a focused, lightweight viewer using modern web technologies (Tauri + WebGL
 | **Dynamic adjustment** | P0 | Easy | WebGL fragment shader for min/max/gamma |
 | **RGB compositing** | P0 | Medium | Custom shader, 3-band merge |
 | **Vector support** | P0 | Easy | OGR → GeoJSON → MapLibre |
+| **Version display** | P0 | Easy | Synced version from git tag, shown in help/about |
+| **Pixel basemap** | P0 | Medium | Grid/checkerboard basemap for non-georeferenced data |
+| **Distance measurement** | P1 | Medium | Measure distance between two points in meters |
 
 ### Future Enhancements (Post-MVP)
 
 - Histogram display
 - Band math (NDVI, etc.)
 - Profile/transect tools
-- Measurement tools
+- Area measurement tools
 - Export/screenshot
 - Annotation layers
 - 3D terrain draping
@@ -689,6 +692,287 @@ export class RasterLayer {
 
 ---
 
+### Phase 6: Version Management & Pixel Basemap (Week 9)
+**Goal**: Unified version management and proper basemap for non-georeferenced images
+
+#### Tasks
+
+**6.1 Version Management (2 days)**
+- [ ] Create single source of truth for version
+  - Use git tags as the canonical version source
+  - Generate version at build time from `git describe --tags`
+- [ ] Implement Rust build script for version injection
+```rust
+  // src-tauri/build.rs
+  fn main() {
+      // Get version from git tag
+      let output = std::process::Command::new("git")
+          .args(["describe", "--tags", "--always", "--dirty"])
+          .output()
+          .expect("Failed to execute git");
+
+      let version = String::from_utf8_lossy(&output.stdout)
+          .trim()
+          .to_string();
+
+      // Fall back to Cargo.toml version if no tags
+      let version = if version.is_empty() || version.starts_with("fatal") {
+          env!("CARGO_PKG_VERSION").to_string()
+      } else {
+          version
+      };
+
+      println!("cargo:rustc-env=HEIMDALL_VERSION={}", version);
+      tauri_build::build();
+  }
+```
+- [ ] Add Tauri command to expose version
+```rust
+  // src-tauri/src/commands/app.rs
+  #[tauri::command]
+  pub fn get_version() -> String {
+      env!("HEIMDALL_VERSION").to_string()
+  }
+```
+- [ ] Display version in UI
+  - Add "About" menu item or help dialog
+  - Show version in window title or status bar
+  - Include version in `--help` output (CLI mode if applicable)
+- [ ] Sync version across config files
+  - Create npm script to update `package.json` and `tauri.conf.json` from git tag
+  - Or: Remove hardcoded versions and rely solely on git tag at build time
+
+**6.2 Pixel Coordinate Basemap (3 days)**
+- [ ] Create pixel grid basemap layer
+  - Render a subtle grid pattern for non-georeferenced images
+  - Show pixel coordinate axes
+  - Checkerboard or graph paper style background
+- [ ] Implement pixel basemap source
+```javascript
+  // src/lib/pixel-basemap.js
+  export function createPixelBasemapSource(width, height) {
+      // Generate a canvas-based tile source showing pixel grid
+      return {
+          type: 'canvas',
+          canvas: generateGridCanvas(width, height),
+          coordinates: calculatePixelBounds(width, height),
+          animate: false,
+      };
+  }
+
+  function generateGridCanvas(width, height, gridSize = 100) {
+      const canvas = document.createElement('canvas');
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext('2d');
+
+      // Light background
+      ctx.fillStyle = '#f5f5f5';
+      ctx.fillRect(0, 0, width, height);
+
+      // Draw grid lines
+      ctx.strokeStyle = '#e0e0e0';
+      ctx.lineWidth = 1;
+
+      // Vertical lines
+      for (let x = 0; x <= width; x += gridSize) {
+          ctx.beginPath();
+          ctx.moveTo(x, 0);
+          ctx.lineTo(x, height);
+          ctx.stroke();
+      }
+
+      // Horizontal lines
+      for (let y = 0; y <= height; y += gridSize) {
+          ctx.beginPath();
+          ctx.moveTo(0, y);
+          ctx.lineTo(width, y);
+          ctx.stroke();
+      }
+
+      // Draw coordinate labels at major intervals
+      ctx.fillStyle = '#999';
+      ctx.font = '12px monospace';
+      for (let x = 0; x <= width; x += gridSize * 5) {
+          ctx.fillText(x.toString(), x + 2, 12);
+      }
+      for (let y = gridSize * 5; y <= height; y += gridSize * 5) {
+          ctx.fillText(y.toString(), 2, y - 2);
+      }
+
+      return canvas;
+  }
+```
+- [ ] Update MapManager to switch basemaps based on data type
+```javascript
+  // src/lib/map-manager.js
+  setBasemap(type) {
+      // type: 'osm', 'satellite', 'pixel', or 'none'
+      this.currentBasemap = type;
+
+      if (type === 'none') {
+          this.basemapVisible = false;
+          this.setLayerVisibility('osm-tiles', false);
+          this.setLayerVisibility('satellite-tiles', false);
+          this.setLayerVisibility('pixel-grid', false);
+      } else if (type === 'pixel') {
+          this.basemapVisible = true;
+          this.setLayerVisibility('osm-tiles', false);
+          this.setLayerVisibility('satellite-tiles', false);
+          this.setLayerVisibility('pixel-grid', true);
+      } else {
+          this.basemapVisible = true;
+          this.setLayerVisibility('osm-tiles', type === 'osm');
+          this.setLayerVisibility('satellite-tiles', type === 'satellite');
+          this.setLayerVisibility('pixel-grid', false);
+      }
+  }
+```
+- [ ] Auto-switch to pixel basemap when loading non-georeferenced data
+  - Detect `pixelCoordMode` activation
+  - Automatically change basemap to 'pixel' type
+  - Remember previous basemap to restore when switching back to geo data
+- [ ] Add UI controls for pixel basemap options
+  - Grid spacing selector (10, 50, 100, 500 pixels)
+  - Toggle grid labels
+  - Grid line style (solid, dashed, dots)
+
+**6.3 Distance Measurement Tool (2 days)**
+- [ ] Implement measurement mode toggle
+  - Add "Measure" button to toolbar or keyboard shortcut (M key)
+  - Visual indicator when measurement mode is active
+  - Cursor changes to crosshair in measurement mode
+- [ ] Implement two-point click interaction
+```javascript
+  // src/lib/measure-tool.js
+  export class MeasureTool {
+      constructor(map) {
+          this.map = map;
+          this.active = false;
+          this.points = [];
+          this.markers = [];
+          this.lineLayer = null;
+      }
+
+      activate() {
+          this.active = true;
+          this.points = [];
+          this.clearMarkers();
+          this.map.getCanvas().style.cursor = 'crosshair';
+          this.map.on('click', this.handleClick);
+      }
+
+      deactivate() {
+          this.active = false;
+          this.clearMarkers();
+          this.map.getCanvas().style.cursor = '';
+          this.map.off('click', this.handleClick);
+      }
+
+      handleClick = (e) => {
+          const { lng, lat } = e.lngLat;
+          this.points.push([lng, lat]);
+          this.addMarker(lng, lat);
+
+          if (this.points.length === 2) {
+              this.showDistance();
+              this.drawLine();
+          } else if (this.points.length > 2) {
+              // Reset for new measurement
+              this.points = [[lng, lat]];
+              this.clearMarkers();
+              this.addMarker(lng, lat);
+          }
+      }
+
+      addMarker(lng, lat) {
+          const el = document.createElement('div');
+          el.className = 'measure-marker';
+          const marker = new maplibregl.Marker(el)
+              .setLngLat([lng, lat])
+              .addTo(this.map);
+          this.markers.push(marker);
+      }
+
+      clearMarkers() {
+          this.markers.forEach(m => m.remove());
+          this.markers = [];
+          if (this.lineLayer && this.map.getLayer('measure-line')) {
+              this.map.removeLayer('measure-line');
+              this.map.removeSource('measure-line');
+          }
+      }
+  }
+```
+- [ ] Implement geodesic distance calculation (Haversine formula)
+```javascript
+  // src/lib/geo-utils.js
+  export function calculateDistance(point1, point2) {
+      // Haversine formula for geodesic distance
+      const R = 6371000; // Earth's radius in meters
+      const lat1 = point1[1] * Math.PI / 180;
+      const lat2 = point2[1] * Math.PI / 180;
+      const deltaLat = (point2[1] - point1[1]) * Math.PI / 180;
+      const deltaLng = (point2[0] - point1[0]) * Math.PI / 180;
+
+      const a = Math.sin(deltaLat / 2) * Math.sin(deltaLat / 2) +
+                Math.cos(lat1) * Math.cos(lat2) *
+                Math.sin(deltaLng / 2) * Math.sin(deltaLng / 2);
+      const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+
+      return R * c; // Distance in meters
+  }
+
+  export function formatDistance(meters) {
+      if (meters < 1000) {
+          return `${meters.toFixed(1)} m`;
+      } else {
+          return `${(meters / 1000).toFixed(2)} km`;
+      }
+  }
+```
+- [ ] Display measurement result
+  - Show distance in popup or overlay near the line
+  - Format: meters for <1km, kilometers for >=1km
+  - Include both metric units
+- [ ] Draw measurement line on map
+```javascript
+  drawLine() {
+      const geojson = {
+          type: 'Feature',
+          geometry: {
+              type: 'LineString',
+              coordinates: this.points
+          }
+      };
+
+      if (this.map.getSource('measure-line')) {
+          this.map.getSource('measure-line').setData(geojson);
+      } else {
+          this.map.addSource('measure-line', { type: 'geojson', data: geojson });
+          this.map.addLayer({
+              id: 'measure-line',
+              type: 'line',
+              source: 'measure-line',
+              paint: {
+                  'line-color': '#ff6600',
+                  'line-width': 2,
+                  'line-dasharray': [2, 2]
+              }
+          });
+      }
+  }
+```
+- [ ] Support pixel distance for non-georeferenced images
+  - When in pixel coordinate mode, calculate Euclidean distance in pixels
+  - Display as "X pixels" instead of meters
+- [ ] Add keyboard shortcut (M) to toggle measurement mode
+- [ ] Add clear measurement button/shortcut (Esc to cancel)
+
+**Deliverable**: Unified version management from git tags, proper pixel-coordinate basemap for non-georeferenced imagery, and distance measurement tool
+
+---
+
 ## Technical Implementation Details
 
 ### 1. Tile Extraction Algorithm
@@ -963,7 +1247,8 @@ impl DatasetCache {
 - Phase 3: 2 weeks (80 hours)
 - Phase 4: 1 week (40 hours)
 - Phase 5: 1 week (40 hours)
-- **Total: 8 weeks (320 hours)**
+- Phase 6: 1.5 weeks (60 hours)
+- **Total: 9.5 weeks (380 hours)**
 
 **Part-time development (10hrs/week):**
 - Phase 1: 8 weeks
@@ -971,7 +1256,8 @@ impl DatasetCache {
 - Phase 3: 8 weeks
 - Phase 4: 4 weeks
 - Phase 5: 4 weeks
-- **Total: 32 weeks (~7-8 months)**
+- Phase 6: 6 weeks
+- **Total: 38 weeks (~9 months)**
 
 ### Resource Requirements
 
@@ -1200,7 +1486,10 @@ and implement open_raster()."
 - [ ] Dynamic adjustment (min/max/gamma)
 - [ ] RGB compositing (3+ bands)
 - [ ] Vector overlay (Shapefile, GeoJSON)
-- [ ] Basemap integration
+- [ ] Basemap integration (OSM, satellite)
+- [ ] Pixel basemap for non-georeferenced data
+- [ ] Version display from git tag (help/about)
+- [ ] Distance measurement tool (meters/pixels)
 - [ ] Keyboard shortcuts
 
 ### Code Quality
@@ -1275,6 +1564,8 @@ ogr2ogr -f GeoJSON output.json input.shp
 | Version | Date | Changes |
 |---------|------|---------|
 | 1.0 | 2024-11-25 | Initial comprehensive plan |
+| 1.1 | 2025-11-27 | Added Phase 6: Version management (git tag sync) and pixel basemap for non-georeferenced data |
+| 1.2 | 2025-11-27 | Added distance measurement tool (Phase 6.3) |
 
 ---
 

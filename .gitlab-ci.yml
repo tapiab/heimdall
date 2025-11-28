@@ -103,6 +103,7 @@ build:linux-x86_64:
     - curl -fsSL https://deb.nodesource.com/setup_${NODE_VERSION}.x | bash -
     - apt-get install -y nodejs
     - npm ci
+    - rustup default stable
   script:
     - npm run tauri:build
   artifacts:
@@ -125,6 +126,7 @@ build:linux-arm64:
     - curl -fsSL https://deb.nodesource.com/setup_${NODE_VERSION}.x | bash -
     - apt-get install -y nodejs
     - npm ci
+    - rustup default stable
   script:
     - npm run tauri:build
   artifacts:
@@ -150,6 +152,7 @@ build:macos-x86_64:
     - brew install gdal
     - curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
     - source $HOME/.cargo/env
+    - rustup default stable
     - rustup target add x86_64-apple-darwin
     - npm ci
   script:
@@ -173,6 +176,7 @@ build:macos-arm64:
     - brew install gdal
     - curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
     - source $HOME/.cargo/env
+    - rustup default stable
     - rustup target add aarch64-apple-darwin
     - npm ci
   script:
@@ -202,6 +206,7 @@ build:windows-x86_64:
   before_script:
     - choco install -y osgeo4w
     - choco install -y nodejs-lts rust
+    - rustup default stable
     - refreshenv
     - npm ci
   script:
@@ -227,6 +232,7 @@ build:windows-arm64:
   before_script:
     - choco install -y osgeo4w
     - choco install -y nodejs-lts rust
+    - rustup default stable
     - refreshenv
     - rustup target add aarch64-pc-windows-msvc
     - npm ci
