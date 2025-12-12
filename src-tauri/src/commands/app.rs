@@ -1,4 +1,4 @@
-/// Application-level commands
+//! Application-level commands
 
 /// Get the application version from git tag (set at build time)
 #[tauri::command]

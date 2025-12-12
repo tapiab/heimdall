@@ -44,8 +44,8 @@ lint:js:
   stage: check
   image: node:${NODE_VERSION}
   script:
-    - npm ci
-    - npm run test:run
+    - make ci-install
+    - make ci-lint-js
   rules:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
@@ -54,10 +54,8 @@ lint:rust:
   stage: check
   image: $RUST_TAURI_IMAGE
   script:
-    - cd src-tauri
     - rustup default stable
-    - cargo fmt --check
-    - cargo clippy -- -D warnings
+    - make ci-lint-rust
   rules:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
@@ -70,8 +68,8 @@ test:js:
   stage: test
   image: node:${NODE_VERSION}
   script:
-    - npm ci
-    - npm run test:run
+    - make ci-install
+    - make ci-test-js
   coverage: '/All files[^|]*\|[^|]*\s+([\d\.]+)/'
   artifacts:
     when: always
@@ -85,9 +83,8 @@ test:rust:
   stage: test
   image: $RUST_TAURI_IMAGE
   script:
-    - cd src-tauri
     - rustup default stable
-    - cargo test --verbose
+    - make ci-test-rust
   rules:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
@@ -102,10 +99,10 @@ build:linux-x86_64:
   before_script:
     - curl -fsSL https://deb.nodesource.com/setup_${NODE_VERSION}.x | bash -
     - apt-get install -y nodejs
-    - npm ci
     - rustup default stable
+    - make ci-install
   script:
-    - npm run tauri:build
+    - make ci-build
   artifacts:
     paths:
       - src-tauri/target/release/bundle/deb/*.deb
@@ -125,10 +122,10 @@ build:linux-arm64:
   before_script:
     - curl -fsSL https://deb.nodesource.com/setup_${NODE_VERSION}.x | bash -
     - apt-get install -y nodejs
-    - npm ci
     - rustup default stable
+    - make ci-install
   script:
-    - npm run tauri:build
+    - make ci-build
   artifacts:
     paths:
       - src-tauri/target/release/bundle/deb/*.deb
@@ -154,9 +151,9 @@ build:macos-x86_64:
     - source $HOME/.cargo/env
     - rustup default stable
     - rustup target add x86_64-apple-darwin
-    - npm ci
+    - make ci-install
   script:
-    - npm run tauri:build -- --target x86_64-apple-darwin
+    - make ci-build-target TARGET=x86_64-apple-darwin
   artifacts:
     paths:
       - src-tauri/target/x86_64-apple-darwin/release/bundle/dmg/*.dmg
@@ -178,9 +175,9 @@ build:macos-arm64:
     - source $HOME/.cargo/env
     - rustup default stable
     - rustup target add aarch64-apple-darwin
-    - npm ci
+    - make ci-install
   script:
-    - npm run tauri:build -- --target aarch64-apple-darwin
+    - make ci-build-target TARGET=aarch64-apple-darwin
   artifacts:
     paths:
       - src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/*.dmg
@@ -205,12 +202,12 @@ build:windows-x86_64:
     PATH: ${GDAL_HOME}\bin;${PATH}
   before_script:
     - choco install -y osgeo4w
-    - choco install -y nodejs-lts rust
+    - choco install -y nodejs-lts rust make
     - rustup default stable
     - refreshenv
-    - npm ci
+    - make ci-install
   script:
-    - npm run tauri:build
+    - make ci-build
   artifacts:
     paths:
       - src-tauri/target/release/bundle/msi/*.msi
@@ -231,13 +228,13 @@ build:windows-arm64:
     PATH: ${GDAL_HOME}\bin;${PATH}
   before_script:
     - choco install -y osgeo4w
-    - choco install -y nodejs-lts rust
+    - choco install -y nodejs-lts rust make
     - rustup default stable
     - refreshenv
     - rustup target add aarch64-pc-windows-msvc
-    - npm ci
+    - make ci-install
   script:
-    - npm run tauri:build -- --target aarch64-pc-windows-msvc
+    - make ci-build-target TARGET=aarch64-pc-windows-msvc
   artifacts:
     paths:
       - src-tauri/target/aarch64-pc-windows-msvc/release/bundle/msi/*.msi

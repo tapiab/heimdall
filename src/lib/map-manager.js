@@ -5,11 +5,13 @@ export class MapManager {
     this.containerId = containerId;
     this.map = null;
     this.basemapVisible = true;
-    this.currentBasemap = 'osm'; // 'osm', 'satellite', or 'none'
+    this.currentBasemap = 'osm'; // 'osm', 'satellite', 'pixel', or 'none'
+    this.previousBasemap = 'osm'; // Store previous basemap when switching to pixel mode
     this.pixelCoordMode = false; // true when viewing non-georeferenced images
     this.pixelExtent = null; // { width, height } of current non-geo image
     this.terrainEnabled = false;
     this.terrainExaggeration = 1.5;
+    this.pixelGridCanvas = null;
   }
 
   async init() {
@@ -207,17 +209,24 @@ export class MapManager {
   }
 
   setBasemap(type) {
-    // type: 'osm', 'satellite', or 'none'
+    // type: 'osm', 'satellite', 'pixel', or 'none'
     this.currentBasemap = type;
 
     if (type === 'none') {
       this.basemapVisible = false;
       this.setLayerVisibility('osm-tiles', false);
       this.setLayerVisibility('satellite-tiles', false);
+      this.setLayerVisibility('pixel-grid', false);
+    } else if (type === 'pixel') {
+      this.basemapVisible = true;
+      this.setLayerVisibility('osm-tiles', false);
+      this.setLayerVisibility('satellite-tiles', false);
+      this.setLayerVisibility('pixel-grid', true);
     } else {
       this.basemapVisible = true;
       this.setLayerVisibility('osm-tiles', type === 'osm');
       this.setLayerVisibility('satellite-tiles', type === 'satellite');
+      this.setLayerVisibility('pixel-grid', false);
     }
   }
 
@@ -232,10 +241,208 @@ export class MapManager {
   setPixelCoordMode(enabled, extent = null) {
     this.pixelCoordMode = enabled;
     this.pixelExtent = extent;
-    // Disable terrain when in pixel coordinate mode
-    if (enabled && this.terrainEnabled) {
-      this.disableTerrain();
+
+    if (enabled) {
+      // Disable terrain when in pixel coordinate mode
+      if (this.terrainEnabled) {
+        this.disableTerrain();
+      }
+      // Store the previous basemap and switch to pixel grid
+      if (this.currentBasemap !== 'pixel' && this.currentBasemap !== 'none') {
+        this.previousBasemap = this.currentBasemap;
+      }
+      // Create and show pixel grid basemap
+      if (extent) {
+        this.createPixelGridBasemap(extent);
+        this.setBasemap('pixel');
+        // Update basemap selector UI
+        const basemapSelect = document.getElementById('basemap-select');
+        if (basemapSelect) {
+          basemapSelect.value = 'pixel';
+        }
+      }
+    } else {
+      // Remove pixel grid and restore previous basemap
+      this.removePixelGridBasemap();
+      if (this.previousBasemap && this.previousBasemap !== 'pixel') {
+        this.setBasemap(this.previousBasemap);
+        // Update basemap selector UI
+        const basemapSelect = document.getElementById('basemap-select');
+        if (basemapSelect) {
+          basemapSelect.value = this.previousBasemap;
+        }
+      }
     }
+  }
+
+  /**
+   * Create a pixel grid basemap for non-georeferenced images
+   */
+  createPixelGridBasemap(extent) {
+    const { width, height, scale, offsetX, offsetY } = extent;
+
+    // Remove existing pixel grid if any
+    this.removePixelGridBasemap();
+
+    // Calculate bounds in pseudo-geographic coordinates
+    const bounds = [
+      [-offsetX, -offsetY],           // SW corner
+      [offsetX, -offsetY],            // SE corner
+      [offsetX, offsetY],             // NE corner
+      [-offsetX, offsetY],            // NW corner
+    ];
+
+    // Create canvas for pixel grid
+    const canvas = document.createElement('canvas');
+    const gridResolution = 1024; // Canvas resolution
+    canvas.width = gridResolution;
+    canvas.height = gridResolution;
+    const ctx = canvas.getContext('2d');
+
+    // Transparent background - grid lines only
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    // Calculate grid spacing in pixels (image pixels)
+    // We want major gridlines at nice intervals
+    const imagePixelsPerCanvasPixel = width / gridResolution;
+    const majorGridSpacing = this.calculateGridSpacing(width, height);
+    const minorGridSpacing = majorGridSpacing / 5;
+
+    // Convert image pixel spacing to canvas pixels
+    const majorSpacingCanvas = majorGridSpacing / imagePixelsPerCanvasPixel;
+    const minorSpacingCanvas = minorGridSpacing / imagePixelsPerCanvasPixel;
+
+    // Draw minor grid lines (semi-transparent white)
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.15)';
+    ctx.lineWidth = 1;
+    for (let x = 0; x <= gridResolution; x += minorSpacingCanvas) {
+      ctx.beginPath();
+      ctx.moveTo(x, 0);
+      ctx.lineTo(x, gridResolution);
+      ctx.stroke();
+    }
+    for (let y = 0; y <= gridResolution; y += minorSpacingCanvas) {
+      ctx.beginPath();
+      ctx.moveTo(0, y);
+      ctx.lineTo(gridResolution, y);
+      ctx.stroke();
+    }
+
+    // Draw major grid lines (more visible white)
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.4)';
+    ctx.lineWidth = 2;
+    for (let x = 0; x <= gridResolution; x += majorSpacingCanvas) {
+      ctx.beginPath();
+      ctx.moveTo(x, 0);
+      ctx.lineTo(x, gridResolution);
+      ctx.stroke();
+    }
+    for (let y = 0; y <= gridResolution; y += majorSpacingCanvas) {
+      ctx.beginPath();
+      ctx.moveTo(0, y);
+      ctx.lineTo(gridResolution, y);
+      ctx.stroke();
+    }
+
+    // Draw center crosshairs (origin) - bright cyan for visibility
+    const centerX = gridResolution / 2;
+    const centerY = gridResolution / 2;
+    ctx.strokeStyle = 'rgba(74, 158, 255, 0.8)';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(centerX, 0);
+    ctx.lineTo(centerX, gridResolution);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(0, centerY);
+    ctx.lineTo(gridResolution, centerY);
+    ctx.stroke();
+
+    // Draw coordinate labels at major intervals
+    ctx.font = 'bold 14px monospace';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'top';
+
+    // X-axis labels (at top)
+    for (let i = 0; i <= width; i += majorGridSpacing) {
+      const canvasX = (i / width) * gridResolution;
+      // Add background for readability
+      const text = i.toString();
+      const metrics = ctx.measureText(text);
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.8)';
+      ctx.fillRect(canvasX - metrics.width / 2 - 3, 2, metrics.width + 6, 18);
+      ctx.fillStyle = '#fff';
+      ctx.fillText(text, canvasX, 5);
+    }
+
+    // Y-axis labels (at left)
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
+    for (let i = 0; i <= height; i += majorGridSpacing) {
+      const canvasY = (i / height) * gridResolution;
+      const text = i.toString();
+      const metrics = ctx.measureText(text);
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.8)';
+      ctx.fillRect(2, canvasY - 9, metrics.width + 6, 18);
+      ctx.fillStyle = '#fff';
+      ctx.fillText(text, 5, canvasY);
+    }
+
+    // Store canvas reference
+    this.pixelGridCanvas = canvas;
+
+    // Add to map as image source
+    this.map.addSource('pixel-grid-source', {
+      type: 'image',
+      url: canvas.toDataURL(),
+      coordinates: bounds,
+    });
+
+    // Add layer on top of all other layers (as overlay)
+    this.map.addLayer({
+      id: 'pixel-grid',
+      type: 'raster',
+      source: 'pixel-grid-source',
+      paint: {
+        'raster-opacity': 1,
+        'raster-fade-duration': 0,
+      },
+    }); // No beforeId = add on top
+  }
+
+  /**
+   * Calculate appropriate grid spacing based on image dimensions
+   */
+  calculateGridSpacing(width, height) {
+    const maxDim = Math.max(width, height);
+    // Target roughly 10 major grid lines
+    const targetLines = 10;
+    const rawSpacing = maxDim / targetLines;
+
+    // Round to a nice number (1, 2, 5, 10, 20, 50, 100, 200, 500, etc.)
+    const magnitude = Math.pow(10, Math.floor(Math.log10(rawSpacing)));
+    const normalized = rawSpacing / magnitude;
+
+    let niceSpacing;
+    if (normalized <= 1) niceSpacing = magnitude;
+    else if (normalized <= 2) niceSpacing = 2 * magnitude;
+    else if (normalized <= 5) niceSpacing = 5 * magnitude;
+    else niceSpacing = 10 * magnitude;
+
+    return niceSpacing;
+  }
+
+  /**
+   * Remove the pixel grid basemap
+   */
+  removePixelGridBasemap() {
+    if (this.map.getLayer('pixel-grid')) {
+      this.map.removeLayer('pixel-grid');
+    }
+    if (this.map.getSource('pixel-grid-source')) {
+      this.map.removeSource('pixel-grid-source');
+    }
+    this.pixelGridCanvas = null;
   }
 
   isPixelCoordMode() {

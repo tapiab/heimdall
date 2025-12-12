@@ -9,9 +9,56 @@
   <body>
     <div id="app">
       <div id="map"></div>
+      <div id="loading-indicator">
+        <div class="spinner"></div>
+        <span>Loading...</span>
+      </div>
+      <div id="toast-container"></div>
       <div id="toolbar">
-        <button id="open-file" title="Open GeoTIFF (Ctrl+O)">Open File</button>
+        <div id="file-menu-container" class="menu-container">
+          <button id="file-menu-btn" class="menu-btn">File</button>
+          <div id="file-menu-dropdown" class="menu-dropdown">
+            <div class="menu-item" data-action="open-file">
+              <span>Open File...</span>
+              <kbd>Ctrl+O</kbd>
+            </div>
+            <div class="menu-divider"></div>
+            <div class="menu-item" data-action="save-project">
+              <span>Save Project...</span>
+              <kbd>Ctrl+S</kbd>
+            </div>
+            <div class="menu-item" data-action="load-project">
+              <span>Load Project...</span>
+              <kbd>Ctrl+Shift+O</kbd>
+            </div>
+            <div class="menu-divider"></div>
+            <div class="menu-item" data-action="export-png">
+              <span>Export as PNG...</span>
+              <kbd>E</kbd>
+            </div>
+            <div class="menu-item" data-action="export-highres">
+              <span>Export High-Res (2x)...</span>
+              <kbd>Ctrl+Shift+E</kbd>
+            </div>
+            <div class="menu-item" data-action="copy-clipboard">
+              <span>Copy to Clipboard</span>
+              <kbd>Ctrl+Shift+C</kbd>
+            </div>
+          </div>
+        </div>
         <button id="fit-bounds" title="Fit to layer extent (F)" disabled>Fit Bounds</button>
+        <button id="zoom-rect-btn" title="Zoom to rectangle (Z)">Zoom Rect</button>
+        <button id="measure-btn" title="Measure distance (M)">Measure</button>
+        <button id="inspect-btn" title="Inspect pixel values (I)">Inspect</button>
+        <button id="profile-btn" title="Elevation profile (P)">Profile</button>
+        <div id="annotate-container" class="menu-container">
+          <button id="annotate-btn" title="Add annotations (A)">Annotate</button>
+          <div id="annotation-dropdown" class="menu-dropdown annotation-dropdown">
+            <div class="menu-item" data-mode="marker">Marker</div>
+            <div class="menu-item" data-mode="line">Line</div>
+            <div class="menu-item" data-mode="polygon">Polygon</div>
+          </div>
+        </div>
         <button id="reset-rotation" title="Reset rotation (R)">Reset North</button>
         <button id="reset-view" title="Reset view (pitch & rotation)">Reset View</button>
         <button id="help-btn" title="Keyboard shortcuts (?)" onclick="document.dispatchEvent(new KeyboardEvent('keydown', {key: '?', shiftKey: true}))">?</button>
@@ -24,6 +71,7 @@
             <select id="basemap-select">
               <option value="osm">OSM</option>
               <option value="satellite">Satellite</option>
+              <option value="pixel">Pixel Grid</option>
               <option value="none">None</option>
             </select>
           </div>

@@ -6,8 +6,9 @@ mod gdal;
 
 use commands::app::get_version;
 use commands::raster::{
-    close_dataset, get_cross_layer_pixel_rgb_tile, get_cross_layer_rgb_tile, get_histogram,
-    get_pixel_tile, get_raster_stats, get_rgb_tile, get_tile, get_tile_stretched, open_raster,
+    close_dataset, get_cross_layer_pixel_rgb_tile, get_cross_layer_rgb_tile, get_elevation_profile,
+    get_elevation_profile_pixels, get_histogram, get_pixel_tile, get_raster_stats, get_rgb_tile,
+    get_tile, get_tile_stretched, open_raster, query_pixel_value, query_pixel_value_at_pixel,
 };
 use commands::vector::open_vector;
 use gdal::dataset_cache::DatasetCache;
@@ -16,6 +17,7 @@ fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_fs::init())
         .manage(DatasetCache::new(10))
         .invoke_handler(tauri::generate_handler![
             get_version,
@@ -29,7 +31,11 @@ fn main() {
             get_raster_stats,
             get_histogram,
             close_dataset,
-            open_vector
+            open_vector,
+            query_pixel_value,
+            query_pixel_value_at_pixel,
+            get_elevation_profile,
+            get_elevation_profile_pixels
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -25,27 +25,59 @@ Just as Heimdall watches over the realms, this application lets you observe and 
 - **RGB compositing** - Combine bands from single or multiple files
 - **Vector styling** - Color by field, adjust fill/stroke, view attribute table
 - **Basemaps** - OpenStreetMap, Satellite imagery, or none
-- **Non-georeferenced images** - View regular images with pixel coordinates
+- **3D Terrain** - Visualize elevation with adjustable exaggeration
+- **Non-georeferenced images** - View regular images with pixel coordinates and grid overlay
+- **Distance measurement** - Measure distances in meters/km (geographic) or pixels (non-geo images)
 - **Keyboard-driven** - Full keyboard shortcuts for power users
 
 ## Keyboard Shortcuts
 
+### File Operations
 | Key | Action |
 |-----|--------|
 | `Ctrl+O` | Open file(s) |
+| `Ctrl+S` | Save project |
+| `Ctrl+Shift+O` | Load project |
+| `E` | Export as PNG |
+| `Ctrl+Shift+E` | Export high-res (2x) |
+| `Ctrl+Shift+C` | Copy to clipboard |
+
+### Tools
+| Key | Action |
+|-----|--------|
+| `Z` | Zoom rectangle - draw a box to zoom into |
+| `M` | Measure distance |
+| `I` | Inspect pixel values |
+| `P` | Elevation profile |
+| `A` | Annotate (marker mode) |
+| `Enter` | Generate profile (when in profile mode) |
+
+### View Controls
+| Key | Action |
+|-----|--------|
 | `F` | Fit to extent |
 | `R` | Reset rotation |
-| `B` | Cycle basemap (OSM → Satellite → None) |
+| `B` | Cycle basemap (OSM → Satellite → Pixel Grid → None) |
+| `T` | Toggle 3D terrain |
+| `Ctrl+Drag` | Rotate map |
+| `Right-Drag` | Pitch/tilt (3D mode) |
+| `Scroll` | Zoom in/out |
+
+### Layer Management
+| Key | Action |
+|-----|--------|
 | `L` | Toggle layer panel |
 | `D` | Toggle display panel |
 | `V` | Toggle selected layer visibility |
-| `A` | Open attribute table (vector layers) |
+| `Shift+A` | Open attribute table (vector layers) |
 | `H` | Show histogram (raster layers) |
 | `Del` | Remove selected layer |
-| `Esc` | Close panels |
+
+### General
+| Key | Action |
+|-----|--------|
+| `Esc` | Close panels / cancel tool |
 | `?` | Show keyboard shortcuts |
-| `Ctrl+Drag` | Rotate map |
-| `Scroll` | Zoom in/out |
 
 ## Supported Formats
 
@@ -138,6 +170,9 @@ Tests are located in `src/lib/__tests__/` and cover:
 - Geospatial utility functions (bounds extraction, intersection)
 - Color expression builders (categorical and graduated)
 - File path utilities and format detection
+- Distance measurement (Haversine geodesic and pixel Euclidean)
+- Pixel grid basemap (grid spacing calculation, coordinate conversion)
+- Terrain functionality (enable/disable, exaggeration)
 
 ### Rust Tests
 
@@ -225,7 +260,7 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for technical details.
 
 ## License
 
-MIT
+Apache 2.0
 
 ## Acknowledgments
 

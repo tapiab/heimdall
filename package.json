@@ -18,6 +18,7 @@
   },
   "dependencies": {
     "@tauri-apps/plugin-dialog": "^2.4.2",
+    "@tauri-apps/plugin-fs": "^2.4.4",
     "maplibre-gl": "^4.7.1"
   },
   "devDependencies": {

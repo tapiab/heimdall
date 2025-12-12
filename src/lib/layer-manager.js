@@ -1,5 +1,6 @@
 import { invoke } from '@tauri-apps/api/core';
 import maplibregl from 'maplibre-gl';
+import { showToast, showError, showLoading, hideLoading } from './notifications.js';
 
 // Track registered protocols
 const registeredProtocols = new Set();
@@ -46,8 +47,10 @@ export class LayerManager {
       map.getCanvas().style.cursor = vectorFeature ? 'pointer' : '';
     });
 
-    // Show popup on click
+    // Show popup on click for vector features only
     map.on('click', (e) => {
+      // Don't interfere with other tools' click handlers
+      // Only handle vector feature clicks here
       const features = map.queryRenderedFeatures(e.point);
       const vectorFeature = features.find(f =>
         f.layer.id.startsWith('vector-fill-') ||
@@ -58,6 +61,7 @@ export class LayerManager {
       if (vectorFeature) {
         this.showFeaturePopup(vectorFeature, e.lngLat);
       } else if (this.popup) {
+        // Only remove our own popup (feature popup), not inspect tool popups
         this.popup.remove();
         this.popup = null;
       }
@@ -108,6 +112,8 @@ export class LayerManager {
   }
 
   async addRasterLayer(filePath) {
+    const fileName = filePath.split('/').pop().split('\\').pop();
+    showLoading(`Loading ${fileName}...`);
     try {
       // Open the raster in the backend
       const metadata = await invoke('open_raster', { path: filePath });
@@ -181,6 +187,8 @@ export class LayerManager {
         // Store the scale for coordinate display
         layerData.pixelScale = scale;
         layerData.pixelOffset = { x: halfWidth, y: clampedHalfHeight };
+        // Update layer bounds to use map coordinates (for inspect tool bounds checking)
+        layerData.bounds = mapBounds;
         // Set pixel coordinate mode with scale info
         this.mapManager.setPixelCoordMode(true, {
           width: metadata.width,
@@ -230,14 +238,20 @@ export class LayerManager {
         ]);
       }
 
+      showToast(`Loaded ${fileName}`, 'success', 2000);
       return metadata;
     } catch (error) {
       console.error('Failed to add raster layer:', error);
+      showError('Failed to load raster', error);
       throw error;
+    } finally {
+      hideLoading();
     }
   }
 
   async addVectorLayer(filePath) {
+    const fileName = filePath.split('/').pop().split('\\').pop();
+    showLoading(`Loading ${fileName}...`);
     try {
       // Open the vector in the backend
       const data = await invoke('open_vector', { path: filePath });
@@ -245,7 +259,6 @@ export class LayerManager {
       const geojson = data.geojson;
 
       console.log('Opened vector:', metadata);
-      console.log('GeoJSON:', JSON.stringify(geojson, null, 2));
 
       // Store layer info
       const layerData = {
@@ -404,10 +417,14 @@ export class LayerManager {
         [metadata.bounds[2], metadata.bounds[3]],
       ]);
 
+      showToast(`Loaded ${fileName} (${metadata.feature_count} features)`, 'success', 2000);
       return metadata;
     } catch (error) {
       console.error('Failed to add vector layer:', error);
+      showError('Failed to load vector', error);
       throw error;
+    } finally {
+      hideLoading();
     }
   }
 
@@ -619,6 +636,45 @@ export class LayerManager {
     this.selectedLayerId = id;
     this.updateLayerPanel();
     this.updateDynamicControls();
+  }
+
+  renameLayer(id, newName) {
+    const layer = this.layers.get(id);
+    if (!layer) return;
+
+    layer.displayName = newName;
+    this.updateLayerPanel();
+  }
+
+  startRenameLayer(id, nameElement, currentName) {
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.className = 'layer-name-input';
+    input.value = currentName;
+
+    const commitRename = () => {
+      const newName = input.value.trim();
+      if (newName && newName !== currentName) {
+        this.renameLayer(id, newName);
+      } else {
+        this.updateLayerPanel(); // Restore original
+      }
+    };
+
+    input.addEventListener('blur', commitRename);
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        commitRename();
+      } else if (e.key === 'Escape') {
+        e.preventDefault();
+        this.updateLayerPanel(); // Cancel
+      }
+    });
+
+    nameElement.replaceWith(input);
+    input.focus();
+    input.select();
   }
 
   toggleLayerVisibility(id) {
@@ -1257,15 +1313,22 @@ export class LayerManager {
       const name = document.createElement('span');
       name.className = 'layer-name';
       const fileName = layer.path.split('/').pop().split('\\').pop();
-      name.textContent = fileName;
+      const displayName = layer.displayName || fileName;
+      name.textContent = displayName;
       if (layer.type === 'vector') {
-        name.title = `${layer.path}\n${layer.feature_count} features, ${layer.geometry_type}`;
+        name.title = `${layer.path}\n${layer.feature_count} features, ${layer.geometry_type}\nDouble-click to rename`;
       } else if (layer.isComposition) {
-        name.title = `RGB Composition\nR: Band ${layer.rgbBands.r}, G: Band ${layer.rgbBands.g}, B: Band ${layer.rgbBands.b}\n${layer.width}x${layer.height}`;
+        name.title = `RGB Composition\nR: Band ${layer.rgbBands.r}, G: Band ${layer.rgbBands.g}, B: Band ${layer.rgbBands.b}\n${layer.width}x${layer.height}\nDouble-click to rename`;
         name.style.fontStyle = 'italic';
       } else {
-        name.title = `${layer.path}\n${layer.width}x${layer.height}, ${layer.bands} band(s)`;
+        name.title = `${layer.path}\n${layer.width}x${layer.height}, ${layer.bands} band(s)\nDouble-click to rename`;
       }
+
+      // Double-click to rename
+      name.addEventListener('dblclick', (e) => {
+        e.stopPropagation();
+        this.startRenameLayer(id, name, displayName);
+      });
 
       const removeBtn = document.createElement('button');
       removeBtn.className = 'layer-remove';
@@ -1301,6 +1364,58 @@ export class LayerManager {
 
       item.appendChild(headerRow);
       item.appendChild(opacityRow);
+
+      // Add band selector for multi-band rasters
+      if (layer.type === 'raster' && layer.bands > 1 && !layer.isComposition) {
+        const bandRow = document.createElement('div');
+        bandRow.className = 'layer-band-selector';
+
+        const bandLabel = document.createElement('span');
+        bandLabel.className = 'band-label';
+        bandLabel.textContent = 'Band';
+
+        const bandSelect = document.createElement('select');
+        bandSelect.className = 'band-select';
+
+        // Add grayscale band options
+        for (let i = 1; i <= layer.bands; i++) {
+          const option = document.createElement('option');
+          option.value = `band-${i}`;
+          option.textContent = `Band ${i}`;
+          if (layer.displayMode === 'grayscale' && layer.band === i) {
+            option.selected = true;
+          }
+          bandSelect.appendChild(option);
+        }
+
+        // Add RGB option if 3+ bands
+        if (layer.bands >= 3) {
+          const rgbOption = document.createElement('option');
+          rgbOption.value = 'rgb';
+          rgbOption.textContent = 'RGB';
+          if (layer.displayMode === 'rgb') {
+            rgbOption.selected = true;
+          }
+          bandSelect.appendChild(rgbOption);
+        }
+
+        bandSelect.addEventListener('change', (e) => {
+          e.stopPropagation();
+          const value = e.target.value;
+          if (value === 'rgb') {
+            this.setLayerDisplayMode(id, 'rgb');
+          } else {
+            const bandNum = parseInt(value.replace('band-', ''));
+            this.setLayerDisplayMode(id, 'grayscale');
+            this.setLayerBand(id, bandNum);
+          }
+        });
+
+        bandRow.appendChild(bandLabel);
+        bandRow.appendChild(bandSelect);
+        item.appendChild(bandRow);
+      }
+
       layerList.appendChild(item);
     });
 

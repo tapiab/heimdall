@@ -121,8 +121,8 @@ Build a focused, lightweight viewer using modern web technologies (Tauri + WebGL
 | **RGB compositing** | P0 | Medium | Custom shader, 3-band merge |
 | **Vector support** | P0 | Easy | OGR → GeoJSON → MapLibre |
 | **Version display** | P0 | Easy | ✅ IMPLEMENTED - Git tag version via build.rs, displayed in status bar and help modal |
-| **Pixel basemap** | P0 | Medium | Grid/checkerboard basemap for non-georeferenced data |
-| **Distance measurement** | P1 | Medium | Measure distance between two points in meters |
+| **Pixel basemap** | P0 | Medium | ✅ IMPLEMENTED - Grid basemap for non-georeferenced data |
+| **Distance measurement** | P1 | Medium | ✅ IMPLEMENTED - Haversine for geo, Euclidean for pixels |
 | **3D terrain draping** | P1 | Medium | ✅ IMPLEMENTED - AWS terrain tiles with sky layer |
 
 ### Future Enhancements (Post-MVP)
@@ -740,12 +740,12 @@ export class RasterLayer {
   - Show version in keyboard shortcuts help modal (? key)
 - [x] Version synced at build time via `git describe --tags --always --dirty`
 
-**6.2 Pixel Coordinate Basemap (3 days)**
-- [ ] Create pixel grid basemap layer
+**6.2 Pixel Coordinate Basemap (3 days)** ✅ IMPLEMENTED
+- [x] Create pixel grid basemap layer
   - Render a subtle grid pattern for non-georeferenced images
   - Show pixel coordinate axes
-  - Checkerboard or graph paper style background
-- [ ] Implement pixel basemap source
+  - Graph paper style background with transparent overlay
+- [x] Implement pixel basemap source
 ```javascript
   // src/lib/pixel-basemap.js
   export function createPixelBasemapSource(width, height) {
@@ -801,7 +801,7 @@ export class RasterLayer {
       return canvas;
   }
 ```
-- [ ] Update MapManager to switch basemaps based on data type
+- [x] Update MapManager to switch basemaps based on data type
 ```javascript
   // src/lib/map-manager.js
   setBasemap(type) {
@@ -826,21 +826,21 @@ export class RasterLayer {
       }
   }
 ```
-- [ ] Auto-switch to pixel basemap when loading non-georeferenced data
+- [x] Auto-switch to pixel basemap when loading non-georeferenced data
   - Detect `pixelCoordMode` activation
   - Automatically change basemap to 'pixel' type
   - Remember previous basemap to restore when switching back to geo data
-- [ ] Add UI controls for pixel basemap options
-  - Grid spacing selector (10, 50, 100, 500 pixels)
-  - Toggle grid labels
-  - Grid line style (solid, dashed, dots)
+- [x] Add UI controls for pixel basemap options
+  - Dynamic grid spacing based on image dimensions ("nice numbers")
+  - Grid labels at major intervals
+  - Semi-transparent overlay on top of image
 
-**6.3 Distance Measurement Tool (2 days)**
-- [ ] Implement measurement mode toggle
-  - Add "Measure" button to toolbar or keyboard shortcut (M key)
+**6.3 Distance Measurement Tool (2 days)** ✅ IMPLEMENTED
+- [x] Implement measurement mode toggle
+  - Add "Measure" button to toolbar and keyboard shortcut (M key)
   - Visual indicator when measurement mode is active
   - Cursor changes to crosshair in measurement mode
-- [ ] Implement two-point click interaction
+- [x] Implement two-point click interaction
 ```javascript
   // src/lib/measure-tool.js
   export class MeasureTool {
@@ -902,7 +902,7 @@ export class RasterLayer {
       }
   }
 ```
-- [ ] Implement geodesic distance calculation (Haversine formula)
+- [x] Implement geodesic distance calculation (Haversine formula)
 ```javascript
   // src/lib/geo-utils.js
   export function calculateDistance(point1, point2) {
@@ -929,11 +929,11 @@ export class RasterLayer {
       }
   }
 ```
-- [ ] Display measurement result
-  - Show distance in popup or overlay near the line
+- [x] Display measurement result
+  - Show distance in popup at midpoint of line
   - Format: meters for <1km, kilometers for >=1km
-  - Include both metric units
-- [ ] Draw measurement line on map
+  - Preview distance while moving mouse
+- [x] Draw measurement line on map
 ```javascript
   drawLine() {
       const geojson = {
@@ -961,14 +961,14 @@ export class RasterLayer {
       }
   }
 ```
-- [ ] Support pixel distance for non-georeferenced images
+- [x] Support pixel distance for non-georeferenced images
   - When in pixel coordinate mode, calculate Euclidean distance in pixels
-  - Display as "X pixels" instead of meters
-- [ ] Add keyboard shortcut (M) to toggle measurement mode
-- [ ] Add clear measurement button/shortcut (Esc to cancel)
+  - Display as "X.X px" instead of meters
+- [x] Add keyboard shortcut (M) to toggle measurement mode
+- [x] Add clear measurement button/shortcut (Esc to cancel)
 
-**6.4 3D Terrain Draping (2 days)**
-- [ ] Add terrain source using AWS free terrain tiles
+**6.4 3D Terrain Draping (2 days)** ✅ IMPLEMENTED
+- [x] Add terrain source using AWS free terrain tiles
 ```javascript
   // src/lib/map-manager.js
   initTerrain() {
@@ -1007,7 +1007,7 @@ export class RasterLayer {
       }
   }
 ```
-- [ ] Add sky layer for better 3D visualization
+- [x] Add sky layer for better 3D visualization
 ```javascript
   addSkyLayer() {
       if (!this.map.getLayer('sky')) {
@@ -1023,7 +1023,7 @@ export class RasterLayer {
       }
   }
 ```
-- [ ] Enable pitch control for 3D viewing
+- [x] Enable pitch control for 3D viewing
 ```javascript
   // Update map initialization
   this.map = new maplibregl.Map({
@@ -1033,7 +1033,7 @@ export class RasterLayer {
       pitchWithRotate: true  // Already enabled
   });
 ```
-- [ ] Add terrain controls to UI
+- [x] Add terrain controls to UI
   - Toggle button for 3D terrain (keyboard shortcut: T)
   - Exaggeration slider (0.5x to 5x)
   - Pitch angle display in status bar
@@ -1078,8 +1078,8 @@ export class RasterLayer {
       return container;
   }
 ```
-- [ ] Add keyboard shortcut (T) to toggle terrain
-- [ ] Update pitch display in status bar
+- [x] Add keyboard shortcut (T) to toggle terrain
+- [x] Update pitch display in status bar
 ```javascript
   // Add to setupEventListeners in map-manager.js
   this.map.on('pitch', () => {
@@ -1094,8 +1094,8 @@ export class RasterLayer {
       }
   }
 ```
-- [ ] Add reset view button (resets pitch, bearing, and zoom)
-- [ ] Disable terrain for non-georeferenced images
+- [x] Add reset view button (resets pitch, bearing, and zoom)
+- [x] Disable terrain for non-georeferenced images
   - Terrain only makes sense for geographic data
   - Hide terrain controls when in pixel coordinate mode
 
@@ -1617,11 +1617,11 @@ and implement open_raster()."
 - [ ] RGB compositing (3+ bands)
 - [ ] Vector overlay (Shapefile, GeoJSON)
 - [ ] Basemap integration (OSM, satellite)
-- [ ] Pixel basemap for non-georeferenced data
+- [x] Pixel basemap for non-georeferenced data
 - [x] Version display from git tag (status bar and help modal)
-- [ ] Distance measurement tool (meters/pixels)
+- [x] Distance measurement tool (meters/pixels)
 - [x] 3D terrain draping (AWS terrain tiles)
-- [ ] Keyboard shortcuts
+- [x] Keyboard shortcuts
 
 ### Code Quality
 - [ ] Comprehensive error handling
@@ -1700,6 +1700,8 @@ ogr2ogr -f GeoJSON output.json input.shp
 | 1.3 | 2025-11-28 | Added 3D terrain draping with AWS terrain tiles (Phase 6.4) |
 | 1.4 | 2025-11-28 | **Implemented** 3D terrain draping (Phase 6.4) with error handling, tests, and map.resize() fix |
 | 1.5 | 2025-11-28 | **Implemented** Version from git tag (Phase 6.1) - build.rs extracts version, displayed in status bar and help modal |
+| 1.6 | 2025-12-12 | **Implemented** Pixel basemap (Phase 6.2) - auto-showing grid basemap for non-geo images |
+| 1.7 | 2025-12-12 | **Implemented** Distance measurement tool (Phase 6.3) - Haversine for geo data, Euclidean for pixels |
 
 ---
 

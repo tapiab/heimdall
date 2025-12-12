@@ -1,5 +1,6 @@
 .PHONY: help dev build preview test test-run test-coverage check clean install \
-        tauri-dev tauri-build tauri-build-debug lint-rust fmt-rust cargo-check cargo-test
+        tauri-dev tauri-build tauri-build-debug lint-rust fmt-rust cargo-check cargo-test \
+        ci-install ci-lint-js ci-lint-rust ci-test-js ci-test-rust ci-build ci-build-target
 
 # Default target
 help:
@@ -28,6 +29,15 @@ help:
 	@echo "  cargo-test     Run cargo tests"
 	@echo "  lint-rust      Run clippy linter"
 	@echo "  fmt-rust       Check Rust formatting"
+	@echo ""
+	@echo "CI (used by GitLab CI):"
+	@echo "  ci-install     Install dependencies for CI"
+	@echo "  ci-lint-js     Run JS linting in CI"
+	@echo "  ci-lint-rust   Run Rust linting in CI"
+	@echo "  ci-test-js     Run JS tests in CI"
+	@echo "  ci-test-rust   Run Rust tests in CI"
+	@echo "  ci-build       Build Tauri app in CI"
+	@echo "  ci-build-target TARGET=<target>  Build for specific target"
 	@echo ""
 	@echo "Utilities:"
 	@echo "  install        Install npm dependencies"
@@ -87,3 +97,27 @@ clean:
 	rm -rf dist
 	rm -rf src-tauri/target
 	rm -rf node_modules/.vite
+
+# CI targets (used by GitLab CI)
+ci-install:
+	npm ci
+
+ci-lint-js:
+	npm run test:run
+
+ci-lint-rust:
+	cd src-tauri && cargo fmt --check
+	cd src-tauri && cargo clippy -- -D warnings
+
+ci-test-js:
+	npm run test:run
+
+ci-test-rust:
+	cd src-tauri && cargo test --verbose
+
+ci-build:
+	npm run tauri:build
+
+# Build for specific target (usage: make ci-build-target TARGET=aarch64-apple-darwin)
+ci-build-target:
+	npm run tauri:build -- --target $(TARGET)
