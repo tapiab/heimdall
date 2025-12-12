@@ -120,9 +120,10 @@ Build a focused, lightweight viewer using modern web technologies (Tauri + WebGL
 | **Dynamic adjustment** | P0 | Easy | WebGL fragment shader for min/max/gamma |
 | **RGB compositing** | P0 | Medium | Custom shader, 3-band merge |
 | **Vector support** | P0 | Easy | OGR → GeoJSON → MapLibre |
-| **Version display** | P0 | Easy | Synced version from git tag, shown in help/about |
+| **Version display** | P0 | Easy | ✅ IMPLEMENTED - Git tag version via build.rs, displayed in status bar and help modal |
 | **Pixel basemap** | P0 | Medium | Grid/checkerboard basemap for non-georeferenced data |
 | **Distance measurement** | P1 | Medium | Measure distance between two points in meters |
+| **3D terrain draping** | P1 | Medium | ✅ IMPLEMENTED - AWS terrain tiles with sky layer |
 
 ### Future Enhancements (Post-MVP)
 
@@ -132,9 +133,9 @@ Build a focused, lightweight viewer using modern web technologies (Tauri + WebGL
 - Area measurement tools
 - Export/screenshot
 - Annotation layers
-- 3D terrain draping
 - Time series animation
 - Plugin system
+- Local DEM support (load your own elevation data)
 
 ---
 
@@ -697,11 +698,11 @@ export class RasterLayer {
 
 #### Tasks
 
-**6.1 Version Management (2 days)**
-- [ ] Create single source of truth for version
+**6.1 Version Management (2 days)** ✅ IMPLEMENTED
+- [x] Create single source of truth for version
   - Use git tags as the canonical version source
   - Generate version at build time from `git describe --tags`
-- [ ] Implement Rust build script for version injection
+- [x] Implement Rust build script for version injection
 ```rust
   // src-tauri/build.rs
   fn main() {
@@ -726,7 +727,7 @@ export class RasterLayer {
       tauri_build::build();
   }
 ```
-- [ ] Add Tauri command to expose version
+- [x] Add Tauri command to expose version
 ```rust
   // src-tauri/src/commands/app.rs
   #[tauri::command]
@@ -734,13 +735,10 @@ export class RasterLayer {
       env!("HEIMDALL_VERSION").to_string()
   }
 ```
-- [ ] Display version in UI
-  - Add "About" menu item or help dialog
-  - Show version in window title or status bar
-  - Include version in `--help` output (CLI mode if applicable)
-- [ ] Sync version across config files
-  - Create npm script to update `package.json` and `tauri.conf.json` from git tag
-  - Or: Remove hardcoded versions and rely solely on git tag at build time
+- [x] Display version in UI
+  - Show version in status bar (`#version-display`)
+  - Show version in keyboard shortcuts help modal (? key)
+- [x] Version synced at build time via `git describe --tags --always --dirty`
 
 **6.2 Pixel Coordinate Basemap (3 days)**
 - [ ] Create pixel grid basemap layer
@@ -969,7 +967,139 @@ export class RasterLayer {
 - [ ] Add keyboard shortcut (M) to toggle measurement mode
 - [ ] Add clear measurement button/shortcut (Esc to cancel)
 
-**Deliverable**: Unified version management from git tags, proper pixel-coordinate basemap for non-georeferenced imagery, and distance measurement tool
+**6.4 3D Terrain Draping (2 days)**
+- [ ] Add terrain source using AWS free terrain tiles
+```javascript
+  // src/lib/map-manager.js
+  initTerrain() {
+      // AWS Terrain Tiles - free, no API key required
+      this.map.addSource('terrain-dem', {
+          type: 'raster-dem',
+          tiles: ['https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png'],
+          encoding: 'terrarium',
+          tileSize: 256,
+          maxzoom: 15
+      });
+  }
+
+  enableTerrain(exaggeration = 1.5) {
+      if (!this.map.getSource('terrain-dem')) {
+          this.initTerrain();
+      }
+      this.map.setTerrain({
+          source: 'terrain-dem',
+          exaggeration: exaggeration
+      });
+      this.terrainEnabled = true;
+  }
+
+  disableTerrain() {
+      this.map.setTerrain(null);
+      this.terrainEnabled = false;
+  }
+
+  setTerrainExaggeration(value) {
+      if (this.terrainEnabled) {
+          this.map.setTerrain({
+              source: 'terrain-dem',
+              exaggeration: value
+          });
+      }
+  }
+```
+- [ ] Add sky layer for better 3D visualization
+```javascript
+  addSkyLayer() {
+      if (!this.map.getLayer('sky')) {
+          this.map.addLayer({
+              id: 'sky',
+              type: 'sky',
+              paint: {
+                  'sky-type': 'atmosphere',
+                  'sky-atmosphere-sun': [0.0, 90.0],
+                  'sky-atmosphere-sun-intensity': 15
+              }
+          });
+      }
+  }
+```
+- [ ] Enable pitch control for 3D viewing
+```javascript
+  // Update map initialization
+  this.map = new maplibregl.Map({
+      // ... existing config
+      pitch: 0,
+      maxPitch: 85,
+      pitchWithRotate: true  // Already enabled
+  });
+```
+- [ ] Add terrain controls to UI
+  - Toggle button for 3D terrain (keyboard shortcut: T)
+  - Exaggeration slider (0.5x to 5x)
+  - Pitch angle display in status bar
+```javascript
+  // src/lib/ui.js - Add to controls panel
+  function createTerrainControls(mapManager) {
+      const container = document.createElement('div');
+      container.className = 'terrain-controls';
+      container.innerHTML = `
+          <div class="control-group">
+              <label>
+                  <input type="checkbox" id="terrain-toggle"> 3D Terrain
+              </label>
+          </div>
+          <div class="control-group" id="exaggeration-control" style="display:none">
+              <label>Exaggeration: <span id="exaggeration-value">1.5</span>x</label>
+              <input type="range" id="exaggeration-slider"
+                     min="0.5" max="5" step="0.1" value="1.5">
+          </div>
+      `;
+
+      const toggle = container.querySelector('#terrain-toggle');
+      const slider = container.querySelector('#exaggeration-slider');
+      const exaggerationControl = container.querySelector('#exaggeration-control');
+
+      toggle.addEventListener('change', (e) => {
+          if (e.target.checked) {
+              mapManager.enableTerrain();
+              exaggerationControl.style.display = 'block';
+          } else {
+              mapManager.disableTerrain();
+              exaggerationControl.style.display = 'none';
+          }
+      });
+
+      slider.addEventListener('input', (e) => {
+          const value = parseFloat(e.target.value);
+          container.querySelector('#exaggeration-value').textContent = value.toFixed(1);
+          mapManager.setTerrainExaggeration(value);
+      });
+
+      return container;
+  }
+```
+- [ ] Add keyboard shortcut (T) to toggle terrain
+- [ ] Update pitch display in status bar
+```javascript
+  // Add to setupEventListeners in map-manager.js
+  this.map.on('pitch', () => {
+      this.updatePitchDisplay();
+  });
+
+  updatePitchDisplay() {
+      const pitch = this.map.getPitch();
+      const pitchEl = document.getElementById('pitch-display');
+      if (pitchEl) {
+          pitchEl.textContent = `Pitch: ${pitch.toFixed(0)}°`;
+      }
+  }
+```
+- [ ] Add reset view button (resets pitch, bearing, and zoom)
+- [ ] Disable terrain for non-georeferenced images
+  - Terrain only makes sense for geographic data
+  - Hide terrain controls when in pixel coordinate mode
+
+**Deliverable**: Unified version management from git tags, proper pixel-coordinate basemap for non-georeferenced imagery, distance measurement tool, and 3D terrain visualization
 
 ---
 
@@ -1247,8 +1377,8 @@ impl DatasetCache {
 - Phase 3: 2 weeks (80 hours)
 - Phase 4: 1 week (40 hours)
 - Phase 5: 1 week (40 hours)
-- Phase 6: 1.5 weeks (60 hours)
-- **Total: 9.5 weeks (380 hours)**
+- Phase 6: 2 weeks (80 hours)
+- **Total: 10 weeks (400 hours)**
 
 **Part-time development (10hrs/week):**
 - Phase 1: 8 weeks
@@ -1256,8 +1386,8 @@ impl DatasetCache {
 - Phase 3: 8 weeks
 - Phase 4: 4 weeks
 - Phase 5: 4 weeks
-- Phase 6: 6 weeks
-- **Total: 38 weeks (~9 months)**
+- Phase 6: 8 weeks
+- **Total: 40 weeks (~10 months)**
 
 ### Resource Requirements
 
@@ -1488,8 +1618,9 @@ and implement open_raster()."
 - [ ] Vector overlay (Shapefile, GeoJSON)
 - [ ] Basemap integration (OSM, satellite)
 - [ ] Pixel basemap for non-georeferenced data
-- [ ] Version display from git tag (help/about)
+- [x] Version display from git tag (status bar and help modal)
 - [ ] Distance measurement tool (meters/pixels)
+- [x] 3D terrain draping (AWS terrain tiles)
 - [ ] Keyboard shortcuts
 
 ### Code Quality
@@ -1566,6 +1697,9 @@ ogr2ogr -f GeoJSON output.json input.shp
 | 1.0 | 2024-11-25 | Initial comprehensive plan |
 | 1.1 | 2025-11-27 | Added Phase 6: Version management (git tag sync) and pixel basemap for non-georeferenced data |
 | 1.2 | 2025-11-27 | Added distance measurement tool (Phase 6.3) |
+| 1.3 | 2025-11-28 | Added 3D terrain draping with AWS terrain tiles (Phase 6.4) |
+| 1.4 | 2025-11-28 | **Implemented** 3D terrain draping (Phase 6.4) with error handling, tests, and map.resize() fix |
+| 1.5 | 2025-11-28 | **Implemented** Version from git tag (Phase 6.1) - build.rs extracts version, displayed in status bar and help modal |
 
 ---
 

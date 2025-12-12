@@ -13,6 +13,7 @@
         <button id="open-file" title="Open GeoTIFF (Ctrl+O)">Open File</button>
         <button id="fit-bounds" title="Fit to layer extent (F)" disabled>Fit Bounds</button>
         <button id="reset-rotation" title="Reset rotation (R)">Reset North</button>
+        <button id="reset-view" title="Reset view (pitch & rotation)">Reset View</button>
         <button id="help-btn" title="Keyboard shortcuts (?)" onclick="document.dispatchEvent(new KeyboardEvent('keydown', {key: '?', shiftKey: true}))">?</button>
       </div>
       <div id="left-panel">
@@ -25,6 +26,18 @@
               <option value="satellite">Satellite</option>
               <option value="none">None</option>
             </select>
+          </div>
+          <div id="terrain-row" class="layer-item terrain-item">
+            <label class="terrain-toggle-label">
+              <input type="checkbox" id="terrain-toggle">
+              <span class="layer-name">3D Terrain</span>
+            </label>
+            <div id="terrain-exaggeration" class="terrain-controls hidden">
+              <label for="exaggeration-slider">
+                <span id="exaggeration-value">1.5</span>x
+              </label>
+              <input type="range" id="exaggeration-slider" min="0.5" max="5" step="0.1" value="1.5">
+            </div>
           </div>
           <div id="layer-list"></div>
         </div>
@@ -84,7 +97,9 @@
           <span id="compass-arrow">N</span>
           <span id="bearing">0.0°</span>
         </span>
+        <span id="pitch-display">Pitch: 0°</span>
         <span id="zoom-level">Zoom: --</span>
+        <span id="version-display">Heimdall</span>
       </div>
     </div>
     <script type="module" src="/src/main.js"></script>
