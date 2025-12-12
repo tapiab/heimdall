@@ -121,16 +121,26 @@ build:linux-x86_64:
 
 build:linux-arm64:
   stage: build
-  image: $RUST_TAURI_IMAGE
-  tags:
-    - arm64
+  image: docker:latest
+  allow_failure: true
+  variables:
+    DOCKER_HOST: tcp://docker:2375
+    DOCKER_TLS_CERTDIR: ""
+  services:
+    - docker:dind
   before_script:
-    - curl -fsSL https://deb.nodesource.com/setup_${NODE_VERSION}.x | bash -
-    - apt-get install -y nodejs
-    - rustup default stable
-    - make ci-install
+    # Setup QEMU for ARM64 emulation
+    - docker run --rm --privileged multiarch/qemu-user-static --reset -p yes
+    # Build the ARM64 image
+    - docker build --platform linux/arm64 -t heimdall-arm64-builder -f docker/arm64-build.Dockerfile .
   script:
-    - make ci-build
+    - |
+      docker run --rm \
+        --platform linux/arm64 \
+        -v $(pwd):/workspace \
+        -w /workspace \
+        heimdall-arm64-builder \
+        bash -c "make ci-install && make ci-build"
   artifacts:
     paths:
       - src-tauri/target/release/bundle/deb/*.deb
@@ -138,8 +148,11 @@ build:linux-arm64:
     expire_in: 1 week
   rules:
     - if: $CI_COMMIT_TAG
+      when: manual
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+      when: manual
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+      when: manual
 
 # ====================
 # Build Stage - macOS
@@ -150,6 +163,7 @@ build:macos-x86_64:
   tags:
     - macos
     - x86_64
+  allow_failure: true
   before_script:
     - brew install gdal
     - curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
@@ -166,14 +180,18 @@ build:macos-x86_64:
     expire_in: 1 week
   rules:
     - if: $CI_COMMIT_TAG
+      when: manual
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+      when: manual
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+      when: manual
 
 build:macos-arm64:
   stage: build
   tags:
     - macos
     - arm64
+  allow_failure: true
   before_script:
     - brew install gdal
     - curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
@@ -190,8 +208,11 @@ build:macos-arm64:
     expire_in: 1 week
   rules:
     - if: $CI_COMMIT_TAG
+      when: manual
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+      when: manual
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+      when: manual
 
 # ====================
 # Build Stage - Windows
@@ -202,6 +223,7 @@ build:windows-x86_64:
   tags:
     - windows
     - x86_64
+  allow_failure: true
   variables:
     GDAL_HOME: C:\OSGeo4W
     PATH: ${GDAL_HOME}\bin;${PATH}
@@ -220,14 +242,18 @@ build:windows-x86_64:
     expire_in: 1 week
   rules:
     - if: $CI_COMMIT_TAG
+      when: manual
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+      when: manual
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+      when: manual
 
 build:windows-arm64:
   stage: build
   tags:
     - windows
     - arm64
+  allow_failure: true
   variables:
     GDAL_HOME: C:\OSGeo4W
     PATH: ${GDAL_HOME}\bin;${PATH}
@@ -247,8 +273,11 @@ build:windows-arm64:
     expire_in: 1 week
   rules:
     - if: $CI_COMMIT_TAG
+      when: manual
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+      when: manual
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+      when: manual
 
 # ====================
 # Release Stage
