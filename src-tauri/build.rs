@@ -22,9 +22,7 @@ fn get_git_version() -> Option<String> {
         return None;
     }
 
-    let version = String::from_utf8_lossy(&output.stdout)
-        .trim()
-        .to_string();
+    let version = String::from_utf8_lossy(&output.stdout).trim().to_string();
 
     if version.is_empty() {
         return None;

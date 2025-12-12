@@ -713,8 +713,12 @@ pub async fn query_pixel_value(
 
         if !target_srs.is_geographic() {
             // Set axis mapping to traditional GIS order (lng, lat) not (lat, lng)
-            source_srs.set_axis_mapping_strategy(gdal::spatial_ref::AxisMappingStrategy::TraditionalGisOrder);
-            target_srs.set_axis_mapping_strategy(gdal::spatial_ref::AxisMappingStrategy::TraditionalGisOrder);
+            source_srs.set_axis_mapping_strategy(
+                gdal::spatial_ref::AxisMappingStrategy::TraditionalGisOrder,
+            );
+            target_srs.set_axis_mapping_strategy(
+                gdal::spatial_ref::AxisMappingStrategy::TraditionalGisOrder,
+            );
 
             let transform = CoordTransform::new(&source_srs, &target_srs)
                 .map_err(|e| format!("Failed to create coordinate transform: {}", e))?;
@@ -763,12 +767,7 @@ pub async fn query_pixel_value(
 
         // Read single pixel
         let buffer = band
-            .read_as::<f64>(
-                (pixel_x as isize, pixel_y as isize),
-                (1, 1),
-                (1, 1),
-                None,
-            )
+            .read_as::<f64>((pixel_x as isize, pixel_y as isize), (1, 1), (1, 1), None)
             .map_err(|e| format!("Failed to read pixel value: {}", e))?;
 
         let value = buffer.data()[0];
@@ -792,7 +791,7 @@ pub async fn query_pixel_value(
 /// Elevation profile point
 #[derive(Clone, Serialize, Deserialize)]
 pub struct ProfilePoint {
-    pub distance: f64, // Distance from start in meters
+    pub distance: f64,  // Distance from start in meters
     pub elevation: f64, // Elevation value
     pub lng: f64,
     pub lat: f64,
@@ -844,8 +843,10 @@ pub async fn get_elevation_profile(
         let mut target_srs = SpatialRef::from_wkt(&projection)
             .map_err(|e| format!("Failed to parse target SRS: {}", e))?;
         // Set axis mapping to traditional GIS order (lng, lat) not (lat, lng)
-        source_srs.set_axis_mapping_strategy(gdal::spatial_ref::AxisMappingStrategy::TraditionalGisOrder);
-        target_srs.set_axis_mapping_strategy(gdal::spatial_ref::AxisMappingStrategy::TraditionalGisOrder);
+        source_srs
+            .set_axis_mapping_strategy(gdal::spatial_ref::AxisMappingStrategy::TraditionalGisOrder);
+        target_srs
+            .set_axis_mapping_strategy(gdal::spatial_ref::AxisMappingStrategy::TraditionalGisOrder);
         Some(
             CoordTransform::new(&source_srs, &target_srs)
                 .map_err(|e| format!("Failed to create transform: {}", e))?,
@@ -863,7 +864,12 @@ pub async fn get_elevation_profile(
     let mut segment_lengths = Vec::new();
 
     for i in 1..coords.len() {
-        let d = haversine_distance(coords[i - 1][0], coords[i - 1][1], coords[i][0], coords[i][1]);
+        let d = haversine_distance(
+            coords[i - 1][0],
+            coords[i - 1][1],
+            coords[i][0],
+            coords[i][1],
+        );
         segment_lengths.push(d);
         total_distance += d;
     }
@@ -1162,12 +1168,7 @@ pub async fn query_pixel_value_at_pixel(
 
         // Read single pixel
         let buffer = band
-            .read_as::<f64>(
-                (pixel_x as isize, pixel_y as isize),
-                (1, 1),
-                (1, 1),
-                None,
-            )
+            .read_as::<f64>((pixel_x as isize, pixel_y as isize), (1, 1), (1, 1), None)
             .map_err(|e| format!("Failed to read pixel value: {}", e))?;
 
         let value = buffer.data()[0];
