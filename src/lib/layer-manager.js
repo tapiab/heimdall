@@ -145,6 +145,11 @@ export class LayerManager {
         // Auto-disable basemap for non-georeferenced images
         this.mapManager.setBasemap('none');
         document.getElementById('basemap-select').value = 'none';
+      } else {
+        // For geo-referenced images, exit pixel coordinate mode if we were in it
+        if (this.mapManager.isPixelCoordMode()) {
+          this.mapManager.setPixelCoordMode(false, null);
+        }
       }
 
       this.layers.set(metadata.id, layerData);
@@ -530,6 +535,12 @@ export class LayerManager {
     const layer = this.layers.get(id);
     if (!layer) return;
 
+    // Handle composition layers separately
+    if (layer.isComposition) {
+      this.refreshCompositionTiles(id);
+      return;
+    }
+
     const sourceId = `raster-source-${id}`;
     const layerId = `raster-layer-${id}`;
     const protocolName = `raster-${id}`;
@@ -567,7 +578,7 @@ export class LayerManager {
       }
       this.mapManager.removeSource(sourceId);
     } else {
-      // Remove raster layer
+      // Remove raster layer (including composition layers)
       const sourceId = `raster-source-${id}`;
       const layerId = `raster-layer-${id}`;
       const protocolName = `raster-${id}`;
@@ -581,11 +592,13 @@ export class LayerManager {
         registeredProtocols.delete(protocolName);
       }
 
-      // Close dataset in backend
-      try {
-        await invoke('close_dataset', { id });
-      } catch (error) {
-        console.error('Failed to close dataset:', error);
+      // Close dataset in backend (only for non-composition layers)
+      if (!layer.isComposition) {
+        try {
+          await invoke('close_dataset', { id });
+        } catch (error) {
+          console.error('Failed to close dataset:', error);
+        }
       }
     }
 
@@ -714,6 +727,382 @@ export class LayerManager {
 
     layer.rgbStretch[channel] = { min, max, gamma };
     this.refreshLayerTiles(id);
+  }
+
+  /**
+   * Create a new virtual RGB composition layer from the current RGB settings of a layer.
+   * This allows the RGB composition to be managed as a separate layer in the layer panel.
+   */
+  async createRgbCompositionLayer(sourceLayerId) {
+    const sourceLayer = this.layers.get(sourceLayerId);
+    if (!sourceLayer || sourceLayer.type !== 'raster') {
+      console.error('Source layer not found or not a raster');
+      return null;
+    }
+
+    // Generate a unique ID for the new composition layer
+    const compositionId = `rgb-comp-${Date.now()}`;
+    const sourceName = sourceLayer.path.split('/').pop().split('\\').pop();
+
+    // Create the composition layer data
+    const compositionLayer = {
+      id: compositionId,
+      path: `RGB Composite: ${sourceName}`,
+      type: 'raster',
+      isComposition: true,
+      sourceLayerId: sourceLayerId,
+      // Copy relevant metadata from source
+      width: sourceLayer.width,
+      height: sourceLayer.height,
+      bands: 3, // Virtual 3-band layer
+      bounds: sourceLayer.bounds,
+      is_georeferenced: sourceLayer.is_georeferenced,
+      band_stats: [
+        sourceLayer.band_stats[sourceLayer.rgbBands.r - 1] || { min: 0, max: 255 },
+        sourceLayer.band_stats[sourceLayer.rgbBands.g - 1] || { min: 0, max: 255 },
+        sourceLayer.band_stats[sourceLayer.rgbBands.b - 1] || { min: 0, max: 255 },
+      ],
+      visible: true,
+      opacity: 1.0,
+      displayMode: 'rgb',
+      // Store the RGB configuration
+      rgbBands: { ...sourceLayer.rgbBands },
+      rgbStretch: {
+        r: { ...sourceLayer.rgbStretch.r },
+        g: { ...sourceLayer.rgbStretch.g },
+        b: { ...sourceLayer.rgbStretch.b },
+      },
+      // For grayscale fallback
+      band: 1,
+      stretch: { min: 0, max: 255, gamma: 1.0 },
+      // Non-geo support
+      pixelScale: sourceLayer.pixelScale,
+      pixelOffset: sourceLayer.pixelOffset,
+    };
+
+    this.layers.set(compositionId, compositionLayer);
+    this.layerOrder.push(compositionId);
+
+    // Create protocol for the composition layer
+    const protocolName = `raster-${compositionId}`;
+    this.setupCompositionTileProtocol(protocolName, compositionId, compositionLayer);
+
+    // Add to map
+    const sourceId = `raster-source-${compositionId}`;
+    const layerId = `raster-layer-${compositionId}`;
+
+    let mapBounds = compositionLayer.bounds;
+    if (!compositionLayer.is_georeferenced && compositionLayer.pixelScale) {
+      const scale = compositionLayer.pixelScale;
+      const halfWidth = (compositionLayer.width * scale) / 2;
+      const halfHeight = (compositionLayer.height * scale) / 2;
+      const clampedHalfHeight = Math.min(halfHeight, 85);
+      mapBounds = [-halfWidth, -clampedHalfHeight, halfWidth, clampedHalfHeight];
+    }
+
+    this.mapManager.addSource(sourceId, {
+      type: 'raster',
+      tiles: [`${protocolName}://{z}/{x}/{y}`],
+      tileSize: 256,
+      bounds: mapBounds,
+      minzoom: 0,
+      maxzoom: 22,
+    });
+
+    this.mapManager.addLayer({
+      id: layerId,
+      type: 'raster',
+      source: sourceId,
+      paint: {
+        'raster-opacity': 1,
+      },
+    });
+
+    // Select the new composition layer
+    this.selectedLayerId = compositionId;
+
+    // Update UI
+    this.updateLayerPanel();
+    this.updateDynamicControls();
+
+    return compositionId;
+  }
+
+  /**
+   * Setup tile protocol for a composition layer.
+   * This routes tile requests to the source dataset with the composition's RGB settings.
+   */
+  setupCompositionTileProtocol(protocolName, compositionId, compositionLayer) {
+    // Remove existing protocol if any
+    if (registeredProtocols.has(protocolName)) {
+      maplibregl.removeProtocol(protocolName);
+    }
+
+    const self = this;
+
+    maplibregl.addProtocol(protocolName, async (params, abortController) => {
+      const url = params.url;
+      const match = url.match(/raster-[^:]+:\/\/(\d+)\/(\d+)\/(\d+)/);
+
+      if (!match) {
+        throw new Error('Invalid raster URL format');
+      }
+
+      const [, z, x, y] = match;
+      const layer = self.layers.get(compositionId);
+
+      if (!layer) {
+        throw new Error('Composition layer not found');
+      }
+
+      const sourceLayerId = layer.sourceLayerId;
+
+      try {
+        let tileData;
+
+        // Always use RGB mode for composition layers
+        tileData = await invoke('get_rgb_tile', {
+          id: sourceLayerId,
+          x: parseInt(x),
+          y: parseInt(y),
+          z: parseInt(z),
+          redBand: layer.rgbBands.r,
+          greenBand: layer.rgbBands.g,
+          blueBand: layer.rgbBands.b,
+          redMin: layer.rgbStretch.r.min,
+          redMax: layer.rgbStretch.r.max,
+          redGamma: layer.rgbStretch.r.gamma,
+          greenMin: layer.rgbStretch.g.min,
+          greenMax: layer.rgbStretch.g.max,
+          greenGamma: layer.rgbStretch.g.gamma,
+          blueMin: layer.rgbStretch.b.min,
+          blueMax: layer.rgbStretch.b.max,
+          blueGamma: layer.rgbStretch.b.gamma,
+        });
+
+        return { data: new Uint8Array(tileData) };
+      } catch (error) {
+        console.error('Failed to load composition tile:', error);
+        throw error;
+      }
+    });
+
+    registeredProtocols.add(protocolName);
+  }
+
+  /**
+   * Refresh tiles for a composition layer
+   */
+  refreshCompositionTiles(id) {
+    const layer = this.layers.get(id);
+    if (!layer || !layer.isComposition) return;
+
+    const sourceId = `raster-source-${id}`;
+    const protocolName = `raster-${id}`;
+
+    // Update the protocol with new settings
+    if (layer.isCrossLayerComposition) {
+      this.setupCrossLayerCompositionTileProtocol(protocolName, id, layer);
+    } else {
+      this.setupCompositionTileProtocol(protocolName, id, layer);
+    }
+
+    // Force map to reload tiles
+    const source = this.mapManager.map.getSource(sourceId);
+    if (source) {
+      const cacheBuster = Date.now();
+      source.setTiles([`${protocolName}://{z}/{x}/{y}?v=${cacheBuster}`]);
+    }
+  }
+
+  /**
+   * Create a new virtual cross-layer RGB composition layer.
+   * This combines bands from different source layers into a single RGB view.
+   */
+  async createCrossLayerRgbCompositionLayer(sourceLayerId) {
+    const sourceLayer = this.layers.get(sourceLayerId);
+    if (!sourceLayer || sourceLayer.type !== 'raster' || !sourceLayer.crossLayerRgb) {
+      console.error('Source layer not found or not configured for cross-layer RGB');
+      return null;
+    }
+
+    const { rLayerId, gLayerId, bLayerId, rBand, gBand, bBand } = sourceLayer.crossLayerRgb;
+    const rLayer = this.layers.get(rLayerId);
+    const gLayer = this.layers.get(gLayerId);
+    const bLayer = this.layers.get(bLayerId);
+
+    if (!rLayer || !gLayer || !bLayer) {
+      console.error('One or more source layers for cross-layer RGB not found');
+      return null;
+    }
+
+    // Generate a unique ID for the new composition layer
+    const compositionId = `cross-rgb-comp-${Date.now()}`;
+
+    // Get names for the composition
+    const rName = rLayer.path.split('/').pop().split('\\').pop();
+    const gName = gLayer.path.split('/').pop().split('\\').pop();
+    const bName = bLayer.path.split('/').pop().split('\\').pop();
+
+    // Create the composition layer data
+    const compositionLayer = {
+      id: compositionId,
+      path: `Cross RGB: ${rName}/${gName}/${bName}`,
+      type: 'raster',
+      isComposition: true,
+      isCrossLayerComposition: true,
+      // Store references to source layers
+      crossLayerRgb: {
+        rLayerId, rBand: rBand || 1,
+        gLayerId, gBand: gBand || 1,
+        bLayerId, bBand: bBand || 1,
+      },
+      // Use the red layer as reference for dimensions/bounds
+      width: rLayer.width,
+      height: rLayer.height,
+      bands: 3,
+      bounds: rLayer.bounds,
+      is_georeferenced: rLayer.is_georeferenced,
+      band_stats: [
+        rLayer.band_stats[0] || { min: 0, max: 255 },
+        gLayer.band_stats[0] || { min: 0, max: 255 },
+        bLayer.band_stats[0] || { min: 0, max: 255 },
+      ],
+      visible: true,
+      opacity: 1.0,
+      displayMode: 'crossLayerRgb',
+      // RGB stretch settings
+      rgbBands: { r: 1, g: 1, b: 1 },
+      rgbStretch: {
+        r: { min: rLayer.band_stats[0]?.min || 0, max: rLayer.band_stats[0]?.max || 255, gamma: 1.0 },
+        g: { min: gLayer.band_stats[0]?.min || 0, max: gLayer.band_stats[0]?.max || 255, gamma: 1.0 },
+        b: { min: bLayer.band_stats[0]?.min || 0, max: bLayer.band_stats[0]?.max || 255, gamma: 1.0 },
+      },
+      // For grayscale fallback
+      band: 1,
+      stretch: { min: 0, max: 255, gamma: 1.0 },
+      // Non-geo support
+      pixelScale: rLayer.pixelScale,
+      pixelOffset: rLayer.pixelOffset,
+    };
+
+    this.layers.set(compositionId, compositionLayer);
+    this.layerOrder.push(compositionId);
+
+    // Create protocol for the composition layer
+    const protocolName = `raster-${compositionId}`;
+    this.setupCrossLayerCompositionTileProtocol(protocolName, compositionId, compositionLayer);
+
+    // Add to map
+    const sourceId = `raster-source-${compositionId}`;
+    const layerId = `raster-layer-${compositionId}`;
+
+    let mapBounds = compositionLayer.bounds;
+    if (!compositionLayer.is_georeferenced && compositionLayer.pixelScale) {
+      const scale = compositionLayer.pixelScale;
+      const halfWidth = (compositionLayer.width * scale) / 2;
+      const halfHeight = (compositionLayer.height * scale) / 2;
+      const clampedHalfHeight = Math.min(halfHeight, 85);
+      mapBounds = [-halfWidth, -clampedHalfHeight, halfWidth, clampedHalfHeight];
+    }
+
+    this.mapManager.addSource(sourceId, {
+      type: 'raster',
+      tiles: [`${protocolName}://{z}/{x}/{y}`],
+      tileSize: 256,
+      bounds: mapBounds,
+      minzoom: 0,
+      maxzoom: 22,
+    });
+
+    this.mapManager.addLayer({
+      id: layerId,
+      type: 'raster',
+      source: sourceId,
+      paint: {
+        'raster-opacity': 1,
+      },
+    });
+
+    // Select the new composition layer
+    this.selectedLayerId = compositionId;
+
+    // Update UI
+    this.updateLayerPanel();
+    this.updateDynamicControls();
+
+    return compositionId;
+  }
+
+  /**
+   * Setup tile protocol for a cross-layer composition.
+   */
+  setupCrossLayerCompositionTileProtocol(protocolName, compositionId, compositionLayer) {
+    // Remove existing protocol if any
+    if (registeredProtocols.has(protocolName)) {
+      maplibregl.removeProtocol(protocolName);
+    }
+
+    const self = this;
+
+    maplibregl.addProtocol(protocolName, async (params, abortController) => {
+      const url = params.url;
+      const match = url.match(/raster-[^:]+:\/\/(\d+)\/(\d+)\/(\d+)/);
+
+      if (!match) {
+        throw new Error('Invalid raster URL format');
+      }
+
+      const [, z, x, y] = match;
+      const layer = self.layers.get(compositionId);
+
+      if (!layer || !layer.crossLayerRgb) {
+        throw new Error('Cross-layer composition not found');
+      }
+
+      const { rLayerId, gLayerId, bLayerId, rBand, gBand, bBand } = layer.crossLayerRgb;
+      const rLayer = self.layers.get(rLayerId);
+      const gLayer = self.layers.get(gLayerId);
+      const bLayer = self.layers.get(bLayerId);
+
+      if (!rLayer || !gLayer || !bLayer) {
+        throw new Error('Source layers for cross-layer RGB not found');
+      }
+
+      try {
+        // Use pixel version for non-georeferenced images
+        const usePixelVersion = !rLayer.is_georeferenced || !gLayer.is_georeferenced || !bLayer.is_georeferenced;
+        const command = usePixelVersion ? 'get_cross_layer_pixel_rgb_tile' : 'get_cross_layer_rgb_tile';
+
+        const tileData = await invoke(command, {
+          redId: rLayerId,
+          redBand: rBand || 1,
+          greenId: gLayerId,
+          greenBand: gBand || 1,
+          blueId: bLayerId,
+          blueBand: bBand || 1,
+          x: parseInt(x),
+          y: parseInt(y),
+          z: parseInt(z),
+          redMin: layer.rgbStretch?.r?.min ?? rLayer.band_stats[0]?.min ?? 0,
+          redMax: layer.rgbStretch?.r?.max ?? rLayer.band_stats[0]?.max ?? 255,
+          redGamma: layer.rgbStretch?.r?.gamma ?? 1.0,
+          greenMin: layer.rgbStretch?.g?.min ?? gLayer.band_stats[0]?.min ?? 0,
+          greenMax: layer.rgbStretch?.g?.max ?? gLayer.band_stats[0]?.max ?? 255,
+          greenGamma: layer.rgbStretch?.g?.gamma ?? 1.0,
+          blueMin: layer.rgbStretch?.b?.min ?? bLayer.band_stats[0]?.min ?? 0,
+          blueMax: layer.rgbStretch?.b?.max ?? bLayer.band_stats[0]?.max ?? 255,
+          blueGamma: layer.rgbStretch?.b?.gamma ?? 1.0,
+        });
+
+        return { data: new Uint8Array(tileData) };
+      } catch (error) {
+        console.error('Failed to load cross-layer composition tile:', error);
+        throw error;
+      }
+    });
+
+    registeredProtocols.add(protocolName);
   }
 
   setVectorStyle(id, property, value) {
@@ -871,6 +1260,9 @@ export class LayerManager {
       name.textContent = fileName;
       if (layer.type === 'vector') {
         name.title = `${layer.path}\n${layer.feature_count} features, ${layer.geometry_type}`;
+      } else if (layer.isComposition) {
+        name.title = `RGB Composition\nR: Band ${layer.rgbBands.r}, G: Band ${layer.rgbBands.g}, B: Band ${layer.rgbBands.b}\n${layer.width}x${layer.height}`;
+        name.style.fontStyle = 'italic';
       } else {
         name.title = `${layer.path}\n${layer.width}x${layer.height}, ${layer.bands} band(s)`;
       }
@@ -1120,6 +1512,7 @@ export class LayerManager {
           </div>
         </div>
         <button id="apply-cross-rgb" class="control-btn">Apply Cross-Layer RGB</button>
+        ${!layer.isComposition && layer.crossLayerRgb.rLayerId && layer.crossLayerRgb.gLayerId && layer.crossLayerRgb.bLayerId ? '<button id="create-cross-rgb-layer" class="control-btn" style="margin-top: 8px;">Create Cross-Layer RGB Layer</button>' : ''}
       `;
     } else {
       // RGB mode controls
@@ -1199,6 +1592,7 @@ export class LayerManager {
           </label>
         </div>
         <button id="auto-stretch-rgb" class="control-btn">Auto Stretch All</button>
+        ${!layer.isComposition ? '<button id="create-rgb-layer" class="control-btn" style="margin-top: 8px;">Create RGB Layer</button>' : ''}
       `;
     }
 
@@ -1290,9 +1684,19 @@ export class LayerManager {
               bLayerId, bBand: 1,
             };
             this.refreshLayerTiles(this.selectedLayerId);
+            // Refresh UI to show the create button now that layers are selected
+            this.updateDynamicControls();
           } else {
             alert('Please select a layer for each RGB channel');
           }
+        });
+      }
+
+      // Create Cross-Layer RGB Layer button
+      const createCrossRgbLayerBtn = document.getElementById('create-cross-rgb-layer');
+      if (createCrossRgbLayerBtn) {
+        createCrossRgbLayerBtn.addEventListener('click', () => {
+          this.createCrossLayerRgbCompositionLayer(this.selectedLayerId);
         });
       }
     } else {
@@ -1366,6 +1770,14 @@ export class LayerManager {
           stretchControls.forEach(ctrl => {
             ctrl.classList.toggle('hidden', !e.target.checked);
           });
+        });
+      }
+
+      // Create RGB Layer button
+      const createRgbLayerBtn = document.getElementById('create-rgb-layer');
+      if (createRgbLayerBtn) {
+        createRgbLayerBtn.addEventListener('click', () => {
+          this.createRgbCompositionLayer(this.selectedLayerId);
         });
       }
     }
