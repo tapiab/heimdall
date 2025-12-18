@@ -1,16 +1,30 @@
 import { invoke } from '@tauri-apps/api/core';
 import maplibregl from 'maplibre-gl';
 import { showToast, showError, showLoading, hideLoading } from './notifications.js';
+import { LRUCache } from './lru-cache.js';
+import { logger } from './logger.js';
 
 // Track registered protocols
 const registeredProtocols = new Set();
 
+// Module-level logger for LayerManager
+const log = logger.child('LayerManager');
+
+/**
+ * LayerManager handles raster and vector layer management for the map.
+ * Provides methods for loading, displaying, styling, and removing layers,
+ * as well as managing layer ordering and visibility.
+ */
 export class LayerManager {
+  /**
+   * Create a new LayerManager instance
+   * @param {MapManager} mapManager - The MapManager instance to use for map operations
+   */
   constructor(mapManager) {
     this.mapManager = mapManager;
     this.layers = new Map(); // id -> layer metadata
     this.layerOrder = []; // Array of layer IDs in display order (bottom to top)
-    this.tileCache = new Map(); // tile key -> image data URL
+    this.tileCache = new LRUCache(500); // LRU cache for tiles (max 500 tiles)
     this.draggedItem = null;
     this.selectedLayerId = null; // Currently selected layer for controls
     this.popup = null; // Feature info popup
@@ -18,15 +32,16 @@ export class LayerManager {
   }
 
   setupFeatureInteraction() {
-    const map = this.mapManager.map;
+    const { map } = this.mapManager;
 
     // Change cursor to pointer when hovering over vector features
-    map.on('mouseenter', (e) => {
+    map.on('mouseenter', e => {
       const features = map.queryRenderedFeatures(e.point);
-      const vectorFeature = features.find(f =>
-        f.layer.id.startsWith('vector-fill-') ||
-        f.layer.id.startsWith('vector-line-') ||
-        f.layer.id.startsWith('vector-circle-')
+      const vectorFeature = features.find(
+        f =>
+          f.layer.id.startsWith('vector-fill-') ||
+          f.layer.id.startsWith('vector-line-') ||
+          f.layer.id.startsWith('vector-circle-')
       );
       if (vectorFeature) {
         map.getCanvas().style.cursor = 'pointer';
@@ -37,25 +52,27 @@ export class LayerManager {
       map.getCanvas().style.cursor = '';
     });
 
-    map.on('mousemove', (e) => {
+    map.on('mousemove', e => {
       const features = map.queryRenderedFeatures(e.point);
-      const vectorFeature = features.find(f =>
-        f.layer.id.startsWith('vector-fill-') ||
-        f.layer.id.startsWith('vector-line-') ||
-        f.layer.id.startsWith('vector-circle-')
+      const vectorFeature = features.find(
+        f =>
+          f.layer.id.startsWith('vector-fill-') ||
+          f.layer.id.startsWith('vector-line-') ||
+          f.layer.id.startsWith('vector-circle-')
       );
       map.getCanvas().style.cursor = vectorFeature ? 'pointer' : '';
     });
 
     // Show popup on click for vector features only
-    map.on('click', (e) => {
+    map.on('click', e => {
       // Don't interfere with other tools' click handlers
       // Only handle vector feature clicks here
       const features = map.queryRenderedFeatures(e.point);
-      const vectorFeature = features.find(f =>
-        f.layer.id.startsWith('vector-fill-') ||
-        f.layer.id.startsWith('vector-line-') ||
-        f.layer.id.startsWith('vector-circle-')
+      const vectorFeature = features.find(
+        f =>
+          f.layer.id.startsWith('vector-fill-') ||
+          f.layer.id.startsWith('vector-line-') ||
+          f.layer.id.startsWith('vector-circle-')
       );
 
       if (vectorFeature) {
@@ -90,8 +107,12 @@ export class LayerManager {
     } else {
       for (const key of keys) {
         const value = properties[key];
-        const displayValue = value === null || value === undefined ? '<em>null</em>' :
-          typeof value === 'object' ? JSON.stringify(value) : String(value);
+        const displayValue =
+          value === null || value === undefined
+            ? '<em>null</em>'
+            : typeof value === 'object'
+              ? JSON.stringify(value)
+              : String(value);
         html += `<div class="feature-popup-row">`;
         html += `<span class="feature-popup-key">${key}</span>`;
         html += `<span class="feature-popup-value">${displayValue}</span>`;
@@ -111,13 +132,19 @@ export class LayerManager {
       .addTo(this.mapManager.map);
   }
 
+  /**
+   * Add a raster layer from a file path
+   * @param {string} filePath - Path to the raster file (GeoTIFF, etc.)
+   * @returns {Promise<Object>} Layer metadata from the backend
+   * @throws {Error} If the file cannot be loaded
+   */
   async addRasterLayer(filePath) {
     const fileName = filePath.split('/').pop().split('\\').pop();
     showLoading(`Loading ${fileName}...`);
     try {
       // Open the raster in the backend
       const metadata = await invoke('open_raster', { path: filePath });
-      console.log('Opened raster:', metadata);
+      log.debug('Opened raster', { id: metadata.id, fileName, bands: metadata.bands });
 
       // Get stats for first band (default)
       const defaultBandStats = metadata.band_stats[0] || { min: 0, max: 255 };
@@ -140,9 +167,21 @@ export class LayerManager {
         // RGB settings
         rgbBands: { r: 1, g: 2, b: 3 },
         rgbStretch: {
-          r: { min: metadata.band_stats[0]?.min || 0, max: metadata.band_stats[0]?.max || 255, gamma: 1.0 },
-          g: { min: metadata.band_stats[1]?.min || 0, max: metadata.band_stats[1]?.max || 255, gamma: 1.0 },
-          b: { min: metadata.band_stats[2]?.min || 0, max: metadata.band_stats[2]?.max || 255, gamma: 1.0 },
+          r: {
+            min: metadata.band_stats[0]?.min || 0,
+            max: metadata.band_stats[0]?.max || 255,
+            gamma: 1.0,
+          },
+          g: {
+            min: metadata.band_stats[1]?.min || 0,
+            max: metadata.band_stats[1]?.max || 255,
+            gamma: 1.0,
+          },
+          b: {
+            min: metadata.band_stats[2]?.min || 0,
+            max: metadata.band_stats[2]?.max || 255,
+            gamma: 1.0,
+          },
         },
       };
 
@@ -193,7 +232,7 @@ export class LayerManager {
         this.mapManager.setPixelCoordMode(true, {
           width: metadata.width,
           height: metadata.height,
-          scale: scale,
+          scale,
           offsetX: halfWidth,
           offsetY: clampedHalfHeight,
         });
@@ -241,7 +280,7 @@ export class LayerManager {
       showToast(`Loaded ${fileName}`, 'success', 2000);
       return metadata;
     } catch (error) {
-      console.error('Failed to add raster layer:', error);
+      log.error('Failed to add raster layer', error);
       showError('Failed to load raster', error);
       throw error;
     } finally {
@@ -249,16 +288,22 @@ export class LayerManager {
     }
   }
 
+  /**
+   * Add a vector layer from a file path
+   * @param {string} filePath - Path to the vector file (GeoJSON, Shapefile, GeoPackage, etc.)
+   * @returns {Promise<Object>} Layer metadata from the backend
+   * @throws {Error} If the file cannot be loaded
+   */
   async addVectorLayer(filePath) {
     const fileName = filePath.split('/').pop().split('\\').pop();
     showLoading(`Loading ${fileName}...`);
     try {
       // Open the vector in the backend
       const data = await invoke('open_vector', { path: filePath });
-      const metadata = data.metadata;
-      const geojson = data.geojson;
+      const { metadata } = data;
+      const { geojson } = data;
 
-      console.log('Opened vector:', metadata);
+      log.debug('Opened vector', { id: metadata.id, fileName, features: metadata.feature_count });
 
       // Store layer info
       const layerData = {
@@ -266,7 +311,7 @@ export class LayerManager {
         visible: true,
         opacity: 1.0,
         type: 'vector',
-        geojson: geojson,
+        geojson,
         // Styling
         style: {
           fillColor: '#ff0000',
@@ -420,7 +465,7 @@ export class LayerManager {
       showToast(`Loaded ${fileName} (${metadata.feature_count} features)`, 'success', 2000);
       return metadata;
     } catch (error) {
-      console.error('Failed to add vector layer:', error);
+      log.error('Failed to add vector layer', error);
       showError('Failed to load vector', error);
       throw error;
     } finally {
@@ -428,7 +473,7 @@ export class LayerManager {
     }
   }
 
-  setupTileProtocol(protocolName, datasetId, layerData) {
+  setupTileProtocol(protocolName, datasetId, _layerData) {
     // Remove existing protocol if any
     if (registeredProtocols.has(protocolName)) {
       maplibregl.removeProtocol(protocolName);
@@ -436,8 +481,8 @@ export class LayerManager {
 
     const self = this;
 
-    maplibregl.addProtocol(protocolName, async (params, abortController) => {
-      const url = params.url;
+    maplibregl.addProtocol(protocolName, async (params, _abortController) => {
+      const { url } = params;
       const match = url.match(/raster-[^:]+:\/\/(\d+)\/(\d+)\/(\d+)/);
 
       if (!match) {
@@ -463,8 +508,11 @@ export class LayerManager {
 
           if (rLayer && gLayer && bLayer) {
             // Use pixel version for non-georeferenced images
-            const usePixelVersion = !rLayer.is_georeferenced || !gLayer.is_georeferenced || !bLayer.is_georeferenced;
-            const command = usePixelVersion ? 'get_cross_layer_pixel_rgb_tile' : 'get_cross_layer_rgb_tile';
+            const usePixelVersion =
+              !rLayer.is_georeferenced || !gLayer.is_georeferenced || !bLayer.is_georeferenced;
+            const command = usePixelVersion
+              ? 'get_cross_layer_pixel_rgb_tile'
+              : 'get_cross_layer_rgb_tile';
 
             tileData = await invoke(command, {
               redId: cross.rLayerId,
@@ -473,9 +521,9 @@ export class LayerManager {
               greenBand: cross.gBand,
               blueId: cross.bLayerId,
               blueBand: cross.bBand,
-              x: parseInt(x),
-              y: parseInt(y),
-              z: parseInt(z),
+              x: parseInt(x, 10),
+              y: parseInt(y, 10),
+              z: parseInt(z, 10),
               redMin: rLayer.band_stats[0]?.min || 0,
               redMax: rLayer.band_stats[0]?.max || 255,
               redGamma: 1.0,
@@ -494,9 +542,9 @@ export class LayerManager {
           // RGB mode
           tileData = await invoke('get_rgb_tile', {
             id: datasetId,
-            x: parseInt(x),
-            y: parseInt(y),
-            z: parseInt(z),
+            x: parseInt(x, 10),
+            y: parseInt(y, 10),
+            z: parseInt(z, 10),
             redBand: layer.rgbBands.r,
             greenBand: layer.rgbBands.g,
             blueBand: layer.rgbBands.b,
@@ -516,9 +564,9 @@ export class LayerManager {
           if (!layer.is_georeferenced) {
             tileData = await invoke('get_pixel_tile', {
               id: datasetId,
-              x: parseInt(x),
-              y: parseInt(y),
-              z: parseInt(z),
+              x: parseInt(x, 10),
+              y: parseInt(y, 10),
+              z: parseInt(z, 10),
               band: layer.band,
               min: layer.stretch.min,
               max: layer.stretch.max,
@@ -527,9 +575,9 @@ export class LayerManager {
           } else {
             tileData = await invoke('get_tile_stretched', {
               id: datasetId,
-              x: parseInt(x),
-              y: parseInt(y),
-              z: parseInt(z),
+              x: parseInt(x, 10),
+              y: parseInt(y, 10),
+              z: parseInt(z, 10),
               band: layer.band,
               min: layer.stretch.min,
               max: layer.stretch.max,
@@ -540,7 +588,7 @@ export class LayerManager {
 
         return { data: new Uint8Array(tileData) };
       } catch (error) {
-        console.error('Failed to load tile:', error);
+        log.error('Failed to load tile', error);
         throw error;
       }
     });
@@ -559,7 +607,6 @@ export class LayerManager {
     }
 
     const sourceId = `raster-source-${id}`;
-    const layerId = `raster-layer-${id}`;
     const protocolName = `raster-${id}`;
 
     // Update the protocol with new settings
@@ -581,15 +628,11 @@ export class LayerManager {
     if (layer.type === 'vector') {
       // Remove vector layers
       const sourceId = `vector-source-${id}`;
-      const possibleLayerIds = [
-        `vector-fill-${id}`,
-        `vector-line-${id}`,
-        `vector-circle-${id}`,
-      ];
+      const possibleLayerIds = [`vector-fill-${id}`, `vector-line-${id}`, `vector-circle-${id}`];
       for (const layerId of possibleLayerIds) {
         try {
           this.mapManager.removeLayer(layerId);
-        } catch (e) {
+        } catch (_e) {
           // Layer might not exist
         }
       }
@@ -614,7 +657,7 @@ export class LayerManager {
         try {
           await invoke('close_dataset', { id });
         } catch (error) {
-          console.error('Failed to close dataset:', error);
+          log.error('Failed to close dataset', error);
         }
       }
     }
@@ -625,7 +668,8 @@ export class LayerManager {
 
     // Update selection
     if (this.selectedLayerId === id) {
-      this.selectedLayerId = this.layerOrder.length > 0 ? this.layerOrder[this.layerOrder.length - 1] : null;
+      this.selectedLayerId =
+        this.layerOrder.length > 0 ? this.layerOrder[this.layerOrder.length - 1] : null;
     }
 
     this.updateLayerPanel();
@@ -662,7 +706,7 @@ export class LayerManager {
     };
 
     input.addEventListener('blur', commitRename);
-    input.addEventListener('keydown', (e) => {
+    input.addEventListener('keydown', e => {
       if (e.key === 'Enter') {
         e.preventDefault();
         commitRename();
@@ -684,15 +728,11 @@ export class LayerManager {
     layer.visible = !layer.visible;
 
     if (layer.type === 'vector') {
-      const layerIds = [
-        `vector-fill-${id}`,
-        `vector-line-${id}`,
-        `vector-circle-${id}`,
-      ];
+      const layerIds = [`vector-fill-${id}`, `vector-line-${id}`, `vector-circle-${id}`];
       for (const layerId of layerIds) {
         try {
           this.mapManager.setLayerVisibility(layerId, layer.visible);
-        } catch (e) {
+        } catch (_e) {
           // Layer might not exist
         }
       }
@@ -712,14 +752,24 @@ export class LayerManager {
     if (layer.type === 'vector') {
       // For vector layers, adjust fill and line opacity
       try {
-        this.mapManager.map.setPaintProperty(`vector-fill-${id}`, 'fill-opacity', layer.style.fillOpacity * opacity);
-      } catch (e) {}
+        this.mapManager.map.setPaintProperty(
+          `vector-fill-${id}`,
+          'fill-opacity',
+          layer.style.fillOpacity * opacity
+        );
+      } catch (_e) {
+        /* Layer might not exist */
+      }
       try {
         this.mapManager.map.setPaintProperty(`vector-line-${id}`, 'line-opacity', opacity);
-      } catch (e) {}
+      } catch (_e) {
+        /* Layer might not exist */
+      }
       try {
         this.mapManager.map.setPaintProperty(`vector-circle-${id}`, 'circle-opacity', opacity);
-      } catch (e) {}
+      } catch (_e) {
+        /* Layer might not exist */
+      }
     } else {
       const layerId = `raster-layer-${id}`;
       this.mapManager.setLayerOpacity(layerId, opacity);
@@ -792,7 +842,7 @@ export class LayerManager {
   async createRgbCompositionLayer(sourceLayerId) {
     const sourceLayer = this.layers.get(sourceLayerId);
     if (!sourceLayer || sourceLayer.type !== 'raster') {
-      console.error('Source layer not found or not a raster');
+      log.error('Source layer not found or not a raster');
       return null;
     }
 
@@ -806,7 +856,7 @@ export class LayerManager {
       path: `RGB Composite: ${sourceName}`,
       type: 'raster',
       isComposition: true,
-      sourceLayerId: sourceLayerId,
+      sourceLayerId,
       // Copy relevant metadata from source
       width: sourceLayer.width,
       height: sourceLayer.height,
@@ -888,7 +938,7 @@ export class LayerManager {
    * Setup tile protocol for a composition layer.
    * This routes tile requests to the source dataset with the composition's RGB settings.
    */
-  setupCompositionTileProtocol(protocolName, compositionId, compositionLayer) {
+  setupCompositionTileProtocol(protocolName, compositionId, _compositionLayer) {
     // Remove existing protocol if any
     if (registeredProtocols.has(protocolName)) {
       maplibregl.removeProtocol(protocolName);
@@ -896,8 +946,8 @@ export class LayerManager {
 
     const self = this;
 
-    maplibregl.addProtocol(protocolName, async (params, abortController) => {
-      const url = params.url;
+    maplibregl.addProtocol(protocolName, async (params, _abortController) => {
+      const { url } = params;
       const match = url.match(/raster-[^:]+:\/\/(\d+)\/(\d+)\/(\d+)/);
 
       if (!match) {
@@ -911,17 +961,15 @@ export class LayerManager {
         throw new Error('Composition layer not found');
       }
 
-      const sourceLayerId = layer.sourceLayerId;
+      const { sourceLayerId } = layer;
 
       try {
-        let tileData;
-
         // Always use RGB mode for composition layers
-        tileData = await invoke('get_rgb_tile', {
+        const tileData = await invoke('get_rgb_tile', {
           id: sourceLayerId,
-          x: parseInt(x),
-          y: parseInt(y),
-          z: parseInt(z),
+          x: parseInt(x, 10),
+          y: parseInt(y, 10),
+          z: parseInt(z, 10),
           redBand: layer.rgbBands.r,
           greenBand: layer.rgbBands.g,
           blueBand: layer.rgbBands.b,
@@ -938,7 +986,7 @@ export class LayerManager {
 
         return { data: new Uint8Array(tileData) };
       } catch (error) {
-        console.error('Failed to load composition tile:', error);
+        log.error('Failed to load composition tile', error);
         throw error;
       }
     });
@@ -978,7 +1026,7 @@ export class LayerManager {
   async createCrossLayerRgbCompositionLayer(sourceLayerId) {
     const sourceLayer = this.layers.get(sourceLayerId);
     if (!sourceLayer || sourceLayer.type !== 'raster' || !sourceLayer.crossLayerRgb) {
-      console.error('Source layer not found or not configured for cross-layer RGB');
+      log.error('Source layer not found or not configured for cross-layer RGB');
       return null;
     }
 
@@ -988,7 +1036,7 @@ export class LayerManager {
     const bLayer = this.layers.get(bLayerId);
 
     if (!rLayer || !gLayer || !bLayer) {
-      console.error('One or more source layers for cross-layer RGB not found');
+      log.error('One or more source layers for cross-layer RGB not found');
       return null;
     }
 
@@ -1009,9 +1057,12 @@ export class LayerManager {
       isCrossLayerComposition: true,
       // Store references to source layers
       crossLayerRgb: {
-        rLayerId, rBand: rBand || 1,
-        gLayerId, gBand: gBand || 1,
-        bLayerId, bBand: bBand || 1,
+        rLayerId,
+        rBand: rBand || 1,
+        gLayerId,
+        gBand: gBand || 1,
+        bLayerId,
+        bBand: bBand || 1,
       },
       // Use the red layer as reference for dimensions/bounds
       width: rLayer.width,
@@ -1030,9 +1081,21 @@ export class LayerManager {
       // RGB stretch settings
       rgbBands: { r: 1, g: 1, b: 1 },
       rgbStretch: {
-        r: { min: rLayer.band_stats[0]?.min || 0, max: rLayer.band_stats[0]?.max || 255, gamma: 1.0 },
-        g: { min: gLayer.band_stats[0]?.min || 0, max: gLayer.band_stats[0]?.max || 255, gamma: 1.0 },
-        b: { min: bLayer.band_stats[0]?.min || 0, max: bLayer.band_stats[0]?.max || 255, gamma: 1.0 },
+        r: {
+          min: rLayer.band_stats[0]?.min || 0,
+          max: rLayer.band_stats[0]?.max || 255,
+          gamma: 1.0,
+        },
+        g: {
+          min: gLayer.band_stats[0]?.min || 0,
+          max: gLayer.band_stats[0]?.max || 255,
+          gamma: 1.0,
+        },
+        b: {
+          min: bLayer.band_stats[0]?.min || 0,
+          max: bLayer.band_stats[0]?.max || 255,
+          gamma: 1.0,
+        },
       },
       // For grayscale fallback
       band: 1,
@@ -1093,7 +1156,7 @@ export class LayerManager {
   /**
    * Setup tile protocol for a cross-layer composition.
    */
-  setupCrossLayerCompositionTileProtocol(protocolName, compositionId, compositionLayer) {
+  setupCrossLayerCompositionTileProtocol(protocolName, compositionId, _compositionLayer) {
     // Remove existing protocol if any
     if (registeredProtocols.has(protocolName)) {
       maplibregl.removeProtocol(protocolName);
@@ -1101,8 +1164,8 @@ export class LayerManager {
 
     const self = this;
 
-    maplibregl.addProtocol(protocolName, async (params, abortController) => {
-      const url = params.url;
+    maplibregl.addProtocol(protocolName, async (params, _abortController) => {
+      const { url } = params;
       const match = url.match(/raster-[^:]+:\/\/(\d+)\/(\d+)\/(\d+)/);
 
       if (!match) {
@@ -1127,8 +1190,11 @@ export class LayerManager {
 
       try {
         // Use pixel version for non-georeferenced images
-        const usePixelVersion = !rLayer.is_georeferenced || !gLayer.is_georeferenced || !bLayer.is_georeferenced;
-        const command = usePixelVersion ? 'get_cross_layer_pixel_rgb_tile' : 'get_cross_layer_rgb_tile';
+        const usePixelVersion =
+          !rLayer.is_georeferenced || !gLayer.is_georeferenced || !bLayer.is_georeferenced;
+        const command = usePixelVersion
+          ? 'get_cross_layer_pixel_rgb_tile'
+          : 'get_cross_layer_rgb_tile';
 
         const tileData = await invoke(command, {
           redId: rLayerId,
@@ -1137,9 +1203,9 @@ export class LayerManager {
           greenBand: gBand || 1,
           blueId: bLayerId,
           blueBand: bBand || 1,
-          x: parseInt(x),
-          y: parseInt(y),
-          z: parseInt(z),
+          x: parseInt(x, 10),
+          y: parseInt(y, 10),
+          z: parseInt(z, 10),
           redMin: layer.rgbStretch?.r?.min ?? rLayer.band_stats[0]?.min ?? 0,
           redMax: layer.rgbStretch?.r?.max ?? rLayer.band_stats[0]?.max ?? 255,
           redGamma: layer.rgbStretch?.r?.gamma ?? 1.0,
@@ -1153,7 +1219,7 @@ export class LayerManager {
 
         return { data: new Uint8Array(tileData) };
       } catch (error) {
-        console.error('Failed to load cross-layer composition tile:', error);
+        log.error('Failed to load cross-layer composition tile', error);
         throw error;
       }
     });
@@ -1173,7 +1239,11 @@ export class LayerManager {
         this.mapManager.map.setPaintProperty(`vector-fill-${id}`, 'fill-color', value);
         this.mapManager.map.setPaintProperty(`vector-circle-${id}`, 'circle-color', value);
       } else if (property === 'fillOpacity') {
-        this.mapManager.map.setPaintProperty(`vector-fill-${id}`, 'fill-opacity', value * layer.opacity);
+        this.mapManager.map.setPaintProperty(
+          `vector-fill-${id}`,
+          'fill-opacity',
+          value * layer.opacity
+        );
       } else if (property === 'strokeColor') {
         this.mapManager.map.setPaintProperty(`vector-line-${id}`, 'line-color', value);
         this.mapManager.map.setPaintProperty(`vector-circle-${id}`, 'circle-stroke-color', value);
@@ -1182,7 +1252,7 @@ export class LayerManager {
       } else if (property === 'pointRadius') {
         this.mapManager.map.setPaintProperty(`vector-circle-${id}`, 'circle-radius', value);
       }
-    } catch (e) {
+    } catch (_e) {
       // Layer might not exist for this geometry type
     }
   }
@@ -1195,17 +1265,23 @@ export class LayerManager {
 
     if (!fieldName) {
       // Reset to solid color
-      const fillColor = layer.style.fillColor;
+      const { fillColor } = layer.style;
       try {
         this.mapManager.map.setPaintProperty(`vector-fill-${id}`, 'fill-color', fillColor);
         this.mapManager.map.setPaintProperty(`vector-circle-${id}`, 'circle-color', fillColor);
-      } catch (e) {}
+      } catch (_e) {
+        /* Layer might not exist */
+      }
       return;
     }
 
     // Get unique values for the field
     const features = layer.geojson?.features || [];
-    const values = [...new Set(features.map(f => f.properties?.[fieldName]).filter(v => v !== null && v !== undefined))];
+    const values = [
+      ...new Set(
+        features.map(f => f.properties?.[fieldName]).filter(v => v !== null && v !== undefined)
+      ),
+    ];
 
     if (values.length === 0) return;
 
@@ -1225,15 +1301,26 @@ export class LayerManager {
         'interpolate',
         ['linear'],
         ['get', fieldName],
-        min, '#2166ac',  // Blue
-        (min + max) / 2, '#f7f7f7',  // White
-        max, '#b2182b'   // Red
+        min,
+        '#2166ac', // Blue
+        (min + max) / 2,
+        '#f7f7f7', // White
+        max,
+        '#b2182b', // Red
       ];
     } else {
       // Categorical color scheme
       const colors = [
-        '#e41a1c', '#377eb8', '#4daf4a', '#984ea3', '#ff7f00',
-        '#ffff33', '#a65628', '#f781bf', '#999999', '#66c2a5'
+        '#e41a1c',
+        '#377eb8',
+        '#4daf4a',
+        '#984ea3',
+        '#ff7f00',
+        '#ffff33',
+        '#a65628',
+        '#f781bf',
+        '#999999',
+        '#66c2a5',
       ];
 
       // Build match expression
@@ -1250,10 +1337,14 @@ export class LayerManager {
     // Apply to layers
     try {
       this.mapManager.map.setPaintProperty(`vector-fill-${id}`, 'fill-color', colorExpression);
-    } catch (e) {}
+    } catch (_e) {
+      /* Layer might not exist */
+    }
     try {
       this.mapManager.map.setPaintProperty(`vector-circle-${id}`, 'circle-color', colorExpression);
-    } catch (e) {}
+    } catch (_e) {
+      /* Layer might not exist */
+    }
   }
 
   reorderLayers(fromIndex, toIndex) {
@@ -1287,19 +1378,19 @@ export class LayerManager {
       if (!layer) return;
 
       const item = document.createElement('div');
-      item.className = 'layer-item' + (id === this.selectedLayerId ? ' selected' : '');
+      item.className = `layer-item${id === this.selectedLayerId ? ' selected' : ''}`;
       item.draggable = true;
       item.dataset.layerId = id;
       item.dataset.index = this.layerOrder.length - 1 - displayIndex;
 
-      item.addEventListener('click', (e) => {
+      item.addEventListener('click', e => {
         if (e.target.tagName !== 'INPUT' && e.target.tagName !== 'BUTTON') {
           this.selectLayer(id);
         }
       });
-      item.addEventListener('dragstart', (e) => this.handleDragStart(e, item));
-      item.addEventListener('dragover', (e) => this.handleDragOver(e, item));
-      item.addEventListener('drop', (e) => this.handleDrop(e, item));
+      item.addEventListener('dragstart', e => this.handleDragStart(e, item));
+      item.addEventListener('dragover', e => this.handleDragOver(e, item));
+      item.addEventListener('drop', e => this.handleDrop(e, item));
       item.addEventListener('dragend', () => this.handleDragEnd());
 
       const headerRow = document.createElement('div');
@@ -1325,7 +1416,7 @@ export class LayerManager {
       }
 
       // Double-click to rename
-      name.addEventListener('dblclick', (e) => {
+      name.addEventListener('dblclick', e => {
         e.stopPropagation();
         this.startRenameLayer(id, name, displayName);
       });
@@ -1334,7 +1425,7 @@ export class LayerManager {
       removeBtn.className = 'layer-remove';
       removeBtn.textContent = '\u00d7';
       removeBtn.title = 'Remove layer';
-      removeBtn.addEventListener('click', (e) => {
+      removeBtn.addEventListener('click', e => {
         e.stopPropagation();
         this.removeLayer(id);
       });
@@ -1355,8 +1446,8 @@ export class LayerManager {
       opacitySlider.min = '0';
       opacitySlider.max = '100';
       opacitySlider.value = Math.round(layer.opacity * 100);
-      opacitySlider.addEventListener('input', (e) => {
-        this.setLayerOpacity(id, parseInt(e.target.value) / 100);
+      opacitySlider.addEventListener('input', e => {
+        this.setLayerOpacity(id, parseInt(e.target.value, 10) / 100);
       });
 
       opacityRow.appendChild(opacityLabel);
@@ -1399,13 +1490,13 @@ export class LayerManager {
           bandSelect.appendChild(rgbOption);
         }
 
-        bandSelect.addEventListener('change', (e) => {
+        bandSelect.addEventListener('change', e => {
           e.stopPropagation();
-          const value = e.target.value;
+          const { value } = e.target;
           if (value === 'rgb') {
             this.setLayerDisplayMode(id, 'rgb');
           } else {
-            const bandNum = parseInt(value.replace('band-', ''));
+            const bandNum = parseInt(value.replace('band-', ''), 10);
             this.setLayerDisplayMode(id, 'grayscale');
             this.setLayerBand(id, bandNum);
           }
@@ -1440,9 +1531,12 @@ export class LayerManager {
     if (layer.type === 'vector') {
       // Build field options for styling
       const fields = layer.fields || [];
-      const fieldOptions = fields.map(f =>
-        `<option value="${f.name}" ${layer.style.colorByField === f.name ? 'selected' : ''}>${f.name}</option>`
-      ).join('');
+      const fieldOptions = fields
+        .map(
+          f =>
+            `<option value="${f.name}" ${layer.style.colorByField === f.name ? 'selected' : ''}>${f.name}</option>`
+        )
+        .join('');
 
       controlsPanel.innerHTML = `
         <div class="control-section">
@@ -1498,12 +1592,12 @@ export class LayerManager {
         });
       }
       if (colorByFieldSelect) {
-        colorByFieldSelect.addEventListener('change', (e) => {
+        colorByFieldSelect.addEventListener('change', e => {
           this.setColorByField(this.selectedLayerId, e.target.value);
         });
       }
       if (fillColorInput) {
-        fillColorInput.addEventListener('change', (e) => {
+        fillColorInput.addEventListener('change', e => {
           this.setVectorStyle(this.selectedLayerId, 'fillColor', e.target.value);
           // Reset color-by-field when manually setting color
           layer.style.colorByField = null;
@@ -1511,28 +1605,31 @@ export class LayerManager {
         });
       }
       if (fillOpacityInput) {
-        fillOpacityInput.addEventListener('input', (e) => {
-          const opacity = parseInt(e.target.value) / 100;
-          e.target.previousElementSibling.querySelector('.value-display').textContent = `${e.target.value}%`;
+        fillOpacityInput.addEventListener('input', e => {
+          const opacity = parseInt(e.target.value, 10) / 100;
+          e.target.previousElementSibling.querySelector('.value-display').textContent =
+            `${e.target.value}%`;
           this.setVectorStyle(this.selectedLayerId, 'fillOpacity', opacity);
         });
       }
       if (strokeColorInput) {
-        strokeColorInput.addEventListener('change', (e) => {
+        strokeColorInput.addEventListener('change', e => {
           this.setVectorStyle(this.selectedLayerId, 'strokeColor', e.target.value);
         });
       }
       if (strokeWidthInput) {
-        strokeWidthInput.addEventListener('input', (e) => {
+        strokeWidthInput.addEventListener('input', e => {
           const width = parseFloat(e.target.value);
-          e.target.previousElementSibling.querySelector('.value-display').textContent = `${width}px`;
+          e.target.previousElementSibling.querySelector('.value-display').textContent =
+            `${width}px`;
           this.setVectorStyle(this.selectedLayerId, 'strokeWidth', width);
         });
       }
       if (pointRadiusInput) {
-        pointRadiusInput.addEventListener('input', (e) => {
-          const radius = parseInt(e.target.value);
-          e.target.previousElementSibling.querySelector('.value-display').textContent = `${radius}px`;
+        pointRadiusInput.addEventListener('input', e => {
+          const radius = parseInt(e.target.value, 10);
+          e.target.previousElementSibling.querySelector('.value-display').textContent =
+            `${radius}px`;
           this.setVectorStyle(this.selectedLayerId, 'pointRadius', radius);
         });
       }
@@ -1541,8 +1638,10 @@ export class LayerManager {
     }
 
     // Raster layer controls
-    const bandOptions = Array.from({ length: layer.bands }, (_, i) =>
-      `<option value="${i + 1}" ${layer.band === i + 1 ? 'selected' : ''}>Band ${i + 1}</option>`
+    const bandOptions = Array.from(
+      { length: layer.bands },
+      (_, i) =>
+        `<option value="${i + 1}" ${layer.band === i + 1 ? 'selected' : ''}>Band ${i + 1}</option>`
     ).join('');
 
     // Check if we have multiple single-band layers for cross-layer RGB
@@ -1586,7 +1685,7 @@ export class LayerManager {
       `;
     } else if (layer.displayMode === 'crossLayerRgb') {
       // Cross-layer RGB mode - select layers for each channel
-      const layerOptions = (selectedId) => {
+      const layerOptions = selectedId => {
         let opts = '<option value="">-- Select Layer --</option>';
         for (const [id, l] of this.layers) {
           const name = l.path.split('/').pop().split('\\').pop();
@@ -1598,9 +1697,12 @@ export class LayerManager {
       // Initialize crossLayerRgb settings if not present
       if (!layer.crossLayerRgb) {
         layer.crossLayerRgb = {
-          rLayerId: null, rBand: 1,
-          gLayerId: null, gBand: 1,
-          bLayerId: null, bBand: 1,
+          rLayerId: null,
+          rBand: 1,
+          gLayerId: null,
+          gBand: 1,
+          bLayerId: null,
+          bBand: 1,
         };
       }
 
@@ -1631,9 +1733,12 @@ export class LayerManager {
       `;
     } else {
       // RGB mode controls
-      const rgbBandOptions = (selected) => Array.from({ length: layer.bands }, (_, i) =>
-        `<option value="${i + 1}" ${selected === i + 1 ? 'selected' : ''}>Band ${i + 1}</option>`
-      ).join('');
+      const rgbBandOptions = selected =>
+        Array.from(
+          { length: layer.bands },
+          (_, i) =>
+            `<option value="${i + 1}" ${selected === i + 1 ? 'selected' : ''}>Band ${i + 1}</option>`
+        ).join('');
 
       // Get stats for current RGB bands
       const rStats = layer.band_stats[layer.rgbBands.r - 1] || { min: 0, max: 255 };
@@ -1716,7 +1821,7 @@ export class LayerManager {
     // Attach event listeners
     const displayModeSelect = document.getElementById('display-mode');
     if (displayModeSelect) {
-      displayModeSelect.addEventListener('change', (e) => {
+      displayModeSelect.addEventListener('change', e => {
         this.setLayerDisplayMode(this.selectedLayerId, e.target.value);
       });
     }
@@ -1724,8 +1829,8 @@ export class LayerManager {
     if (layer.displayMode === 'grayscale') {
       const bandSelect = document.getElementById('band-select');
       if (bandSelect) {
-        bandSelect.addEventListener('change', (e) => {
-          this.setLayerBand(this.selectedLayerId, parseInt(e.target.value));
+        bandSelect.addEventListener('change', e => {
+          this.setLayerBand(this.selectedLayerId, parseInt(e.target.value, 10));
         });
       }
 
@@ -1734,33 +1839,36 @@ export class LayerManager {
       const gammaSlider = document.getElementById('stretch-gamma');
 
       if (minSlider) {
-        minSlider.addEventListener('input', (e) => {
+        minSlider.addEventListener('input', e => {
           const min = parseFloat(e.target.value);
-          e.target.previousElementSibling.querySelector('.value-display').textContent = min.toFixed(1);
+          e.target.previousElementSibling.querySelector('.value-display').textContent =
+            min.toFixed(1);
         });
-        minSlider.addEventListener('change', (e) => {
+        minSlider.addEventListener('change', e => {
           const min = parseFloat(e.target.value);
           this.setLayerStretch(this.selectedLayerId, min, layer.stretch.max, layer.stretch.gamma);
         });
       }
 
       if (maxSlider) {
-        maxSlider.addEventListener('input', (e) => {
+        maxSlider.addEventListener('input', e => {
           const max = parseFloat(e.target.value);
-          e.target.previousElementSibling.querySelector('.value-display').textContent = max.toFixed(1);
+          e.target.previousElementSibling.querySelector('.value-display').textContent =
+            max.toFixed(1);
         });
-        maxSlider.addEventListener('change', (e) => {
+        maxSlider.addEventListener('change', e => {
           const max = parseFloat(e.target.value);
           this.setLayerStretch(this.selectedLayerId, layer.stretch.min, max, layer.stretch.gamma);
         });
       }
 
       if (gammaSlider) {
-        gammaSlider.addEventListener('input', (e) => {
+        gammaSlider.addEventListener('input', e => {
           const gamma = parseFloat(e.target.value);
-          e.target.previousElementSibling.querySelector('.value-display').textContent = gamma.toFixed(2);
+          e.target.previousElementSibling.querySelector('.value-display').textContent =
+            gamma.toFixed(2);
         });
-        gammaSlider.addEventListener('change', (e) => {
+        gammaSlider.addEventListener('change', e => {
           const gamma = parseFloat(e.target.value);
           this.setLayerStretch(this.selectedLayerId, layer.stretch.min, layer.stretch.max, gamma);
         });
@@ -1794,9 +1902,12 @@ export class LayerManager {
 
           if (rLayerId && gLayerId && bLayerId) {
             layer.crossLayerRgb = {
-              rLayerId, rBand: 1,
-              gLayerId, gBand: 1,
-              bLayerId, bBand: 1,
+              rLayerId,
+              rBand: 1,
+              gLayerId,
+              gBand: 1,
+              bLayerId,
+              bBand: 1,
             };
             this.refreshLayerTiles(this.selectedLayerId);
             // Refresh UI to show the create button now that layers are selected
@@ -1824,9 +1935,9 @@ export class LayerManager {
         const updateRgbBands = () => {
           this.setRgbBands(
             this.selectedLayerId,
-            parseInt(rgbR.value),
-            parseInt(rgbG.value),
-            parseInt(rgbB.value)
+            parseInt(rgbR.value, 10),
+            parseInt(rgbG.value, 10),
+            parseInt(rgbB.value, 10)
           );
         };
         rgbR.addEventListener('change', updateRgbBands);
@@ -1841,20 +1952,32 @@ export class LayerManager {
         const maxSlider = document.getElementById(`rgb-${ch}-max`);
 
         if (minSlider) {
-          minSlider.addEventListener('input', (e) => {
+          minSlider.addEventListener('input', e => {
             e.target.nextElementSibling.textContent = parseFloat(e.target.value).toFixed(0);
           });
-          minSlider.addEventListener('change', (e) => {
-            this.setRgbStretch(this.selectedLayerId, ch, parseFloat(e.target.value), layer.rgbStretch[ch].max, layer.rgbStretch[ch].gamma);
+          minSlider.addEventListener('change', e => {
+            this.setRgbStretch(
+              this.selectedLayerId,
+              ch,
+              parseFloat(e.target.value),
+              layer.rgbStretch[ch].max,
+              layer.rgbStretch[ch].gamma
+            );
           });
         }
 
         if (maxSlider) {
-          maxSlider.addEventListener('input', (e) => {
+          maxSlider.addEventListener('input', e => {
             e.target.nextElementSibling.textContent = parseFloat(e.target.value).toFixed(0);
           });
-          maxSlider.addEventListener('change', (e) => {
-            this.setRgbStretch(this.selectedLayerId, ch, layer.rgbStretch[ch].min, parseFloat(e.target.value), layer.rgbStretch[ch].gamma);
+          maxSlider.addEventListener('change', e => {
+            this.setRgbStretch(
+              this.selectedLayerId,
+              ch,
+              layer.rgbStretch[ch].min,
+              parseFloat(e.target.value),
+              layer.rgbStretch[ch].gamma
+            );
           });
         }
       });
@@ -1879,7 +2002,7 @@ export class LayerManager {
       // Toggle stretch controls visibility
       const showStretchCheckbox = document.getElementById('show-rgb-stretch');
       if (showStretchCheckbox) {
-        showStretchCheckbox.addEventListener('change', (e) => {
+        showStretchCheckbox.addEventListener('change', e => {
           layer.showRgbStretch = e.target.checked;
           const stretchControls = document.querySelectorAll('.rgb-stretch-controls');
           stretchControls.forEach(ctrl => {
@@ -1925,13 +2048,15 @@ export class LayerManager {
     e.preventDefault();
     if (!this.draggedItem || item === this.draggedItem) return;
 
-    const fromIndex = parseInt(this.draggedItem.dataset.index);
-    let toIndex = parseInt(item.dataset.index);
+    const fromIndex = parseInt(this.draggedItem.dataset.index, 10);
+    let toIndex = parseInt(item.dataset.index, 10);
 
     const rect = item.getBoundingClientRect();
     const midY = rect.top + rect.height / 2;
     if (e.clientY > midY && toIndex > fromIndex) {
+      // No adjustment needed - dragging down past item below
     } else if (e.clientY < midY && toIndex < fromIndex) {
+      // No adjustment needed - dragging up past item above
     } else if (e.clientY > midY) {
       toIndex = Math.max(0, toIndex - 1);
     } else {
@@ -1955,7 +2080,10 @@ export class LayerManager {
   fitToAllLayers() {
     if (this.layers.size === 0) return;
 
-    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    let minX = Infinity,
+      minY = Infinity,
+      maxX = -Infinity,
+      maxY = -Infinity;
 
     for (const layer of this.layers.values()) {
       minX = Math.min(minX, layer.bounds[0]);
@@ -1991,21 +2119,27 @@ export class LayerManager {
     const fieldNames = fields.map(f => f.name);
 
     // Build header row
-    thead.innerHTML = '<tr>' + fieldNames.map(name =>
-      `<th>${name}</th>`
-    ).join('') + '</tr>';
+    thead.innerHTML = `<tr>${fieldNames.map(name => `<th>${name}</th>`).join('')}</tr>`;
 
     // Build body rows from geojson features
     const features = layer.geojson?.features || [];
-    tbody.innerHTML = features.map((feature, idx) => {
-      const props = feature.properties || {};
-      return '<tr data-feature-idx="' + idx + '">' + fieldNames.map(name => {
-        const value = props[name];
-        const displayValue = value === null || value === undefined ? '' :
-          typeof value === 'object' ? JSON.stringify(value) : String(value);
-        return `<td title="${displayValue}">${displayValue}</td>`;
-      }).join('') + '</tr>';
-    }).join('');
+    tbody.innerHTML = features
+      .map((feature, idx) => {
+        const props = feature.properties || {};
+        return `<tr data-feature-idx="${idx}">${fieldNames
+          .map(name => {
+            const value = props[name];
+            const displayValue =
+              value === null || value === undefined
+                ? ''
+                : typeof value === 'object'
+                  ? JSON.stringify(value)
+                  : String(value);
+            return `<td title="${displayValue}">${displayValue}</td>`;
+          })
+          .join('')}</tr>`;
+      })
+      .join('');
 
     // Add click handler for row selection and zoom
     tbody.querySelectorAll('tr').forEach((row, idx) => {
@@ -2037,8 +2171,8 @@ export class LayerManager {
   getFeatureBounds(geometry) {
     if (!geometry || !geometry.coordinates) return null;
 
-    let coords = [];
-    const extractCoords = (c) => {
+    const coords = [];
+    const extractCoords = c => {
       if (typeof c[0] === 'number') {
         coords.push(c);
       } else {
@@ -2049,7 +2183,10 @@ export class LayerManager {
 
     if (coords.length === 0) return null;
 
-    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    let minX = Infinity,
+      minY = Infinity,
+      maxX = -Infinity,
+      maxY = -Infinity;
     for (const [x, y] of coords) {
       minX = Math.min(minX, x);
       minY = Math.min(minY, y);
@@ -2066,7 +2203,10 @@ export class LayerManager {
       maxY += buffer;
     }
 
-    return [[minX, minY], [maxX, maxY]];
+    return [
+      [minX, minY],
+      [maxX, maxY],
+    ];
   }
 
   async showHistogram(layerId, band) {
@@ -2091,16 +2231,18 @@ export class LayerManager {
 
     // Populate band selector
     if (bandSelect) {
-      bandSelect.innerHTML = Array.from({ length: layer.bands }, (_, i) =>
-        `<option value="${i + 1}" ${band === i + 1 ? 'selected' : ''}>Band ${i + 1}</option>`
+      bandSelect.innerHTML = Array.from(
+        { length: layer.bands },
+        (_, i) =>
+          `<option value="${i + 1}" ${band === i + 1 ? 'selected' : ''}>Band ${i + 1}</option>`
       ).join('');
 
       // Store current layer ID for band change handler
       bandSelect.dataset.layerId = layerId;
 
       // Setup band change handler (remove old listener first)
-      bandSelect.onchange = async (e) => {
-        const newBand = parseInt(e.target.value);
+      bandSelect.onchange = async e => {
+        const newBand = parseInt(e.target.value, 10);
         await this.showHistogram(layerId, newBand);
       };
     }
@@ -2120,7 +2262,7 @@ export class LayerManager {
       // Fetch histogram data from backend
       const histogram = await invoke('get_histogram', {
         id: layerId,
-        band: band,
+        band,
         numBins: 256,
       });
 
@@ -2152,13 +2294,23 @@ export class LayerManager {
           const currentCanvas = document.getElementById('histogram-canvas');
           const currentTooltip = document.getElementById('histogram-tooltip');
           if (this.currentHistogram && currentCanvas) {
-            this.drawHistogram(currentCanvas, this.currentHistogram, currentLayer, logScaleCheckbox.checked);
-            this.setupHistogramHover(currentCanvas, currentTooltip, this.currentHistogram, logScaleCheckbox.checked);
+            this.drawHistogram(
+              currentCanvas,
+              this.currentHistogram,
+              currentLayer,
+              logScaleCheckbox.checked
+            );
+            this.setupHistogramHover(
+              currentCanvas,
+              currentTooltip,
+              this.currentHistogram,
+              logScaleCheckbox.checked
+            );
           }
         };
       }
     } catch (error) {
-      console.error('Failed to load histogram:', error);
+      log.error('Failed to load histogram', error);
       minSpan.textContent = 'Error loading histogram';
       maxSpan.textContent = '';
     }
@@ -2174,7 +2326,7 @@ export class LayerManager {
     const newCanvas = canvas.cloneNode(true);
     canvas.parentNode.replaceChild(newCanvas, canvas);
 
-    newCanvas.addEventListener('mousemove', (e) => {
+    newCanvas.addEventListener('mousemove', e => {
       const rect = newCanvas.getBoundingClientRect();
       const scaleX = newCanvas.width / rect.width;
       const x = (e.clientX - rect.left) * scaleX;
@@ -2222,8 +2374,8 @@ export class LayerManager {
 
   drawHistogram(canvas, histogram, layer, useLogScale = false) {
     const ctx = canvas.getContext('2d');
-    const width = canvas.width;
-    const height = canvas.height;
+    const { width } = canvas;
+    const { height } = canvas;
     const padding = { top: 10, right: 10, bottom: 30, left: 50 };
     const chartWidth = width - padding.left - padding.right;
     const chartHeight = height - padding.top - padding.bottom;
@@ -2236,7 +2388,7 @@ export class LayerManager {
     const maxCount = Math.max(...histogram.counts);
     if (maxCount === 0) return;
 
-    const getScaledValue = (count) => {
+    const getScaledValue = count => {
       if (useLogScale) {
         return count > 0 ? Math.log10(count + 1) / Math.log10(maxCount + 1) : 0;
       }

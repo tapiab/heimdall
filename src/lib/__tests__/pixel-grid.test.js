@@ -284,7 +284,11 @@ describe('MapManager Pixel Grid', () => {
       mapManager.setBasemap('pixel');
 
       expect(mockMap.setLayoutProperty).toHaveBeenCalledWith('osm-tiles', 'visibility', 'none');
-      expect(mockMap.setLayoutProperty).toHaveBeenCalledWith('satellite-tiles', 'visibility', 'none');
+      expect(mockMap.setLayoutProperty).toHaveBeenCalledWith(
+        'satellite-tiles',
+        'visibility',
+        'none'
+      );
       expect(mockMap.setLayoutProperty).toHaveBeenCalledWith('pixel-grid', 'visibility', 'visible');
     });
 

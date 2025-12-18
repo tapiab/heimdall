@@ -109,7 +109,7 @@ export class ProjectManager {
   }
 
   serializeView() {
-    const map = this.mapManager.map;
+    const { map } = this.mapManager;
     return {
       center: map.getCenter().toArray(),
       zoom: map.getZoom(),
@@ -300,14 +300,16 @@ export class ProjectManager {
     }
   }
 
-  deserializeSettings(settings) {
+  deserializeSettings(_settings) {
     // Apply any saved settings
   }
 
   hasUnsavedChanges() {
     // Simple check - could be made more sophisticated
-    return this.layerManager.layers.size > 0 ||
-           (this.annotationTool && this.annotationTool.getCount() > 0);
+    return (
+      this.layerManager.layers.size > 0 ||
+      (this.annotationTool && this.annotationTool.getCount() > 0)
+    );
   }
 
   getCurrentProjectPath() {

@@ -23,8 +23,8 @@ export const sampleLine = {
     type: 'LineString',
     coordinates: [
       [-122.4194, 37.7749],
-      [-122.4080, 37.7820],
-      [-122.3920, 37.7900],
+      [-122.408, 37.782],
+      [-122.392, 37.79],
     ],
   },
   properties: {
@@ -38,13 +38,15 @@ export const samplePolygon = {
   type: 'Feature',
   geometry: {
     type: 'Polygon',
-    coordinates: [[
-      [-122.45, 37.75],
-      [-122.40, 37.75],
-      [-122.40, 37.80],
-      [-122.45, 37.80],
-      [-122.45, 37.75],
-    ]],
+    coordinates: [
+      [
+        [-122.45, 37.75],
+        [-122.4, 37.75],
+        [-122.4, 37.8],
+        [-122.45, 37.8],
+        [-122.45, 37.75],
+      ],
+    ],
   },
   properties: {
     name: 'Downtown Area',
@@ -59,8 +61,20 @@ export const samplePolygonWithHole = {
   geometry: {
     type: 'Polygon',
     coordinates: [
-      [[-122.50, 37.70], [-122.35, 37.70], [-122.35, 37.85], [-122.50, 37.85], [-122.50, 37.70]],
-      [[-122.45, 37.75], [-122.40, 37.75], [-122.40, 37.80], [-122.45, 37.80], [-122.45, 37.75]],
+      [
+        [-122.5, 37.7],
+        [-122.35, 37.7],
+        [-122.35, 37.85],
+        [-122.5, 37.85],
+        [-122.5, 37.7],
+      ],
+      [
+        [-122.45, 37.75],
+        [-122.4, 37.75],
+        [-122.4, 37.8],
+        [-122.45, 37.8],
+        [-122.45, 37.75],
+      ],
     ],
   },
   properties: {
@@ -76,8 +90,8 @@ export const sampleMultiPoint = {
     type: 'MultiPoint',
     coordinates: [
       [-122.4194, 37.7749],
-      [-122.4100, 37.7800],
-      [-122.4000, 37.7850],
+      [-122.41, 37.78],
+      [-122.4, 37.785],
     ],
   },
   properties: {
@@ -92,8 +106,24 @@ export const sampleMultiPolygon = {
   geometry: {
     type: 'MultiPolygon',
     coordinates: [
-      [[[-122.50, 37.70], [-122.45, 37.70], [-122.45, 37.75], [-122.50, 37.75], [-122.50, 37.70]]],
-      [[[-122.40, 37.80], [-122.35, 37.80], [-122.35, 37.85], [-122.40, 37.85], [-122.40, 37.80]]],
+      [
+        [
+          [-122.5, 37.7],
+          [-122.45, 37.7],
+          [-122.45, 37.75],
+          [-122.5, 37.75],
+          [-122.5, 37.7],
+        ],
+      ],
+      [
+        [
+          [-122.4, 37.8],
+          [-122.35, 37.8],
+          [-122.35, 37.85],
+          [-122.4, 37.85],
+          [-122.4, 37.8],
+        ],
+      ],
     ],
   },
   properties: {
@@ -113,17 +143,17 @@ export const sampleFeatureCollection = {
     },
     {
       type: 'Feature',
-      geometry: { type: 'Point', coordinates: [-122.4100, 37.7800] },
+      geometry: { type: 'Point', coordinates: [-122.41, 37.78] },
       properties: { id: 2, name: 'Point B', value: 200, category: 'B' },
     },
     {
       type: 'Feature',
-      geometry: { type: 'Point', coordinates: [-122.4000, 37.7850] },
+      geometry: { type: 'Point', coordinates: [-122.4, 37.785] },
       properties: { id: 3, name: 'Point C', value: 150, category: 'A' },
     },
     {
       type: 'Feature',
-      geometry: { type: 'Point', coordinates: [-122.3900, 37.7900] },
+      geometry: { type: 'Point', coordinates: [-122.39, 37.79] },
       properties: { id: 4, name: 'Point D', value: 300, category: 'C' },
     },
   ],
@@ -186,9 +216,7 @@ export const sampleSingleBandRasterMetadata = {
   height: 512,
   bands: 1,
   bounds: [-122.5, 37.7, -122.3, 37.9],
-  band_stats: [
-    { min: -50, max: 1500, mean: 425.3, std_dev: 312.7 },
-  ],
+  band_stats: [{ min: -50, max: 1500, mean: 425.3, std_dev: 312.7 }],
   crs: 'EPSG:4326',
   is_georeferenced: true,
 };
@@ -228,8 +256,8 @@ export const sampleVectorMetadata = {
 
 // Sample bounds for intersection tests
 export const sampleBounds = {
-  sanFrancisco: [-122.5149, 37.7081, -122.3550, 37.8324],
-  oakland: [-122.3550, 37.7081, -122.1149, 37.8850],
+  sanFrancisco: [-122.5149, 37.7081, -122.355, 37.8324],
+  oakland: [-122.355, 37.7081, -122.1149, 37.885],
   pacific: [-140.0, 30.0, -130.0, 40.0],
   world: [-180, -90, 180, 90],
 };

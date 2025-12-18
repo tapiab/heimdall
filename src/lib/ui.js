@@ -2,7 +2,19 @@ import { open } from '@tauri-apps/plugin-dialog';
 import { listen } from '@tauri-apps/api/event';
 import { showToast } from './notifications.js';
 
-const VECTOR_EXTENSIONS = ['shp', 'geojson', 'json', 'gpkg', 'kml', 'kmz', 'gml', 'gpx', 'fgb', 'tab', 'mif'];
+const VECTOR_EXTENSIONS = [
+  'shp',
+  'geojson',
+  'json',
+  'gpkg',
+  'kml',
+  'kmz',
+  'gml',
+  'gpx',
+  'fgb',
+  'tab',
+  'mif',
+];
 
 // Setup drag and drop file handling
 async function setupDragAndDrop(layerManager) {
@@ -25,10 +37,10 @@ async function setupDragAndDrop(layerManager) {
   });
 
   // Listen for file drop
-  await listen('tauri://drag-drop', async (event) => {
+  await listen('tauri://drag-drop', async event => {
     dropOverlay.classList.remove('visible');
 
-    const paths = event.payload.paths;
+    const { paths } = event.payload;
     if (!paths || paths.length === 0) return;
 
     for (const filePath of paths) {
@@ -78,12 +90,22 @@ function deactivateTools(tools) {
   }
 }
 
-export function setupUI(mapManager, layerManager, measureTool = null, inspectTool = null, exportTool = null, profileTool = null, annotationTool = null, zoomRectTool = null, projectManager = null) {
+export function setupUI(
+  mapManager,
+  layerManager,
+  measureTool = null,
+  inspectTool = null,
+  exportTool = null,
+  profileTool = null,
+  annotationTool = null,
+  zoomRectTool = null,
+  projectManager = null
+) {
   // File menu
   const fileMenuBtn = document.getElementById('file-menu-btn');
   const fileMenuDropdown = document.getElementById('file-menu-dropdown');
   if (fileMenuBtn && fileMenuDropdown) {
-    fileMenuBtn.addEventListener('click', (e) => {
+    fileMenuBtn.addEventListener('click', e => {
       e.stopPropagation();
       const isVisible = fileMenuDropdown.classList.toggle('visible');
       if (isVisible) {
@@ -98,10 +120,10 @@ export function setupUI(mapManager, layerManager, measureTool = null, inspectToo
     });
 
     // Handle file menu actions
-    fileMenuDropdown.querySelectorAll('.menu-item').forEach((item) => {
-      item.addEventListener('click', (e) => {
+    fileMenuDropdown.querySelectorAll('.menu-item').forEach(item => {
+      item.addEventListener('click', e => {
         e.stopPropagation();
-        const action = item.dataset.action;
+        const { action } = item.dataset;
         fileMenuDropdown.classList.remove('visible');
 
         switch (action) {
@@ -179,7 +201,7 @@ export function setupUI(mapManager, layerManager, measureTool = null, inspectToo
   const annotateBtn = document.getElementById('annotate-btn');
   const annotationDropdown = document.getElementById('annotation-dropdown');
   if (annotateBtn && annotationTool) {
-    annotateBtn.addEventListener('click', (e) => {
+    annotateBtn.addEventListener('click', e => {
       e.stopPropagation();
       // Toggle dropdown
       if (annotationDropdown) {
@@ -198,10 +220,10 @@ export function setupUI(mapManager, layerManager, measureTool = null, inspectToo
 
     // Handle mode selection
     if (annotationDropdown) {
-      annotationDropdown.querySelectorAll('.menu-item').forEach((option) => {
-        option.addEventListener('click', (e) => {
+      annotationDropdown.querySelectorAll('.menu-item').forEach(option => {
+        option.addEventListener('click', e => {
           e.stopPropagation();
-          const mode = option.dataset.mode;
+          const { mode } = option.dataset;
 
           // Deactivate other tools
           deactivateTools({ measureTool, inspectTool, profileTool, zoomRectTool });
@@ -212,7 +234,7 @@ export function setupUI(mapManager, layerManager, measureTool = null, inspectToo
           annotationDropdown.classList.remove('visible');
 
           // Update active state in dropdown
-          annotationDropdown.querySelectorAll('.menu-item').forEach((opt) => {
+          annotationDropdown.querySelectorAll('.menu-item').forEach(opt => {
             opt.classList.toggle('active', opt.dataset.mode === mode);
           });
         });
@@ -241,7 +263,7 @@ export function setupUI(mapManager, layerManager, measureTool = null, inspectToo
   const basemapSelect = document.getElementById('basemap-select');
   if (basemapSelect) {
     basemapSelect.value = mapManager.getBasemap();
-    basemapSelect.addEventListener('change', (e) => {
+    basemapSelect.addEventListener('change', e => {
       mapManager.setBasemap(e.target.value);
     });
   }
@@ -259,7 +281,7 @@ export function setupUI(mapManager, layerManager, measureTool = null, inspectToo
   const exaggerationValue = document.getElementById('exaggeration-value');
 
   if (terrainToggle) {
-    terrainToggle.addEventListener('change', (e) => {
+    terrainToggle.addEventListener('change', e => {
       if (e.target.checked) {
         const result = mapManager.enableTerrain();
         if (!result.success) {
@@ -282,7 +304,7 @@ export function setupUI(mapManager, layerManager, measureTool = null, inspectToo
   }
 
   if (exaggerationSlider) {
-    exaggerationSlider.addEventListener('input', (e) => {
+    exaggerationSlider.addEventListener('input', e => {
       const value = parseFloat(e.target.value);
       if (exaggerationValue) {
         exaggerationValue.textContent = value.toFixed(1);
@@ -298,7 +320,7 @@ export function setupUI(mapManager, layerManager, measureTool = null, inspectToo
   }
 
   // Keyboard shortcuts
-  document.addEventListener('keydown', (e) => {
+  document.addEventListener('keydown', e => {
     // Don't trigger shortcuts when typing in inputs
     if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') {
       return;
@@ -355,7 +377,7 @@ export function setupUI(mapManager, layerManager, measureTool = null, inspectToo
         return;
       }
 
-      const enabled = result.enabled;
+      const { enabled } = result;
       if (terrainToggle) {
         terrainToggle.checked = enabled;
       }
@@ -588,7 +610,7 @@ function showShortcutsHelp() {
   document.body.appendChild(helpDiv);
 
   // Close on click outside or button
-  helpDiv.addEventListener('click', (e) => {
+  helpDiv.addEventListener('click', e => {
     if (e.target === helpDiv || e.target.classList.contains('close-help')) {
       helpDiv.remove();
     }
@@ -602,15 +624,102 @@ async function openFileDialog(layerManager) {
       filters: [
         {
           name: 'Geospatial Files',
-          extensions: ['tif', 'tiff', 'geotiff', 'img', 'vrt', 'ntf', 'nitf', 'dt0', 'dt1', 'dt2', 'hgt', 'ers', 'ecw', 'jp2', 'j2k', 'sid', 'png', 'jpg', 'jpeg', 'gif', 'bmp', 'hdr', 'bil', 'bsq', 'bip', 'grd', 'asc', 'dem', 'nc', 'hdf', 'h5', 'shp', 'geojson', 'json', 'gpkg', 'kml', 'kmz', 'gml', 'gpx', 'fgb', 'tab', 'mif'],
+          extensions: [
+            'tif',
+            'tiff',
+            'geotiff',
+            'img',
+            'vrt',
+            'ntf',
+            'nitf',
+            'dt0',
+            'dt1',
+            'dt2',
+            'hgt',
+            'ers',
+            'ecw',
+            'jp2',
+            'j2k',
+            'sid',
+            'png',
+            'jpg',
+            'jpeg',
+            'gif',
+            'bmp',
+            'hdr',
+            'bil',
+            'bsq',
+            'bip',
+            'grd',
+            'asc',
+            'dem',
+            'nc',
+            'hdf',
+            'h5',
+            'shp',
+            'geojson',
+            'json',
+            'gpkg',
+            'kml',
+            'kmz',
+            'gml',
+            'gpx',
+            'fgb',
+            'tab',
+            'mif',
+          ],
         },
         {
           name: 'Vector Files',
-          extensions: ['shp', 'geojson', 'json', 'gpkg', 'kml', 'kmz', 'gml', 'gpx', 'fgb', 'tab', 'mif'],
+          extensions: [
+            'shp',
+            'geojson',
+            'json',
+            'gpkg',
+            'kml',
+            'kmz',
+            'gml',
+            'gpx',
+            'fgb',
+            'tab',
+            'mif',
+          ],
         },
         {
           name: 'Raster Images',
-          extensions: ['tif', 'tiff', 'geotiff', 'img', 'vrt', 'ntf', 'nitf', 'dt0', 'dt1', 'dt2', 'hgt', 'ers', 'ecw', 'jp2', 'j2k', 'sid', 'png', 'jpg', 'jpeg', 'gif', 'bmp', 'hdr', 'bil', 'bsq', 'bip', 'grd', 'asc', 'dem', 'nc', 'hdf', 'h5'],
+          extensions: [
+            'tif',
+            'tiff',
+            'geotiff',
+            'img',
+            'vrt',
+            'ntf',
+            'nitf',
+            'dt0',
+            'dt1',
+            'dt2',
+            'hgt',
+            'ers',
+            'ecw',
+            'jp2',
+            'j2k',
+            'sid',
+            'png',
+            'jpg',
+            'jpeg',
+            'gif',
+            'bmp',
+            'hdr',
+            'bil',
+            'bsq',
+            'bip',
+            'grd',
+            'asc',
+            'dem',
+            'nc',
+            'hdf',
+            'h5',
+          ],
         },
         {
           name: 'All Files',
@@ -622,7 +731,19 @@ async function openFileDialog(layerManager) {
     if (selected) {
       // Handle both single and multiple file selection
       const files = Array.isArray(selected) ? selected : [selected];
-      const vectorExtensions = ['shp', 'geojson', 'json', 'gpkg', 'kml', 'kmz', 'gml', 'gpx', 'fgb', 'tab', 'mif'];
+      const vectorExtensions = [
+        'shp',
+        'geojson',
+        'json',
+        'gpkg',
+        'kml',
+        'kmz',
+        'gml',
+        'gpx',
+        'fgb',
+        'tab',
+        'mif',
+      ];
 
       for (const file of files) {
         const ext = file.split('.').pop().toLowerCase();

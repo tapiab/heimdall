@@ -57,14 +57,14 @@ function createTestMeasureTool(isPixelMode = false, pixelExtent = null) {
      */
     calculateGeodesicDistance(point1, point2) {
       const R = 6371000; // Earth's radius in meters
-      const lat1 = point1[1] * Math.PI / 180;
-      const lat2 = point2[1] * Math.PI / 180;
-      const deltaLat = (point2[1] - point1[1]) * Math.PI / 180;
-      const deltaLng = (point2[0] - point1[0]) * Math.PI / 180;
+      const lat1 = (point1[1] * Math.PI) / 180;
+      const lat2 = (point2[1] * Math.PI) / 180;
+      const deltaLat = ((point2[1] - point1[1]) * Math.PI) / 180;
+      const deltaLng = ((point2[0] - point1[0]) * Math.PI) / 180;
 
-      const a = Math.sin(deltaLat / 2) * Math.sin(deltaLat / 2) +
-                Math.cos(lat1) * Math.cos(lat2) *
-                Math.sin(deltaLng / 2) * Math.sin(deltaLng / 2);
+      const a =
+        Math.sin(deltaLat / 2) * Math.sin(deltaLat / 2) +
+        Math.cos(lat1) * Math.cos(lat2) * Math.sin(deltaLng / 2) * Math.sin(deltaLng / 2);
       const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 
       return { value: R * c, unit: 'meters' };
@@ -161,7 +161,7 @@ describe('MeasureTool', () => {
     });
 
     it('should calculate distance between New York and London', () => {
-      const ny = [-74.0060, 40.7128];
+      const ny = [-74.006, 40.7128];
       const london = [-0.1278, 51.5074];
       const result = measureTool.calculateGeodesicDistance(ny, london);
 
@@ -394,7 +394,7 @@ describe('Integration: End-to-end distance scenarios', () => {
     const tool = createTestMeasureTool();
     // Two points approximately 500m apart
     const start = [-122.4194, 37.7749];
-    const end = [-122.4150, 37.7780];
+    const end = [-122.415, 37.778];
 
     const result = tool.calculateDistance(start, end);
     const formatted = tool.formatDistance(result);

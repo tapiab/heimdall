@@ -209,9 +209,7 @@ describe('Pixel value result processing', () => {
     const result = {
       x: 100,
       y: 200,
-      values: [
-        { band: 1, value: -9999, is_nodata: true },
-      ],
+      values: [{ band: 1, value: -9999, is_nodata: true }],
       is_valid: true,
     };
 

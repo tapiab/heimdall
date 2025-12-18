@@ -1,5 +1,4 @@
 import 'maplibre-gl/dist/maplibre-gl.css';
-import maplibregl from 'maplibre-gl';
 import { invoke } from '@tauri-apps/api/core';
 import { MapManager } from './lib/map-manager.js';
 import { LayerManager } from './lib/layer-manager.js';
@@ -11,6 +10,7 @@ import { AnnotationTool } from './lib/annotation-tool.js';
 import { ZoomRectTool } from './lib/zoom-rect-tool.js';
 import { ProjectManager } from './lib/project-manager.js';
 import { setupUI } from './lib/ui.js';
+import { logger } from './lib/logger.js';
 
 // Initialize the application
 async function init() {
@@ -43,7 +43,17 @@ async function init() {
   const projectManager = new ProjectManager(mapManager, layerManager, annotationTool);
 
   // Setup UI interactions
-  setupUI(mapManager, layerManager, measureTool, inspectTool, exportTool, profileTool, annotationTool, zoomRectTool, projectManager);
+  setupUI(
+    mapManager,
+    layerManager,
+    measureTool,
+    inspectTool,
+    exportTool,
+    profileTool,
+    annotationTool,
+    zoomRectTool,
+    projectManager
+  );
 
   // Fetch and display version
   try {
@@ -52,23 +62,12 @@ async function init() {
     if (versionEl) {
       versionEl.textContent = `Heimdall ${version}`;
     }
-    console.log(`Heimdall ${version} initialized`);
+    logger.info(`Heimdall ${version} initialized`);
   } catch (error) {
-    console.warn('Could not fetch version:', error);
-    console.log('Heimdall initialized');
+    logger.warn('Could not fetch version', error);
+    logger.info('Heimdall initialized');
   }
-
-  // Expose for debugging
-  window.mapManager = mapManager;
-  window.layerManager = layerManager;
-  window.measureTool = measureTool;
-  window.inspectTool = inspectTool;
-  window.exportTool = exportTool;
-  window.profileTool = profileTool;
-  window.annotationTool = annotationTool;
-  window.zoomRectTool = zoomRectTool;
-  window.projectManager = projectManager;
 }
 
 // Start the app
-init().catch(console.error);
+init().catch(err => logger.error('Failed to initialize app', err));

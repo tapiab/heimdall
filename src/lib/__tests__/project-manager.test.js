@@ -58,7 +58,7 @@ function createTestProjectManager() {
     },
 
     serializeLayers() {
-      return Array.from(this.layers.values()).map((layer) => ({
+      return Array.from(this.layers.values()).map(layer => ({
         id: layer.id,
         type: layer.type,
         name: layer.name,
@@ -197,7 +197,10 @@ describe('ProjectManager', () => {
         id: 'annotation-line-1',
         type: 'line',
         label: 'Test Line',
-        coordinates: [[-122.4, 37.8], [-122.5, 37.9]],
+        coordinates: [
+          [-122.4, 37.8],
+          [-122.5, 37.9],
+        ],
       });
 
       const data = projectManager.serializeProject();

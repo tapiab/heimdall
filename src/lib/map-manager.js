@@ -1,6 +1,18 @@
 import maplibregl from 'maplibre-gl';
+import { logger } from './logger.js';
 
+const log = logger.child('MapManager');
+
+/**
+ * MapManager handles the MapLibre GL map instance and basemap management.
+ * Provides methods for map initialization, basemap switching, terrain control,
+ * and layer management operations.
+ */
 export class MapManager {
+  /**
+   * Create a new MapManager instance
+   * @param {string} containerId - DOM element ID for the map container
+   */
   constructor(containerId) {
     this.containerId = containerId;
     this.map = null;
@@ -14,6 +26,10 @@ export class MapManager {
     this.pixelGridCanvas = null;
   }
 
+  /**
+   * Initialize the map with default settings and basemaps
+   * @returns {Promise<void>} Resolves when map is loaded and ready
+   */
   async init() {
     this.map = new maplibregl.Map({
       container: this.containerId,
@@ -28,7 +44,9 @@ export class MapManager {
           },
           satellite: {
             type: 'raster',
-            tiles: ['https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'],
+            tiles: [
+              'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+            ],
             tileSize: 256,
             attribution: '&copy; Esri',
           },
@@ -61,14 +79,17 @@ export class MapManager {
     });
 
     // Add navigation controls
-    this.map.addControl(new maplibregl.NavigationControl({
-      showCompass: true,
-      showZoom: true,
-      visualizePitch: false,
-    }), 'top-right');
+    this.map.addControl(
+      new maplibregl.NavigationControl({
+        showCompass: true,
+        showZoom: true,
+        visualizePitch: false,
+      }),
+      'top-right'
+    );
 
     // Wait for map to load
-    return new Promise((resolve) => {
+    return new Promise(resolve => {
       this.map.on('load', () => {
         this.setupEventListeners();
         resolve();
@@ -78,7 +99,7 @@ export class MapManager {
 
   setupEventListeners() {
     // Update coordinates on mouse move
-    this.map.on('mousemove', (e) => {
+    this.map.on('mousemove', e => {
       const coordsEl = document.getElementById('coordinates');
       if (coordsEl) {
         if (this.pixelCoordMode && this.pixelExtent) {
@@ -279,17 +300,17 @@ export class MapManager {
    * Create a pixel grid basemap for non-georeferenced images
    */
   createPixelGridBasemap(extent) {
-    const { width, height, scale, offsetX, offsetY } = extent;
+    const { width, height, offsetX, offsetY } = extent;
 
     // Remove existing pixel grid if any
     this.removePixelGridBasemap();
 
     // Calculate bounds in pseudo-geographic coordinates
     const bounds = [
-      [-offsetX, -offsetY],           // SW corner
-      [offsetX, -offsetY],            // SE corner
-      [offsetX, offsetY],             // NE corner
-      [-offsetX, offsetY],            // NW corner
+      [-offsetX, -offsetY], // SW corner
+      [offsetX, -offsetY], // SE corner
+      [offsetX, offsetY], // NE corner
+      [-offsetX, offsetY], // NW corner
     ];
 
     // Create canvas for pixel grid
@@ -474,7 +495,7 @@ export class MapManager {
 
       return true;
     } catch (error) {
-      console.error('Failed to initialize terrain source:', error);
+      log.error('Failed to initialize terrain source', error);
       return false;
     }
   }
@@ -483,13 +504,13 @@ export class MapManager {
     // Check if error is related to terrain tiles
     try {
       if (e.sourceId === 'terrain-dem' || (e.source && e.source.id === 'terrain-dem')) {
-        console.warn('Terrain tile loading failed:', e.error?.message || 'Unknown error');
+        log.warn('Terrain tile loading failed', { error: e.error?.message || 'Unknown error' });
         // Don't disable terrain entirely - some tiles may still load
         // Just log the error for debugging
       }
     } catch (err) {
       // Ignore errors in error handler to prevent cascading issues
-      console.warn('Error in terrain error handler:', err);
+      log.warn('Error in terrain error handler', { error: err.message });
     }
   }
 
@@ -524,7 +545,7 @@ export class MapManager {
 
       return { success: true };
     } catch (error) {
-      console.error('Failed to enable terrain:', error);
+      log.error('Failed to enable terrain', error);
       return { success: false, error: error.message };
     }
   }

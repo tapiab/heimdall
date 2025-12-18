@@ -10,8 +10,8 @@
 export function getFeatureBounds(geometry) {
   if (!geometry || !geometry.coordinates) return null;
 
-  let coords = [];
-  const extractCoords = (c) => {
+  const coords = [];
+  const extractCoords = c => {
     if (typeof c[0] === 'number') {
       coords.push(c);
     } else {
@@ -22,7 +22,10 @@ export function getFeatureBounds(geometry) {
 
   if (coords.length === 0) return null;
 
-  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  let minX = Infinity,
+    minY = Infinity,
+    maxX = -Infinity,
+    maxY = -Infinity;
   for (const [x, y] of coords) {
     minX = Math.min(minX, x);
     minY = Math.min(minY, y);
@@ -39,7 +42,10 @@ export function getFeatureBounds(geometry) {
     maxY += buffer;
   }
 
-  return [[minX, minY], [maxX, maxY]];
+  return [
+    [minX, minY],
+    [maxX, maxY],
+  ];
 }
 
 /**
@@ -50,7 +56,10 @@ export function getFeatureBounds(geometry) {
 export function mergeBounds(boundsArray) {
   if (!boundsArray || boundsArray.length === 0) return null;
 
-  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  let minX = Infinity,
+    minY = Infinity,
+    maxX = -Infinity,
+    maxY = -Infinity;
 
   for (const bounds of boundsArray) {
     if (!bounds) continue;
@@ -62,7 +71,10 @@ export function mergeBounds(boundsArray) {
 
   if (!isFinite(minX)) return null;
 
-  return [[minX, minY], [maxX, maxY]];
+  return [
+    [minX, minY],
+    [maxX, maxY],
+  ];
 }
 
 /**
@@ -83,8 +95,16 @@ export function boundsIntersect(a, b) {
  */
 export function buildCategoricalColorExpression(fieldName, values) {
   const colors = [
-    '#e41a1c', '#377eb8', '#4daf4a', '#984ea3', '#ff7f00',
-    '#ffff33', '#a65628', '#f781bf', '#999999', '#66c2a5'
+    '#e41a1c',
+    '#377eb8',
+    '#4daf4a',
+    '#984ea3',
+    '#ff7f00',
+    '#ffff33',
+    '#a65628',
+    '#f781bf',
+    '#999999',
+    '#66c2a5',
   ];
 
   const matchExpr = ['match', ['get', fieldName]];
@@ -109,9 +129,12 @@ export function buildGraduatedColorExpression(fieldName, min, max) {
     'interpolate',
     ['linear'],
     ['get', fieldName],
-    min, '#2166ac',        // Blue
-    (min + max) / 2, '#f7f7f7',  // White
-    max, '#b2182b'         // Red
+    min,
+    '#2166ac', // Blue
+    (min + max) / 2,
+    '#f7f7f7', // White
+    max,
+    '#b2182b', // Red
   ];
 }
 
@@ -131,11 +154,11 @@ export function isNumericArray(values) {
  * @returns {Array} Unique non-null values
  */
 export function getUniqueFieldValues(features, fieldName) {
-  return [...new Set(
-    features
-      .map(f => f.properties?.[fieldName])
-      .filter(v => v !== null && v !== undefined)
-  )];
+  return [
+    ...new Set(
+      features.map(f => f.properties?.[fieldName]).filter(v => v !== null && v !== undefined)
+    ),
+  ];
 }
 
 /**
@@ -184,7 +207,19 @@ export function getFileExtension(path) {
  * @returns {boolean}
  */
 export function isVectorExtension(ext) {
-  const vectorExtensions = ['shp', 'geojson', 'json', 'gpkg', 'kml', 'kmz', 'gml', 'gpx', 'fgb', 'tab', 'mif'];
+  const vectorExtensions = [
+    'shp',
+    'geojson',
+    'json',
+    'gpkg',
+    'kml',
+    'kmz',
+    'gml',
+    'gpx',
+    'fgb',
+    'tab',
+    'mif',
+  ];
   return vectorExtensions.includes(ext.toLowerCase());
 }
 
@@ -217,7 +252,12 @@ export function logScaleValue(count) {
  * @param {boolean} useLogScale - Whether to use log scale
  * @returns {Array<number>} Array of bar heights in pixels
  */
-export function calculateHistogramBarHeights(counts, canvasHeight, padding = 10, useLogScale = false) {
+export function calculateHistogramBarHeights(
+  counts,
+  canvasHeight,
+  padding = 10,
+  useLogScale = false
+) {
   if (!counts || counts.length === 0) return [];
 
   const drawHeight = canvasHeight - padding * 2;
@@ -268,10 +308,10 @@ export function formatHistogramValue(value) {
 
   // Use compact notation for large numbers
   if (Math.abs(value) >= 1000000) {
-    return (value / 1000000).toFixed(1) + 'M';
+    return `${(value / 1000000).toFixed(1)}M`;
   }
   if (Math.abs(value) >= 1000) {
-    return (value / 1000).toFixed(1) + 'K';
+    return `${(value / 1000).toFixed(1)}K`;
   }
 
   // For small numbers, show appropriate precision

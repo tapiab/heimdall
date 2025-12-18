@@ -106,14 +106,12 @@ export class AnnotationTool {
     el.className = 'annotation-temp-marker';
     el.textContent = this.currentPoints.length;
 
-    const marker = new maplibregl.Marker({ element: el })
-      .setLngLat([lng, lat])
-      .addTo(this.map);
+    const marker = new maplibregl.Marker({ element: el }).setLngLat([lng, lat]).addTo(this.map);
     this.tempMarkers.push(marker);
   }
 
   clearTempMarkers() {
-    this.tempMarkers.forEach((m) => m.remove());
+    this.tempMarkers.forEach(m => m.remove());
     this.tempMarkers = [];
   }
 
@@ -187,7 +185,7 @@ export class AnnotationTool {
     el.innerHTML = `<div class="annotation-marker-pin"></div><span class="annotation-marker-label">${displayLabel}</span>`;
 
     // Make marker editable on click
-    el.addEventListener('click', (e) => {
+    el.addEventListener('click', e => {
       e.stopPropagation();
       this.showAnnotationPopup(id, [lng, lat]);
     });
@@ -243,7 +241,7 @@ export class AnnotationTool {
     });
 
     // Add click handler for the line
-    this.map.on('click', `${id}-layer`, (e) => {
+    this.map.on('click', `${id}-layer`, e => {
       e.preventDefault();
       this.showAnnotationPopup(id, e.lngLat);
     });
@@ -300,7 +298,7 @@ export class AnnotationTool {
     });
 
     // Add click handler for the polygon
-    this.map.on('click', `${id}-fill`, (e) => {
+    this.map.on('click', `${id}-fill`, e => {
       e.preventDefault();
       this.showAnnotationPopup(id, e.lngLat);
     });
@@ -309,7 +307,7 @@ export class AnnotationTool {
       id,
       type: 'polygon',
       label: displayLabel,
-      coordinates: this.currentPoints.map((c) => [...c]), // Copy without closing point
+      coordinates: this.currentPoints.map(c => [...c]), // Copy without closing point
     });
 
     this.clearTempMarkers();
@@ -368,7 +366,7 @@ export class AnnotationTool {
       popup.remove();
     });
 
-    input.addEventListener('keydown', (e) => {
+    input.addEventListener('keydown', e => {
       if (e.key === 'Enter') {
         this.updateAnnotationLabel(id, input.value);
         popup.remove();
@@ -436,7 +434,7 @@ export class AnnotationTool {
   }
 
   getAnnotations() {
-    return Array.from(this.annotations.values()).map((ann) => ({
+    return Array.from(this.annotations.values()).map(ann => ({
       id: ann.id,
       type: ann.type,
       label: ann.label,

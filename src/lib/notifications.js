@@ -62,7 +62,11 @@ function simplifyErrorMessage(message) {
     return 'Permission denied - check file permissions';
   }
   // Invalid format
-  if (message.includes('not a valid') || message.includes('unsupported') || message.includes('invalid')) {
+  if (
+    message.includes('not a valid') ||
+    message.includes('unsupported') ||
+    message.includes('invalid')
+  ) {
     return 'Unsupported file format';
   }
   // GDAL errors
@@ -78,7 +82,7 @@ function simplifyErrorMessage(message) {
     return message;
   }
   // Truncate long messages
-  return message.substring(0, 57) + '...';
+  return `${message.substring(0, 57)}...`;
 }
 
 /**

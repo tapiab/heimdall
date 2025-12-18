@@ -89,7 +89,9 @@ export class ProfileTool {
     this.markers.push(marker);
 
     if (this.points.length === 1) {
-      this.showInstruction('Click to set profile end point (or keep clicking for multi-point profile)');
+      this.showInstruction(
+        'Click to set profile end point (or keep clicking for multi-point profile)'
+      );
     } else {
       this.drawLine();
       this.showInstruction('Click to add more points, or press Enter to generate profile');
@@ -181,7 +183,7 @@ export class ProfileTool {
   }
 
   clearMarkers() {
-    this.markers.forEach((m) => m.remove());
+    this.markers.forEach(m => m.remove());
     this.markers = [];
     this.points = [];
   }
@@ -250,7 +252,7 @@ export class ProfileTool {
     return null;
   }
 
-  showProfilePanel(result, layer) {
+  showProfilePanel(result, _layer) {
     // Remove existing panel
     const existing = document.getElementById('profile-panel');
     if (existing) existing.remove();
@@ -295,8 +297,8 @@ export class ProfileTool {
   drawProfileChart(result) {
     const canvas = document.getElementById('profile-canvas');
     const ctx = canvas.getContext('2d');
-    const width = canvas.width;
-    const height = canvas.height;
+    const { width } = canvas;
+    const { height } = canvas;
     const padding = { top: 20, right: 20, bottom: 30, left: 50 };
 
     const chartWidth = width - padding.left - padding.right;
@@ -307,7 +309,7 @@ export class ProfileTool {
     ctx.fillRect(0, 0, width, height);
 
     // Filter valid points
-    const validPoints = result.points.filter((p) => p.is_valid);
+    const validPoints = result.points.filter(p => p.is_valid);
     if (validPoints.length < 2) {
       ctx.fillStyle = '#666';
       ctx.font = '14px sans-serif';
@@ -379,7 +381,7 @@ export class ProfileTool {
     for (let i = 0; i <= 5; i++) {
       const elev = result.min_elevation + (elevRange * 1.1 * (5 - i)) / 5 - elevRange * 0.05;
       const y = padding.top + (chartHeight * i) / 5;
-      ctx.fillText(elev.toFixed(0) + 'm', padding.left - 5, y + 4);
+      ctx.fillText(`${elev.toFixed(0)}m`, padding.left - 5, y + 4);
     }
 
     // X axis labels
@@ -394,7 +396,7 @@ export class ProfileTool {
     const padding = { left: 50, right: 20, top: 20, bottom: 30 };
     const chartWidth = canvas.width - padding.left - padding.right;
 
-    canvas.addEventListener('mousemove', (e) => {
+    canvas.addEventListener('mousemove', e => {
       const rect = canvas.getBoundingClientRect();
       const x = e.clientX - rect.left;
       const relX = x - padding.left;

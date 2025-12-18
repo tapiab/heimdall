@@ -66,7 +66,7 @@ export class InspectTool {
     }
   }
 
-  handleMouseMove(e) {
+  handleMouseMove(_e) {
     // Update cursor position display if needed
   }
 
@@ -197,7 +197,9 @@ export class InspectTool {
       className: 'inspect-popup-container',
     })
       .setLngLat(lngLat)
-      .setHTML('<div class="inspect-popup"><div class="inspect-nodata">No raster layer at this location</div></div>')
+      .setHTML(
+        '<div class="inspect-popup"><div class="inspect-nodata">No raster layer at this location</div></div>'
+      )
       .addTo(this.map);
   }
 
@@ -210,7 +212,9 @@ export class InspectTool {
       className: 'inspect-popup-container',
     })
       .setLngLat(lngLat)
-      .setHTML(`<div class="inspect-popup"><div class="inspect-error">Error: ${error.message || error}</div></div>`)
+      .setHTML(
+        `<div class="inspect-popup"><div class="inspect-error">Error: ${error.message || error}</div></div>`
+      )
       .addTo(this.map);
   }
 

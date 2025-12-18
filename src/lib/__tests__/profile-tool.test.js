@@ -120,7 +120,10 @@ describe('ProfileTool', () => {
     });
 
     it('should clear points on activate', () => {
-      profileTool.points = [[0, 0], [1, 1]];
+      profileTool.points = [
+        [0, 0],
+        [1, 1],
+      ];
       profileTool.activate();
       expect(profileTool.points).toEqual([]);
     });
@@ -213,11 +216,7 @@ describe('ProfileTool', () => {
     });
 
     it('should calculate stats for flat terrain', () => {
-      const points = [
-        { elevation: 100 },
-        { elevation: 100 },
-        { elevation: 100 },
-      ];
+      const points = [{ elevation: 100 }, { elevation: 100 }, { elevation: 100 }];
       const stats = profileTool.calculateStats(points);
       expect(stats.elevationGain).toBe(0);
       expect(stats.elevationLoss).toBe(0);
@@ -226,11 +225,7 @@ describe('ProfileTool', () => {
     });
 
     it('should calculate stats for uphill terrain', () => {
-      const points = [
-        { elevation: 100 },
-        { elevation: 150 },
-        { elevation: 200 },
-      ];
+      const points = [{ elevation: 100 }, { elevation: 150 }, { elevation: 200 }];
       const stats = profileTool.calculateStats(points);
       expect(stats.elevationGain).toBe(100);
       expect(stats.elevationLoss).toBe(0);
@@ -239,11 +234,7 @@ describe('ProfileTool', () => {
     });
 
     it('should calculate stats for downhill terrain', () => {
-      const points = [
-        { elevation: 200 },
-        { elevation: 150 },
-        { elevation: 100 },
-      ];
+      const points = [{ elevation: 200 }, { elevation: 150 }, { elevation: 100 }];
       const stats = profileTool.calculateStats(points);
       expect(stats.elevationGain).toBe(0);
       expect(stats.elevationLoss).toBe(100);
@@ -269,11 +260,7 @@ describe('ProfileTool', () => {
     });
 
     it('should handle negative elevations', () => {
-      const points = [
-        { elevation: -10 },
-        { elevation: -50 },
-        { elevation: 20 },
-      ];
+      const points = [{ elevation: -10 }, { elevation: -50 }, { elevation: 20 }];
       const stats = profileTool.calculateStats(points);
       expect(stats.elevationGain).toBe(70); // -50 to 20
       expect(stats.elevationLoss).toBe(40); // -10 to -50
@@ -301,7 +288,7 @@ describe('Profile result processing', () => {
     expect(result.points.length).toBe(3);
     expect(result.total_distance).toBe(200);
     expect(result.elevation_gain).toBe(20);
-    expect(result.points.every((p) => p.is_valid)).toBe(true);
+    expect(result.points.every(p => p.is_valid)).toBe(true);
   });
 
   it('should handle points outside raster bounds', () => {
@@ -318,7 +305,7 @@ describe('Profile result processing', () => {
       elevation_loss: 0,
     };
 
-    const validPoints = result.points.filter((p) => p.is_valid);
+    const validPoints = result.points.filter(p => p.is_valid);
     expect(validPoints.length).toBe(2);
   });
 
@@ -343,7 +330,7 @@ describe('Haversine distance calculation', () => {
   // Test the concept of Haversine distance used in profile tool
   function haversineDistance(lng1, lat1, lng2, lat2) {
     const R = 6371000; // Earth radius in meters
-    const toRad = (deg) => (deg * Math.PI) / 180;
+    const toRad = deg => (deg * Math.PI) / 180;
 
     const dLat = toRad(lat2 - lat1);
     const dLon = toRad(lng2 - lng1);

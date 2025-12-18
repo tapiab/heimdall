@@ -41,7 +41,7 @@ function createTestMapManager() {
         });
         this.map.on('error', this.handleTerrainError.bind(this));
         return true;
-      } catch (error) {
+      } catch (_error) {
         return false;
       }
     },
@@ -324,10 +324,7 @@ describe('MapManager Terrain', () => {
         error: { message: 'Network error' },
       });
 
-      expect(consoleSpy).toHaveBeenCalledWith(
-        'Terrain tile loading failed:',
-        'Network error'
-      );
+      expect(consoleSpy).toHaveBeenCalledWith('Terrain tile loading failed:', 'Network error');
 
       consoleSpy.mockRestore();
     });

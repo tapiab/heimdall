@@ -2,7 +2,7 @@
  * Tests for notification utilities
  */
 
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 
 // Create mock DOM elements
 function createMockDOM() {
@@ -139,10 +139,7 @@ describe('Notifications', () => {
     it('should hide loading even if promise rejects', async () => {
       const indicator = document.getElementById('loading-indicator');
 
-      const promise = withLoading(
-        Promise.reject(new Error('Test error')),
-        'Test loading'
-      );
+      const promise = withLoading(Promise.reject(new Error('Test error')), 'Test loading');
 
       await expect(promise).rejects.toThrow('Test error');
       expect(indicator.classList.contains('visible')).toBe(false);

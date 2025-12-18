@@ -145,7 +145,7 @@ function createTestAnnotationTool() {
     },
 
     getAnnotations() {
-      return Array.from(this.annotations.values()).map((ann) => ({
+      return Array.from(this.annotations.values()).map(ann => ({
         id: ann.id,
         type: ann.type,
         label: ann.label,
@@ -157,7 +157,7 @@ function createTestAnnotationTool() {
       this.clearAll();
       for (const ann of data) {
         if (ann.type === 'marker') {
-          const id = this.addMarkerAnnotation(ann.coordinates[0], ann.coordinates[1], ann.label);
+          this.addMarkerAnnotation(ann.coordinates[0], ann.coordinates[1], ann.label);
           // Update the ID to match the original if needed
         } else if (ann.type === 'line') {
           this.currentPoints = ann.coordinates;
@@ -405,17 +405,32 @@ describe('AnnotationTool', () => {
     it('should load annotations', () => {
       const data = [
         { type: 'marker', label: 'Loaded Marker', coordinates: [-122.4, 37.8] },
-        { type: 'line', label: 'Loaded Line', coordinates: [[-122.4, 37.8], [-122.5, 37.9]] },
-        { type: 'polygon', label: 'Loaded Polygon', coordinates: [[-122.4, 37.8], [-122.5, 37.9], [-122.3, 37.85]] },
+        {
+          type: 'line',
+          label: 'Loaded Line',
+          coordinates: [
+            [-122.4, 37.8],
+            [-122.5, 37.9],
+          ],
+        },
+        {
+          type: 'polygon',
+          label: 'Loaded Polygon',
+          coordinates: [
+            [-122.4, 37.8],
+            [-122.5, 37.9],
+            [-122.3, 37.85],
+          ],
+        },
       ];
 
       annotationTool.loadAnnotations(data);
       expect(annotationTool.getCount()).toBe(3);
 
       const annotations = annotationTool.getAnnotations();
-      expect(annotations.some((a) => a.type === 'marker')).toBe(true);
-      expect(annotations.some((a) => a.type === 'line')).toBe(true);
-      expect(annotations.some((a) => a.type === 'polygon')).toBe(true);
+      expect(annotations.some(a => a.type === 'marker')).toBe(true);
+      expect(annotations.some(a => a.type === 'line')).toBe(true);
+      expect(annotations.some(a => a.type === 'polygon')).toBe(true);
     });
 
     it('should clear existing annotations when loading', () => {
@@ -452,7 +467,10 @@ describe('Annotation data structure', () => {
       id: 'annotation-line-1',
       type: 'line',
       label: 'Test Line',
-      coordinates: [[-122.4, 37.8], [-122.5, 37.9]],
+      coordinates: [
+        [-122.4, 37.8],
+        [-122.5, 37.9],
+      ],
     };
 
     expect(line.type).toBe('line');
@@ -465,7 +483,11 @@ describe('Annotation data structure', () => {
       id: 'annotation-polygon-1',
       type: 'polygon',
       label: 'Test Polygon',
-      coordinates: [[-122.4, 37.8], [-122.5, 37.9], [-122.3, 37.85]],
+      coordinates: [
+        [-122.4, 37.8],
+        [-122.5, 37.9],
+        [-122.3, 37.85],
+      ],
     };
 
     expect(polygon.type).toBe('polygon');

@@ -35,7 +35,7 @@ export class ExportTool {
 
       // Convert to blob
       const mimeType = format === 'jpeg' ? 'image/jpeg' : 'image/png';
-      const blob = await new Promise((resolve) => {
+      const blob = await new Promise(resolve => {
         exportCanvas.toBlob(resolve, mimeType, quality);
       });
 
@@ -104,7 +104,7 @@ export class ExportTool {
 
       // Convert to blob
       const mimeType = format === 'jpeg' ? 'image/jpeg' : 'image/png';
-      const blob = await new Promise((resolve) => {
+      const blob = await new Promise(resolve => {
         exportCanvas.toBlob(resolve, mimeType, 0.92);
       });
 
@@ -150,7 +150,7 @@ export class ExportTool {
     try {
       const canvas = this.map.getCanvas();
 
-      const blob = await new Promise((resolve) => {
+      const blob = await new Promise(resolve => {
         canvas.toBlob(resolve, 'image/png');
       });
 
@@ -158,9 +158,7 @@ export class ExportTool {
         throw new Error('Failed to create image');
       }
 
-      await navigator.clipboard.write([
-        new ClipboardItem({ 'image/png': blob }),
-      ]);
+      await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
 
       showToast('Copied to clipboard', 'success', 2000);
     } catch (error) {

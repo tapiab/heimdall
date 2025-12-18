@@ -43,61 +43,126 @@ describe('getFeatureBounds', () => {
   it('extracts bounds from LineString geometry', () => {
     const geometry = {
       type: 'LineString',
-      coordinates: [[0, 0], [10, 5], [20, 10]],
+      coordinates: [
+        [0, 0],
+        [10, 5],
+        [20, 10],
+      ],
     };
     const bounds = getFeatureBounds(geometry);
-    expect(bounds).toEqual([[0, 0], [20, 10]]);
+    expect(bounds).toEqual([
+      [0, 0],
+      [20, 10],
+    ]);
   });
 
   it('extracts bounds from Polygon geometry', () => {
     const geometry = {
       type: 'Polygon',
-      coordinates: [[[0, 0], [10, 0], [10, 10], [0, 10], [0, 0]]],
+      coordinates: [
+        [
+          [0, 0],
+          [10, 0],
+          [10, 10],
+          [0, 10],
+          [0, 0],
+        ],
+      ],
     };
     const bounds = getFeatureBounds(geometry);
-    expect(bounds).toEqual([[0, 0], [10, 10]]);
+    expect(bounds).toEqual([
+      [0, 0],
+      [10, 10],
+    ]);
   });
 
   it('extracts bounds from Polygon with holes', () => {
     const geometry = {
       type: 'Polygon',
       coordinates: [
-        [[0, 0], [20, 0], [20, 20], [0, 20], [0, 0]],
-        [[5, 5], [15, 5], [15, 15], [5, 15], [5, 5]],
+        [
+          [0, 0],
+          [20, 0],
+          [20, 20],
+          [0, 20],
+          [0, 0],
+        ],
+        [
+          [5, 5],
+          [15, 5],
+          [15, 15],
+          [5, 15],
+          [5, 5],
+        ],
       ],
     };
     const bounds = getFeatureBounds(geometry);
-    expect(bounds).toEqual([[0, 0], [20, 20]]);
+    expect(bounds).toEqual([
+      [0, 0],
+      [20, 20],
+    ]);
   });
 
   it('extracts bounds from MultiPoint geometry', () => {
     const geometry = {
       type: 'MultiPoint',
-      coordinates: [[-5, -5], [5, 5], [10, 0]],
+      coordinates: [
+        [-5, -5],
+        [5, 5],
+        [10, 0],
+      ],
     };
     const bounds = getFeatureBounds(geometry);
-    expect(bounds).toEqual([[-5, -5], [10, 5]]);
+    expect(bounds).toEqual([
+      [-5, -5],
+      [10, 5],
+    ]);
   });
 
   it('extracts bounds from MultiPolygon geometry', () => {
     const geometry = {
       type: 'MultiPolygon',
       coordinates: [
-        [[[0, 0], [10, 0], [10, 10], [0, 10], [0, 0]]],
-        [[[20, 20], [30, 20], [30, 30], [20, 30], [20, 20]]],
+        [
+          [
+            [0, 0],
+            [10, 0],
+            [10, 10],
+            [0, 10],
+            [0, 0],
+          ],
+        ],
+        [
+          [
+            [20, 20],
+            [30, 20],
+            [30, 30],
+            [20, 30],
+            [20, 20],
+          ],
+        ],
       ],
     };
     const bounds = getFeatureBounds(geometry);
-    expect(bounds).toEqual([[0, 0], [30, 30]]);
+    expect(bounds).toEqual([
+      [0, 0],
+      [30, 30],
+    ]);
   });
 
   it('handles negative coordinates', () => {
     const geometry = {
       type: 'LineString',
-      coordinates: [[-180, -90], [180, 90]],
+      coordinates: [
+        [-180, -90],
+        [180, 90],
+      ],
     };
     const bounds = getFeatureBounds(geometry);
-    expect(bounds).toEqual([[-180, -90], [180, 90]]);
+    expect(bounds).toEqual([
+      [-180, -90],
+      [180, 90],
+    ]);
   });
 });
 
@@ -111,8 +176,18 @@ describe('mergeBounds', () => {
   });
 
   it('handles array with null entries', () => {
-    const bounds = mergeBounds([null, [[0, 0], [10, 10]], null]);
-    expect(bounds).toEqual([[0, 0], [10, 10]]);
+    const bounds = mergeBounds([
+      null,
+      [
+        [0, 0],
+        [10, 10],
+      ],
+      null,
+    ]);
+    expect(bounds).toEqual([
+      [0, 0],
+      [10, 10],
+    ]);
   });
 
   it('returns null for array of all nulls', () => {
@@ -121,19 +196,40 @@ describe('mergeBounds', () => {
 
   it('merges two bounds', () => {
     const bounds = mergeBounds([
-      [[0, 0], [10, 10]],
-      [[5, 5], [20, 20]],
+      [
+        [0, 0],
+        [10, 10],
+      ],
+      [
+        [5, 5],
+        [20, 20],
+      ],
     ]);
-    expect(bounds).toEqual([[0, 0], [20, 20]]);
+    expect(bounds).toEqual([
+      [0, 0],
+      [20, 20],
+    ]);
   });
 
   it('merges multiple non-overlapping bounds', () => {
     const bounds = mergeBounds([
-      [[-10, -10], [0, 0]],
-      [[10, 10], [20, 20]],
-      [[5, 0], [15, 10]],
+      [
+        [-10, -10],
+        [0, 0],
+      ],
+      [
+        [10, 10],
+        [20, 20],
+      ],
+      [
+        [5, 0],
+        [15, 10],
+      ],
     ]);
-    expect(bounds).toEqual([[-10, -10], [20, 20]]);
+    expect(bounds).toEqual([
+      [-10, -10],
+      [20, 20],
+    ]);
   });
 });
 
@@ -191,11 +287,11 @@ describe('buildGraduatedColorExpression', () => {
     expect(expr[0]).toBe('interpolate');
     expect(expr[1]).toEqual(['linear']);
     expect(expr[2]).toEqual(['get', 'value']);
-    expect(expr[3]).toBe(0);      // min
+    expect(expr[3]).toBe(0); // min
     expect(expr[4]).toBe('#2166ac'); // blue
-    expect(expr[5]).toBe(50);     // mid
+    expect(expr[5]).toBe(50); // mid
     expect(expr[6]).toBe('#f7f7f7'); // white
-    expect(expr[7]).toBe(100);    // max
+    expect(expr[7]).toBe(100); // max
     expect(expr[8]).toBe('#b2182b'); // red
   });
 
@@ -414,9 +510,9 @@ describe('calculateHistogramBarHeights', () => {
     // canvas height 200, padding 10 each side = 180 drawable
     // max count is 100, so 100 should be full height (180)
     const heights = calculateHistogramBarHeights([50, 100, 25], 200, 10, false);
-    expect(heights[0]).toBe(90);  // 50/100 * 180
+    expect(heights[0]).toBe(90); // 50/100 * 180
     expect(heights[1]).toBe(180); // 100/100 * 180
-    expect(heights[2]).toBe(45);  // 25/100 * 180
+    expect(heights[2]).toBe(45); // 25/100 * 180
   });
 
   it('applies log scale when requested', () => {
