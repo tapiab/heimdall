@@ -1,5 +1,5 @@
 .PHONY: help dev build preview test test-run test-coverage check clean install \
-        tauri-dev tauri-build tauri-build-debug lint-rust fmt-rust cargo-check cargo-test \
+        tauri-dev tauri-build tauri-build-debug lint-js lint-rust fmt-js fmt-rust cargo-check cargo-test \
         ci-install ci-lint-js ci-lint-rust ci-test-js ci-test-rust ci-build ci-build-target
 
 # Default target
@@ -24,11 +24,15 @@ help:
 	@echo "  test-coverage  Run tests with coverage"
 	@echo "  check          Run all checks (JS tests + Rust check + Rust tests)"
 	@echo ""
+	@echo "Linting & Formatting:"
+	@echo "  lint-js        Run ESLint on JavaScript"
+	@echo "  lint-rust      Run clippy linter on Rust"
+	@echo "  fmt-js         Check JavaScript formatting with Prettier"
+	@echo "  fmt-rust       Check Rust formatting"
+	@echo ""
 	@echo "Rust:"
 	@echo "  cargo-check    Run cargo check"
 	@echo "  cargo-test     Run cargo tests"
-	@echo "  lint-rust      Run clippy linter"
-	@echo "  fmt-rust       Check Rust formatting"
 	@echo ""
 	@echo "CI (used by GitLab CI):"
 	@echo "  ci-install     Install dependencies for CI"
@@ -76,6 +80,13 @@ test-coverage:
 check:
 	npm run check
 
+# Linting & Formatting
+lint-js:
+	npm run lint
+
+fmt-js:
+	npm run fmt
+
 # Rust specific
 cargo-check:
 	cd src-tauri && cargo check
@@ -103,7 +114,8 @@ ci-install:
 	npm ci
 
 ci-lint-js:
-	npm run test:run
+	npm run lint
+	npm run fmt
 
 ci-lint-rust:
 	cd src-tauri && cargo fmt --check
