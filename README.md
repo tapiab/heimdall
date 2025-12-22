@@ -28,6 +28,7 @@ Just as Heimdall watches over the realms, this application lets you observe and 
 - **3D Terrain** - Visualize elevation with adjustable exaggeration
 - **Non-georeferenced images** - View regular images with pixel coordinates and grid overlay
 - **Distance measurement** - Measure distances in meters/km (geographic) or pixels (non-geo images)
+- **STAC Browser** - Search and load satellite imagery from STAC APIs (Sentinel-2, Landsat, etc.)
 - **Keyboard-driven** - Full keyboard shortcuts for power users
 
 ## Keyboard Shortcuts
@@ -50,6 +51,7 @@ Just as Heimdall watches over the realms, this application lets you observe and 
 | `I` | Inspect pixel values |
 | `P` | Elevation profile |
 | `A` | Annotate (marker mode) |
+| `C` | Open STAC Browser |
 | `Enter` | Generate profile (when in profile mode) |
 
 ### View Controls
@@ -189,10 +191,17 @@ cargo test -- --nocapture
 cargo test test_bounds_intersect
 ```
 
-Tests are located in `src-tauri/src/gdal/tile_extractor.rs` and cover:
-- Coordinate conversion (tile to geographic/Web Mercator)
-- Bounds intersection logic
-- Stretch parameter calculations
+Tests are located in `src-tauri/src/` and cover:
+- **Tile extraction** (`gdal/tile_extractor.rs`): Coordinate conversion, bounds intersection, stretch calculations
+- **STAC API** (`commands/stac.rs`): Data structure serialization/deserialization, URL construction, extent parsing, asset handling, error cases
+
+```bash
+# Run STAC-specific tests
+cargo test stac
+
+# Run integration test with real COG (requires network)
+cargo test test_vsicurl_real_cog -- --ignored
+```
 
 ### Code Quality Checks
 
@@ -214,6 +223,53 @@ cargo fmt --check # Formatting
 3. **Adjust display**: Use the controls panel to adjust min/max/gamma
 4. **RGB composite**: Select "RGB Composite" or "Cross-Layer RGB" mode
 5. **Layer management**: Toggle visibility, adjust opacity, reorder by dragging
+
+## STAC Browser
+
+Heimdall includes a built-in STAC (SpatioTemporal Asset Catalog) browser for searching and loading satellite imagery directly from cloud archives.
+
+### Supported STAC APIs
+
+- **Earth Search** (AWS): `https://earth-search.aws.element84.com/v1` - Sentinel-2, Landsat, NAIP, and more
+- **Microsoft Planetary Computer**: `https://planetarycomputer.microsoft.com/api/stac/v1`
+- **Any STAC API** compliant with the STAC 1.0.0 specification
+
+### Using the STAC Browser
+
+1. **Open STAC Browser**: Press `C` or click the "STAC" button in the toolbar
+2. **Select API**: Choose from preset APIs (Earth Search, Planetary Computer) or select "Custom URL..." to enter your own
+3. **Connect**: Click "Connect" to connect to the selected API
+4. **Select Collection**: Choose a collection (e.g., `sentinel-2-l2a`)
+5. **Set Search Filters**:
+   - Click "Use Current View" to search within the visible map area, or "Draw Area" to draw a bounding box
+   - Set date range for temporal filtering
+   - Adjust cloud cover threshold (for optical imagery)
+6. **Search**: Click "Search" to find matching scenes
+7. **View Results**: Scene footprints appear on the map; click to select
+8. **Load Asset**: Select an asset (e.g., `visual` for true color, individual bands) and click "Load"
+
+### Asset Types
+
+| Asset | Description |
+|-------|-------------|
+| `visual` / `TCI` | True Color Image (RGB composite, 8-bit) |
+| `B02`, `B03`, `B04` | Individual spectral bands (Blue, Green, Red) |
+| `B08` | Near-Infrared band |
+| `SCL` | Scene Classification Layer |
+
+### Performance Features
+
+- **Cloud Optimized GeoTIFF (COG)**: Streams tiles directly from cloud storage
+- **Overview-based loading**: Automatically selects appropriate resolution for current zoom level
+- **HTTP/2 multiplexing**: Efficient parallel range requests for fast tile loading
+
+### Tips
+
+- **Toggle footprints**: Click "Hide"/"Show" in results header to toggle scene outline visibility
+- **Auto-hide footprints**: Footprints are automatically hidden when closing the STAC panel (restored when reopened)
+- **Clear results**: Click "Clear" to remove all footprints and reset the search
+- **Multiple assets**: Load multiple assets from different scenes as separate layers
+- **Switching APIs**: Changing the selected API automatically clears previous results and collections
 
 ## CI/CD
 

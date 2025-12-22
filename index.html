@@ -51,6 +51,7 @@
         <button id="measure-btn" title="Measure distance (M)">Measure</button>
         <button id="inspect-btn" title="Inspect pixel values (I)">Inspect</button>
         <button id="profile-btn" title="Elevation profile (P)">Profile</button>
+        <button id="stac-btn" title="Browse STAC Catalog (C)">STAC</button>
         <div id="annotate-container" class="menu-container">
           <button id="annotate-btn" title="Add annotations (A)">Annotate</button>
           <div id="annotation-dropdown" class="menu-dropdown annotation-dropdown">
@@ -136,6 +137,105 @@
           <div id="histogram-stats">
             <span id="histogram-min">Min: --</span>
             <span id="histogram-max">Max: --</span>
+          </div>
+        </div>
+      </div>
+      <div id="stac-panel">
+        <div id="stac-panel-header">
+          <h4 id="stac-panel-title">STAC Browser</h4>
+          <button id="stac-panel-close">&times;</button>
+        </div>
+        <div id="stac-content">
+          <!-- Connection Section -->
+          <div id="stac-connection" class="stac-section">
+            <label for="stac-api-select">STAC API:</label>
+            <select id="stac-api-select">
+              <option value="https://earth-search.aws.element84.com/v1">Earth Search (AWS) - Sentinel-2, Landsat</option>
+              <option value="https://planetarycomputer.microsoft.com/api/stac/v1">Planetary Computer - Landsat, NAIP, more</option>
+              <option value="custom">Custom URL...</option>
+            </select>
+            <div id="stac-custom-url-row" class="stac-url-row hidden">
+              <input type="text" id="stac-url"
+                     placeholder="Enter STAC API URL">
+            </div>
+            <button id="stac-connect-btn" class="stac-primary-btn">Connect</button>
+            <div id="stac-catalog-info" class="stac-info hidden"></div>
+          </div>
+
+          <!-- Collection Selector -->
+          <div id="stac-collections" class="stac-section hidden">
+            <label for="stac-collection-select">Collection:</label>
+            <select id="stac-collection-select">
+              <option value="">Select a collection...</option>
+            </select>
+            <div id="stac-collection-info" class="stac-info"></div>
+          </div>
+
+          <!-- Search Filters -->
+          <div id="stac-search" class="stac-section hidden">
+            <h5>Search Filters</h5>
+
+            <div class="stac-filter-row">
+              <label>Bounding Box:</label>
+              <button id="stac-use-view" class="stac-small-btn">Use View</button>
+              <button id="stac-draw-bbox" class="stac-small-btn">Draw Area</button>
+              <button id="stac-clear-bbox" class="stac-small-btn stac-clear-btn" style="display:none;">✕</button>
+            </div>
+            <div id="stac-bbox-display" class="stac-bbox-value"></div>
+
+            <div class="stac-filter-row">
+              <label>Date Range:</label>
+              <div class="stac-date-inputs">
+                <input type="date" id="stac-date-start">
+                <span>to</span>
+                <input type="date" id="stac-date-end">
+              </div>
+            </div>
+
+            <div class="stac-filter-row">
+              <label for="stac-cloud-cover">Max Cloud Cover:</label>
+              <div class="stac-slider-row">
+                <input type="range" id="stac-cloud-cover" min="0" max="100" value="20">
+                <span id="stac-cloud-value">20%</span>
+              </div>
+            </div>
+
+            <div class="stac-filter-row">
+              <label for="stac-limit">Results Limit:</label>
+              <select id="stac-limit">
+                <option value="10">10</option>
+                <option value="20" selected>20</option>
+                <option value="50">50</option>
+                <option value="100">100</option>
+              </select>
+            </div>
+
+            <button id="stac-search-btn" class="stac-primary-btn">Search</button>
+          </div>
+
+          <!-- Search Results -->
+          <div id="stac-results" class="stac-section hidden">
+            <div id="stac-results-header">
+              <h5>Results <span id="stac-results-count"></span></h5>
+              <div class="stac-header-buttons">
+                <button id="stac-toggle-footprints" class="stac-small-btn">Hide</button>
+                <button id="stac-clear-results" class="stac-small-btn">Clear</button>
+              </div>
+            </div>
+            <div id="stac-results-list"></div>
+          </div>
+
+          <!-- Item Detail / Asset Loading -->
+          <div id="stac-item-detail" class="stac-section hidden">
+            <div id="stac-item-header">
+              <h5 id="stac-item-title">Item Details</h5>
+              <button id="stac-item-back" class="stac-small-btn">Back</button>
+            </div>
+            <div id="stac-item-properties"></div>
+            <div id="stac-item-assets">
+              <h6>Available Assets</h6>
+              <div id="stac-asset-list"></div>
+            </div>
           </div>
         </div>
       </div>

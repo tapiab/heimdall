@@ -128,7 +128,7 @@ describe('UI Module - File Type Detection', () => {
 
 describe('UI Module - Tool Management', () => {
   // Mock tools
-  function createMockTool(name) {
+  function createMockTool(_name) {
     return {
       isActive: vi.fn(() => false),
       activate: vi.fn(),
@@ -152,15 +152,13 @@ describe('UI Module - Tool Management', () => {
 
       // Create mock buttons
       buttons = {};
-      ['measure-btn', 'inspect-btn', 'profile-btn', 'annotate-btn', 'zoom-rect-btn'].forEach(
-        id => {
-          const btn = document.createElement('button');
-          btn.id = id;
-          btn.classList.add('active');
-          document.body.appendChild(btn);
-          buttons[id] = btn;
-        }
-      );
+      ['measure-btn', 'inspect-btn', 'profile-btn', 'annotate-btn', 'zoom-rect-btn'].forEach(id => {
+        const btn = document.createElement('button');
+        btn.id = id;
+        btn.classList.add('active');
+        document.body.appendChild(btn);
+        buttons[id] = btn;
+      });
     });
 
     afterEach(() => {

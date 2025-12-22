@@ -1813,3 +1813,576 @@ body,
   color: #4a9eff;
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
 }
+
+/* ============================================
+   STAC Browser Panel
+   ============================================ */
+
+#stac-panel {
+  position: absolute;
+  top: 60px;
+  right: 10px;
+  width: 360px;
+  max-height: calc(100vh - 120px);
+  background: #252525;
+  border: 1px solid #3a3a3a;
+  border-radius: 4px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
+  display: none;
+  flex-direction: column;
+  z-index: 1000;
+}
+
+#stac-panel.visible {
+  display: flex;
+}
+
+#stac-panel-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 12px;
+  background: #2a2a2a;
+  border-bottom: 1px solid #3a3a3a;
+}
+
+#stac-panel-header h4 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: #4a9eff;
+}
+
+#stac-panel-close {
+  background: none;
+  border: none;
+  color: #888;
+  font-size: 18px;
+  cursor: pointer;
+  padding: 0 4px;
+}
+
+#stac-panel-close:hover {
+  color: #fff;
+}
+
+#stac-content {
+  padding: 12px;
+  overflow-y: auto;
+  flex: 1;
+}
+
+/* STAC Sections */
+.stac-section {
+  margin-bottom: 16px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid #3a3a3a;
+}
+
+.stac-section:last-child {
+  border-bottom: none;
+  margin-bottom: 0;
+  padding-bottom: 0;
+}
+
+.stac-section.hidden {
+  display: none;
+}
+
+.stac-section h5 {
+  margin: 0 0 12px 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: #aaa;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.stac-section h6 {
+  margin: 12px 0 8px 0;
+  font-size: 11px;
+  font-weight: 600;
+  color: #888;
+}
+
+.stac-section label {
+  display: block;
+  font-size: 12px;
+  color: #888;
+  margin-bottom: 6px;
+}
+
+/* STAC API Select */
+#stac-api-select {
+  width: 100%;
+  padding: 8px 10px;
+  margin-bottom: 10px;
+  background: #1a1a1a;
+  border: 1px solid #3a3a3a;
+  border-radius: 4px;
+  color: #e0e0e0;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+#stac-api-select:focus {
+  outline: none;
+  border-color: #4a9eff;
+}
+
+/* STAC URL Input Row */
+.stac-url-row {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.stac-url-row.hidden {
+  display: none;
+}
+
+#stac-url {
+  flex: 1;
+  padding: 8px 10px;
+  background: #1a1a1a;
+  border: 1px solid #3a3a3a;
+  border-radius: 4px;
+  color: #e0e0e0;
+  font-size: 12px;
+}
+
+#stac-url:focus {
+  outline: none;
+  border-color: #4a9eff;
+}
+
+#stac-connect-btn {
+  padding: 8px 16px;
+  background: #4a9eff;
+  border: none;
+  border-radius: 4px;
+  color: white;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+#stac-connect-btn:hover {
+  background: #3a8adf;
+}
+
+#stac-connect-btn:disabled {
+  background: #3a3a3a;
+  color: #666;
+  cursor: not-allowed;
+}
+
+/* STAC Info Display */
+.stac-info {
+  margin-top: 10px;
+  padding: 10px;
+  background: #1a1a1a;
+  border-radius: 4px;
+  font-size: 12px;
+  color: #aaa;
+}
+
+.stac-info.hidden {
+  display: none;
+}
+
+.stac-info-title {
+  color: #4a9eff;
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+
+.stac-info-desc {
+  color: #888;
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+/* Collection Select */
+#stac-collection-select {
+  width: 100%;
+  padding: 8px 10px;
+  background: #1a1a1a;
+  border: 1px solid #3a3a3a;
+  border-radius: 4px;
+  color: #e0e0e0;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+#stac-collection-select:focus {
+  outline: none;
+  border-color: #4a9eff;
+}
+
+/* STAC Filter Row */
+.stac-filter-row {
+  margin-bottom: 12px;
+}
+
+.stac-filter-row label {
+  margin-bottom: 6px;
+}
+
+/* Date Inputs */
+.stac-date-inputs {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.stac-date-inputs input[type='date'] {
+  flex: 1;
+  padding: 6px 8px;
+  background: #1a1a1a;
+  border: 1px solid #3a3a3a;
+  border-radius: 4px;
+  color: #e0e0e0;
+  font-size: 12px;
+}
+
+.stac-date-inputs input[type='date']:focus {
+  outline: none;
+  border-color: #4a9eff;
+}
+
+.stac-date-inputs span {
+  color: #666;
+  font-size: 12px;
+}
+
+/* Slider Row */
+.stac-slider-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.stac-slider-row input[type='range'] {
+  flex: 1;
+  height: 4px;
+  -webkit-appearance: none;
+  appearance: none;
+  background: #3a3a3a;
+  border-radius: 2px;
+  cursor: pointer;
+}
+
+.stac-slider-row input[type='range']::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  background: #4a9eff;
+  border-radius: 50%;
+  cursor: pointer;
+}
+
+.stac-slider-row span {
+  min-width: 35px;
+  text-align: right;
+  font-size: 12px;
+  color: #4a9eff;
+  font-family: monospace;
+}
+
+/* Limit Select */
+#stac-limit {
+  padding: 6px 10px;
+  background: #1a1a1a;
+  border: 1px solid #3a3a3a;
+  border-radius: 4px;
+  color: #e0e0e0;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+/* STAC Buttons */
+.stac-primary-btn {
+  width: 100%;
+  padding: 10px 16px;
+  background: #4a9eff;
+  border: none;
+  border-radius: 4px;
+  color: white;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.stac-primary-btn:hover {
+  background: #3a8adf;
+}
+
+.stac-primary-btn:disabled {
+  background: #3a3a3a;
+  color: #666;
+  cursor: not-allowed;
+}
+
+.stac-small-btn {
+  padding: 5px 10px;
+  background: #3a3a3a;
+  border: 1px solid #4a4a4a;
+  border-radius: 4px;
+  color: #e0e0e0;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.stac-small-btn:hover {
+  background: #4a4a4a;
+}
+
+.stac-small-btn.active {
+  background: #ff9800;
+  color: #1a1a1a;
+  border-color: #ff9800;
+}
+
+.stac-clear-btn {
+  padding: 5px 8px;
+  background: transparent;
+  border: 1px solid #666;
+  color: #999;
+}
+
+.stac-clear-btn:hover {
+  background: #ff4444;
+  border-color: #ff4444;
+  color: white;
+}
+
+/* STAC Bbox Display */
+.stac-bbox-value {
+  margin-top: 6px;
+  padding: 6px 8px;
+  background: #1a1a1a;
+  border-radius: 4px;
+  font-size: 11px;
+  font-family: monospace;
+  color: #4a9eff;
+  word-break: break-all;
+}
+
+.stac-bbox-value:empty::before {
+  content: 'No area selected';
+  color: #666;
+  font-family: inherit;
+}
+
+/* STAC Results Header */
+#stac-results-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 10px;
+}
+
+#stac-results-header h5 {
+  margin: 0;
+}
+
+.stac-header-buttons {
+  display: flex;
+  gap: 6px;
+}
+
+#stac-results-count {
+  color: #4a9eff;
+  font-weight: normal;
+}
+
+/* STAC Results List */
+#stac-results-list {
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.stac-result-item {
+  padding: 10px;
+  background: #2a2a2a;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  margin-bottom: 6px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.stac-result-item:hover {
+  background: #333;
+}
+
+.stac-result-item.selected {
+  border-color: #4a9eff;
+  background: #2d3a4a;
+}
+
+.stac-result-title {
+  font-size: 12px;
+  font-weight: 500;
+  color: #e0e0e0;
+  margin-bottom: 4px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.stac-result-meta {
+  display: flex;
+  gap: 12px;
+  font-size: 11px;
+  color: #888;
+}
+
+.stac-result-date {
+  color: #4a9eff;
+}
+
+.stac-result-cloud {
+  color: #aaa;
+}
+
+/* STAC Item Detail */
+#stac-item-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+#stac-item-header h5 {
+  margin: 0;
+  color: #4a9eff;
+}
+
+#stac-item-properties {
+  padding: 10px;
+  background: #1a1a1a;
+  border-radius: 4px;
+  margin-bottom: 12px;
+  font-size: 11px;
+}
+
+.stac-property-row {
+  display: flex;
+  justify-content: space-between;
+  padding: 4px 0;
+  border-bottom: 1px solid #2a2a2a;
+}
+
+.stac-property-row:last-child {
+  border-bottom: none;
+}
+
+.stac-property-key {
+  color: #888;
+}
+
+.stac-property-value {
+  color: #e0e0e0;
+  font-family: monospace;
+}
+
+/* STAC Asset List */
+#stac-asset-list {
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.stac-asset-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 10px;
+  background: #2a2a2a;
+  border-radius: 4px;
+  margin-bottom: 4px;
+}
+
+.stac-asset-item:hover {
+  background: #333;
+}
+
+.stac-asset-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.stac-asset-name {
+  font-size: 12px;
+  color: #e0e0e0;
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.stac-asset-type {
+  font-size: 10px;
+  color: #666;
+  margin-top: 2px;
+}
+
+.stac-asset-load-btn {
+  padding: 5px 12px;
+  background: #4a9eff;
+  border: none;
+  border-radius: 4px;
+  color: white;
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.stac-asset-load-btn:hover {
+  background: #3a8adf;
+}
+
+.stac-asset-load-btn:disabled {
+  background: #3a3a3a;
+  color: #666;
+  cursor: not-allowed;
+}
+
+/* STAC Button active state */
+#stac-btn.active {
+  background: #4a9eff !important;
+  border-color: #6ab0ff !important;
+  color: #fff !important;
+}
+
+/* STAC Footprint styling on map */
+.stac-footprint-popup {
+  max-width: 280px;
+}
+
+/* Empty state */
+.stac-empty-state {
+  padding: 20px;
+  text-align: center;
+  color: #666;
+  font-size: 12px;
+}
+
+/* Loading state within STAC panel */
+.stac-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  color: #888;
+  font-size: 12px;
+  gap: 8px;
+}
+
+.stac-loading .spinner {
+  width: 14px;
+  height: 14px;
+}

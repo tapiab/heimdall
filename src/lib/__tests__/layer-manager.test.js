@@ -59,6 +59,7 @@ function createMockMap() {
     on: vi.fn(),
     off: vi.fn(),
     queryRenderedFeatures: vi.fn(() => []),
+    getZoom: vi.fn(() => 10),
   };
 }
 
@@ -290,9 +291,24 @@ describe('LayerManager', () => {
 
   describe('layer ordering', () => {
     beforeEach(() => {
-      layerManager.layers.set('layer-1', { id: 'layer-1', type: 'raster', path: '/a.tif', visible: true });
-      layerManager.layers.set('layer-2', { id: 'layer-2', type: 'raster', path: '/b.tif', visible: true });
-      layerManager.layers.set('layer-3', { id: 'layer-3', type: 'raster', path: '/c.tif', visible: true });
+      layerManager.layers.set('layer-1', {
+        id: 'layer-1',
+        type: 'raster',
+        path: '/a.tif',
+        visible: true,
+      });
+      layerManager.layers.set('layer-2', {
+        id: 'layer-2',
+        type: 'raster',
+        path: '/b.tif',
+        visible: true,
+      });
+      layerManager.layers.set('layer-3', {
+        id: 'layer-3',
+        type: 'raster',
+        path: '/c.tif',
+        visible: true,
+      });
       layerManager.layerOrder = ['layer-1', 'layer-2', 'layer-3'];
     });
 

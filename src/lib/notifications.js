@@ -53,6 +53,14 @@ export function showError(context, error) {
  * Simplify technical error messages for end users
  */
 function simplifyErrorMessage(message) {
+  // Keep STAC-specific errors as-is (they're already informative)
+  if (message.includes('STAC')) {
+    // Truncate if too long but preserve the prefix
+    if (message.length > 150) {
+      return `${message.substring(0, 147)}...`;
+    }
+    return message;
+  }
   // File not found
   if (message.includes('No such file') || message.includes('not found')) {
     return 'File not found';
@@ -61,16 +69,25 @@ function simplifyErrorMessage(message) {
   if (message.includes('Permission denied') || message.includes('access denied')) {
     return 'Permission denied - check file permissions';
   }
-  // Invalid format
+  // Invalid format - only for local file operations, not API responses
   if (
-    message.includes('not a valid') ||
-    message.includes('unsupported') ||
-    message.includes('invalid')
+    (message.includes('not a valid') ||
+      message.includes('unsupported') ||
+      message.includes('invalid')) &&
+    !message.includes('parsing') &&
+    !message.includes('response') &&
+    !message.includes('HTTP')
   ) {
     return 'Unsupported file format';
   }
-  // GDAL errors
-  if (message.includes('GDAL') || message.includes('gdal')) {
+  // GDAL errors - but keep detailed remote file/COG errors
+  if (
+    (message.includes('GDAL') || message.includes('gdal')) &&
+    !message.includes('remote') &&
+    !message.includes('COG') &&
+    !message.includes('vsicurl') &&
+    !message.includes('Failed to open')
+  ) {
     return 'Unable to read geospatial file';
   }
   // Network errors
@@ -78,11 +95,11 @@ function simplifyErrorMessage(message) {
     return 'Network error - check your connection';
   }
   // Keep short messages as-is
-  if (message.length < 60) {
+  if (message.length < 100) {
     return message;
   }
   // Truncate long messages
-  return `${message.substring(0, 57)}...`;
+  return `${message.substring(0, 97)}...`;
 }
 
 /**

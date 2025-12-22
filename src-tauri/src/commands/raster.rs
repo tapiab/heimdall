@@ -5,9 +5,68 @@ use crate::gdal::tile_extractor::{
     extract_rgb_tile, extract_tile, extract_tile_with_stretch, StretchParams, TileRequest,
 };
 use gdal::spatial_ref::{CoordTransform, SpatialRef};
-use gdal::Dataset;
+use gdal::{Dataset, DatasetOptions, GdalOpenFlags};
 use serde::{Deserialize, Serialize};
 use tauri::State;
+
+/// Calculate appropriate overview level for a given zoom level
+/// Returns None for full resolution, Some(N) for overview level N
+fn calculate_overview_level(z: u8, source_resolution: f64) -> Option<usize> {
+    // Web Mercator tile resolution at different zoom levels (meters/pixel for 256px tiles)
+    // zoom 0: ~156543 m/px, zoom 10: ~153 m/px, zoom 15: ~4.8 m/px
+    let tile_resolution = 156543.03 / 2_f64.powi(z as i32);
+
+    // If tile resolution is coarser than source, use overviews
+    // Each overview level halves the resolution
+    if tile_resolution > source_resolution * 2.0 {
+        let ratio = tile_resolution / source_resolution;
+        let level = (ratio.log2().floor() as usize).saturating_sub(1);
+        if level > 0 {
+            Some(level.min(10))
+        } else {
+            None
+        }
+    } else {
+        None // Full resolution
+    }
+}
+
+/// Open dataset with appropriate overview level for the given zoom
+fn open_dataset_for_zoom(path: &str, z: u8) -> Result<Dataset, String> {
+    // For remote COGs (vsicurl), use overview level based on zoom
+    let is_remote = path.starts_with("/vsicurl/");
+
+    if is_remote {
+        // First open to get resolution, then reopen with overview if needed
+        let ds = Dataset::open(path).map_err(|e| format!("Failed to open: {}", e))?;
+
+        // Get source resolution (approximate from pixel size)
+        if let Ok(gt) = ds.geo_transform() {
+            let source_resolution = gt[1].abs();
+
+            if let Some(overview_level) = calculate_overview_level(z, source_resolution) {
+                // Reopen with overview level for better performance
+                let open_options = [format!("OVERVIEW_LEVEL={}", overview_level)];
+                let open_options_refs: Vec<&str> =
+                    open_options.iter().map(|s| s.as_str()).collect();
+
+                let opts = DatasetOptions {
+                    open_flags: GdalOpenFlags::GDAL_OF_READONLY | GdalOpenFlags::GDAL_OF_RASTER,
+                    allowed_drivers: None,
+                    open_options: Some(&open_options_refs),
+                    sibling_files: None,
+                };
+
+                return Dataset::open_ex(path, opts)
+                    .map_err(|e| format!("Failed to open with overview: {}", e));
+            }
+        }
+        Ok(ds)
+    } else {
+        // Local files - just open normally
+        Dataset::open(path).map_err(|e| format!("Failed to open: {}", e))
+    }
+}
 
 #[derive(Clone, Serialize, Deserialize)]
 pub struct RasterMetadata {
@@ -279,8 +338,8 @@ pub async fn get_tile(
 ) -> Result<Vec<u8>, String> {
     let path = state.get_path(&id).ok_or("Dataset not found")?;
 
-    // Open dataset fresh for this request (GDAL Dataset is not thread-safe)
-    let dataset = Dataset::open(&path).map_err(|e| format!("Failed to open raster: {}", e))?;
+    // Open dataset with appropriate overview level for this zoom
+    let dataset = open_dataset_for_zoom(&path, z)?;
 
     let request = TileRequest {
         x,
@@ -307,7 +366,7 @@ pub async fn get_tile_stretched(
     state: State<'_, DatasetCache>,
 ) -> Result<Vec<u8>, String> {
     let path = state.get_path(&id).ok_or("Dataset not found")?;
-    let dataset = Dataset::open(&path).map_err(|e| format!("Failed to open raster: {}", e))?;
+    let dataset = open_dataset_for_zoom(&path, z)?;
 
     let request = TileRequest {
         x,
@@ -344,7 +403,7 @@ pub async fn get_rgb_tile(
     state: State<'_, DatasetCache>,
 ) -> Result<Vec<u8>, String> {
     let path = state.get_path(&id).ok_or("Dataset not found")?;
-    let dataset = Dataset::open(&path).map_err(|e| format!("Failed to open raster: {}", e))?;
+    let dataset = open_dataset_for_zoom(&path, z)?;
 
     let request = TileRequest {
         x,
@@ -1250,7 +1309,7 @@ mod tests {
     #[test]
     fn test_histogram_bins_single_value() {
         let values = vec![5.0];
-        let (counts, bin_edges) = compute_histogram_bins(&values, 0.0, 10.0, 10, None);
+        let (counts, _bin_edges) = compute_histogram_bins(&values, 0.0, 10.0, 10, None);
 
         let total: u64 = counts.iter().sum();
         assert_eq!(total, 1);

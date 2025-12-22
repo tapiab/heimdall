@@ -272,9 +272,7 @@ describe('ZoomRectTool', () => {
       );
 
       // Move the mouse
-      zoomRectTool.handleMouseMove(
-        new MouseEvent('mousemove', { clientX: 300, clientY: 250 })
-      );
+      zoomRectTool.handleMouseMove(new MouseEvent('mousemove', { clientX: 300, clientY: 250 }));
 
       expect(zoomRectTool.box.style.left).toBe('100px');
       expect(zoomRectTool.box.style.top).toBe('100px');
@@ -283,9 +281,7 @@ describe('ZoomRectTool', () => {
     });
 
     it('should not update box if no start point', () => {
-      zoomRectTool.handleMouseMove(
-        new MouseEvent('mousemove', { clientX: 300, clientY: 250 })
-      );
+      zoomRectTool.handleMouseMove(new MouseEvent('mousemove', { clientX: 300, clientY: 250 }));
       expect(zoomRectTool.box).toBeNull();
     });
 
@@ -296,9 +292,7 @@ describe('ZoomRectTool', () => {
       );
 
       // End at 300,250 (200x150 box, larger than 10px threshold)
-      zoomRectTool.handleMouseUp(
-        new MouseEvent('mouseup', { clientX: 300, clientY: 250 })
-      );
+      zoomRectTool.handleMouseUp(new MouseEvent('mouseup', { clientX: 300, clientY: 250 }));
 
       expect(mockMap.fitBounds).toHaveBeenCalled();
     });
@@ -310,9 +304,7 @@ describe('ZoomRectTool', () => {
       );
 
       // End with small movement (less than 10px)
-      zoomRectTool.handleMouseUp(
-        new MouseEvent('mouseup', { clientX: 105, clientY: 105 })
-      );
+      zoomRectTool.handleMouseUp(new MouseEvent('mouseup', { clientX: 105, clientY: 105 }));
 
       expect(mockMap.fitBounds).not.toHaveBeenCalled();
     });
@@ -321,9 +313,7 @@ describe('ZoomRectTool', () => {
       zoomRectTool.handleMouseDown(
         new MouseEvent('mousedown', { button: 0, clientX: 100, clientY: 100 })
       );
-      zoomRectTool.handleMouseUp(
-        new MouseEvent('mouseup', { clientX: 300, clientY: 250 })
-      );
+      zoomRectTool.handleMouseUp(new MouseEvent('mouseup', { clientX: 300, clientY: 250 }));
 
       expect(zoomRectTool.active).toBe(false);
     });
@@ -332,9 +322,7 @@ describe('ZoomRectTool', () => {
       zoomRectTool.handleMouseDown(
         new MouseEvent('mousedown', { button: 0, clientX: 100, clientY: 100 })
       );
-      zoomRectTool.handleMouseUp(
-        new MouseEvent('mouseup', { clientX: 300, clientY: 250 })
-      );
+      zoomRectTool.handleMouseUp(new MouseEvent('mouseup', { clientX: 300, clientY: 250 }));
 
       expect(zoomRectTool.box).toBeNull();
       expect(zoomRectTool.startPoint).toBeNull();
@@ -366,9 +354,7 @@ describe('ZoomRectTool', () => {
       zoomRectTool.handleMouseDown(
         new MouseEvent('mousedown', { button: 0, clientX: 100, clientY: 100 })
       );
-      zoomRectTool.handleMouseUp(
-        new MouseEvent('mouseup', { clientX: 300, clientY: 250 })
-      );
+      zoomRectTool.handleMouseUp(new MouseEvent('mouseup', { clientX: 300, clientY: 250 }));
 
       // unproject should be called twice (sw and ne corners)
       expect(mockMap.unproject).toHaveBeenCalledTimes(2);
