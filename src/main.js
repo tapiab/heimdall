@@ -9,6 +9,7 @@ import { ProfileTool } from './lib/profile-tool.js';
 import { AnnotationTool } from './lib/annotation-tool.js';
 import { ZoomRectTool } from './lib/zoom-rect-tool.js';
 import { ProjectManager } from './lib/project-manager.js';
+import { StacBrowser } from './lib/stac-browser.js';
 import { setupUI } from './lib/ui.js';
 import { logger } from './lib/logger.js';
 
@@ -42,6 +43,9 @@ async function init() {
   // Create project manager
   const projectManager = new ProjectManager(mapManager, layerManager, annotationTool);
 
+  // Create STAC browser
+  const stacBrowser = new StacBrowser(layerManager, mapManager);
+
   // Setup UI interactions
   setupUI(
     mapManager,
@@ -52,7 +56,8 @@ async function init() {
     profileTool,
     annotationTool,
     zoomRectTool,
-    projectManager
+    projectManager,
+    stacBrowser
   );
 
   // Fetch and display version

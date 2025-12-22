@@ -28,7 +28,81 @@ export class LayerManager {
     this.draggedItem = null;
     this.selectedLayerId = null; // Currently selected layer for controls
     this.popup = null; // Feature info popup
+    this.lastZoomLevel = null; // Track zoom for COG overview invalidation
+    this._zoomEndHandler = null; // Store handler reference for cleanup
     this.setupFeatureInteraction();
+    this.setupZoomTracking();
+  }
+
+  /**
+   * Setup zoom level tracking to invalidate remote COG tiles when zoom changes
+   * This ensures proper overview level selection for remote imagery
+   */
+  setupZoomTracking() {
+    const { map } = this.mapManager;
+
+    this._zoomEndHandler = () => {
+      const currentZoom = Math.floor(map.getZoom());
+
+      // If zoom level changed significantly, invalidate remote layer tiles
+      if (this.lastZoomLevel !== null && this.lastZoomLevel !== currentZoom) {
+        this.invalidateRemoteLayerTiles();
+      }
+
+      this.lastZoomLevel = currentZoom;
+    };
+
+    map.on('zoomend', this._zoomEndHandler);
+
+    // Initialize zoom level
+    this.lastZoomLevel = Math.floor(map.getZoom());
+  }
+
+  /**
+   * Clean up event listeners and resources.
+   * Call this method before destroying the LayerManager instance to prevent memory leaks.
+   */
+  destroy() {
+    const { map } = this.mapManager;
+
+    // Remove zoom tracking listener
+    if (this._zoomEndHandler) {
+      map.off('zoomend', this._zoomEndHandler);
+      this._zoomEndHandler = null;
+    }
+
+    // Remove popup if present
+    if (this.popup) {
+      this.popup.remove();
+      this.popup = null;
+    }
+
+    // Clear tile cache
+    this.tileCache.clear();
+
+    // Clear layer data
+    this.layers.clear();
+    this.layerOrder = [];
+  }
+
+  /**
+   * Invalidate tiles for all remote COG layers to force reload at correct overview level
+   */
+  invalidateRemoteLayerTiles() {
+    for (const [id, layer] of this.layers) {
+      // Check if this is a remote layer (vsicurl path)
+      if (layer.path && layer.path.startsWith('/vsicurl/')) {
+        const sourceId = `raster-source-${id}`;
+        const source = this.mapManager.map.getSource(sourceId);
+
+        if (source) {
+          // Add cache buster to force tile reload
+          const protocolName = `raster-${id}`;
+          const cacheBuster = Date.now();
+          source.setTiles([`${protocolName}://{z}/{x}/{y}?v=${cacheBuster}`]);
+        }
+      }
+    }
   }
 
   setupFeatureInteraction() {

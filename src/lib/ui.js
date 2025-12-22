@@ -99,7 +99,8 @@ export function setupUI(
   profileTool = null,
   annotationTool = null,
   zoomRectTool = null,
-  projectManager = null
+  projectManager = null,
+  stacBrowser = null
 ) {
   // File menu
   const fileMenuBtn = document.getElementById('file-menu-btn');
@@ -194,6 +195,14 @@ export function setupUI(
       deactivateTools({ measureTool, inspectTool, annotationTool, zoomRectTool });
       const active = profileTool.toggle();
       profileBtn.classList.toggle('active', active);
+    });
+  }
+
+  // STAC button
+  const stacBtn = document.getElementById('stac-btn');
+  if (stacBtn && stacBrowser) {
+    stacBtn.addEventListener('click', () => {
+      stacBrowser.toggle();
     });
   }
 
@@ -506,6 +515,12 @@ export function setupUI(
         }
       }
     }
+    // C to toggle STAC browser
+    if (e.key === 'c' && !e.ctrlKey && !e.metaKey && !e.altKey) {
+      if (stacBrowser && typeof stacBrowser.toggle === 'function') {
+        stacBrowser.toggle();
+      }
+    }
     // Enter to generate profile when in profile mode
     if (e.key === 'Enter' && profileTool && profileTool.isActive()) {
       e.preventDefault();
@@ -529,6 +544,10 @@ export function setupUI(
       const histPanel = document.getElementById('histogram-panel');
       if (histPanel && histPanel.classList.contains('visible')) {
         histPanel.classList.remove('visible');
+      }
+      // Close STAC panel
+      if (stacBrowser && typeof stacBrowser.isVisible === 'function' && stacBrowser.isVisible()) {
+        stacBrowser.hide();
       }
       // Close shortcuts help
       const helpPanel = document.getElementById('shortcuts-help');
@@ -585,6 +604,7 @@ function showShortcutsHelp() {
         <div class="shortcut"><kbd>I</kbd> Inspect pixel values</div>
         <div class="shortcut"><kbd>E</kbd> Export view as PNG</div>
         <div class="shortcut"><kbd>P</kbd> Elevation profile</div>
+        <div class="shortcut"><kbd>C</kbd> STAC catalog browser</div>
         <div class="shortcut"><kbd>A</kbd> Add annotation</div>
         <div class="shortcut"><kbd>R</kbd> Reset rotation</div>
         <div class="shortcut"><kbd>B</kbd> Cycle basemap</div>
