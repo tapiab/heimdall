@@ -169,6 +169,7 @@ jobs:
 
   build-macos-x86_64:
     name: Build macOS x86_64
+    # macos-13 is the last Intel runner; macos-14+ are ARM64 only
     runs-on: macos-13
     needs: [lint-js, lint-rust, test-js, test-rust]
     steps:
