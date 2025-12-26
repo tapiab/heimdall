@@ -212,13 +212,24 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
+      - name: Setup Miniconda
+        uses: conda-incubator/setup-miniconda@v3
+        with:
+          auto-update-conda: false
+          channels: conda-forge
       - name: Install GDAL
+        shell: bash -el {0}
         run: |
-          choco install gdal --version=3.9.2 -y
-          echo "GDAL_HOME=C:\Program Files\GDAL" >> $env:GITHUB_ENV
-          echo "C:\Program Files\GDAL" >> $env:GITHUB_PATH
-      - run: npm ci
-      - run: npm run tauri:build
+          conda install -y gdal
+          echo "GDAL_HOME=$CONDA_PREFIX" >> $GITHUB_ENV
+          echo "$CONDA_PREFIX/Library/bin" >> $GITHUB_PATH
+          echo "GDAL_DATA=$CONDA_PREFIX/Library/share/gdal" >> $GITHUB_ENV
+          echo "PROJ_LIB=$CONDA_PREFIX/Library/share/proj" >> $GITHUB_ENV
+      - name: Install dependencies
+        run: npm ci
+      - name: Build
+        shell: bash -el {0}
+        run: npm run tauri:build
       - uses: actions/upload-artifact@v4
         with:
           name: windows-x86_64
