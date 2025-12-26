@@ -203,6 +203,8 @@ jobs:
     runs-on: windows-latest
     needs: [lint-js, lint-rust, test-js, test-rust]
     steps:
+      - name: Enable long paths
+        run: git config --system core.longpaths true
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
