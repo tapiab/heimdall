@@ -223,7 +223,8 @@ jobs:
         shell: bash -el {0}
         run: |
           conda install -y gdal
-          echo "GDAL_HOME=$CONDA_PREFIX" >> $GITHUB_ENV
+          echo "GDAL_HOME=$CONDA_PREFIX/Library" >> $GITHUB_ENV
+          echo "GDAL_LIB_DIR=$CONDA_PREFIX/Library/lib" >> $GITHUB_ENV
           echo "$CONDA_PREFIX/Library/bin" >> $GITHUB_PATH
           echo "GDAL_DATA=$CONDA_PREFIX/Library/share/gdal" >> $GITHUB_ENV
           echo "PROJ_LIB=$CONDA_PREFIX/Library/share/proj" >> $GITHUB_ENV
