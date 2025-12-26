@@ -5,7 +5,12 @@
 
 import { invoke } from '@tauri-apps/api/core';
 import maplibregl from 'maplibre-gl';
-import { registeredProtocols, type LayerManagerInterface, type RasterLayer, type Layer } from './types';
+import {
+  registeredProtocols,
+  type LayerManagerInterface,
+  type RasterLayer,
+  type Layer,
+} from './types';
 import { logger } from '../logger';
 
 const log = logger.child('LayerManager:TileProtocol');
@@ -40,7 +45,10 @@ export function setupTileProtocol(
 
   maplibregl.addProtocol(
     protocolName,
-    async (params: ProtocolParams, _abortController: AbortController): Promise<ProtocolResponse> => {
+    async (
+      params: ProtocolParams,
+      _abortController: AbortController
+    ): Promise<ProtocolResponse> => {
       const { url } = params;
       const match = url.match(/raster-[^:]+:\/\/(\d+)\/(\d+)\/(\d+)/);
 
@@ -176,7 +184,10 @@ export function setupCompositionTileProtocol(
 
   maplibregl.addProtocol(
     protocolName,
-    async (params: ProtocolParams, _abortController: AbortController): Promise<ProtocolResponse> => {
+    async (
+      params: ProtocolParams,
+      _abortController: AbortController
+    ): Promise<ProtocolResponse> => {
       const { url } = params;
       const match = url.match(/raster-[^:]+:\/\/(\d+)\/(\d+)\/(\d+)/);
 
@@ -245,7 +256,10 @@ export function setupCrossLayerCompositionTileProtocol(
 
   maplibregl.addProtocol(
     protocolName,
-    async (params: ProtocolParams, _abortController: AbortController): Promise<ProtocolResponse> => {
+    async (
+      params: ProtocolParams,
+      _abortController: AbortController
+    ): Promise<ProtocolResponse> => {
       const { url } = params;
       const match = url.match(/raster-[^:]+:\/\/(\d+)\/(\d+)\/(\d+)/);
 

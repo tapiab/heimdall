@@ -357,7 +357,9 @@ export class InspectTool {
       className: 'inspect-popup-container',
     })
       .setLngLat(lngLat)
-      .setHTML(`<div class="inspect-popup"><div class="inspect-error">Error: ${errorMessage}</div></div>`)
+      .setHTML(
+        `<div class="inspect-popup"><div class="inspect-error">Error: ${errorMessage}</div></div>`
+      )
       .addTo(this.map);
   }
 

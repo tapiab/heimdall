@@ -419,9 +419,7 @@ export class AnnotationTool {
       </div>
     `;
 
-    const popupLngLat: [number, number] = Array.isArray(lngLat)
-      ? lngLat
-      : [lngLat.lng, lngLat.lat];
+    const popupLngLat: [number, number] = Array.isArray(lngLat) ? lngLat : [lngLat.lng, lngLat.lat];
 
     const popup = new maplibregl.Popup({ closeOnClick: true })
       .setLngLat(popupLngLat)
@@ -524,7 +522,10 @@ export class AnnotationTool {
       id: ann.id,
       type: ann.type,
       label: ann.label,
-      coordinates: ann.type === 'marker' ? ann.coordinates : (ann as LineAnnotation | PolygonAnnotation).coordinates,
+      coordinates:
+        ann.type === 'marker'
+          ? ann.coordinates
+          : (ann as LineAnnotation | PolygonAnnotation).coordinates,
     }));
   }
 

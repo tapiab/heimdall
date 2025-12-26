@@ -7,12 +7,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { showToast, showError, showLoading, hideLoading } from '../notifications';
 import { setupTileProtocol } from './tile-protocol';
 import { logger } from '../logger';
-import type {
-  LayerManagerInterface,
-  RasterLayer,
-  BandStats,
-  DisplayMode,
-} from './types';
+import type { LayerManagerInterface, RasterLayer, BandStats, DisplayMode } from './types';
 
 const log = logger.child('LayerManager:Raster');
 
@@ -211,11 +206,7 @@ export function setLayerStretch(
  * @param id - Layer ID
  * @param band - Band number
  */
-export function setLayerBand(
-  manager: LayerManagerInterface,
-  id: string,
-  band: number
-): void {
+export function setLayerBand(manager: LayerManagerInterface, id: string, band: number): void {
   const layer = manager.layers.get(id) as RasterLayer | undefined;
   if (!layer) return;
 
@@ -311,10 +302,7 @@ export function setRgbStretch(
  * @param manager - The LayerManager instance
  * @param id - Layer ID
  */
-export function refreshLayerTiles(
-  manager: LayerManagerInterface,
-  id: string
-): void {
+export function refreshLayerTiles(manager: LayerManagerInterface, id: string): void {
   const layer = manager.layers.get(id) as RasterLayer | undefined;
   if (!layer) return;
 
@@ -331,7 +319,9 @@ export function refreshLayerTiles(
   setupTileProtocol(manager, protocolName, id, layer);
 
   // Force map to reload tiles - update tiles URL with cache buster
-  const source = manager.mapManager.map.getSource(sourceId) as maplibregl.RasterTileSource | undefined;
+  const source = manager.mapManager.map.getSource(sourceId) as
+    | maplibregl.RasterTileSource
+    | undefined;
   if (source) {
     const cacheBuster = Date.now();
     source.setTiles([`${protocolName}://{z}/{x}/{y}?v=${cacheBuster}`]);

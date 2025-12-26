@@ -134,7 +134,7 @@ function createTestConfigManager() {
     },
 
     hasCustomBasemap() {
-      return !!(this.config?.basemaps?.custom?.url);
+      return !!this.config?.basemaps?.custom?.url;
     },
 
     getConfig() {

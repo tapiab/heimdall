@@ -12,7 +12,12 @@ import { showToast, showError, showLoading, hideLoading } from './notifications'
 import { logger } from './logger';
 import type { LayerManager } from './layer-manager/index';
 import type { MapManager } from './map-manager';
-import type { RasterLayer, BandStats, StretchSettings, RgbStretchSettings } from './layer-manager/types';
+import type {
+  RasterLayer,
+  BandStats,
+  StretchSettings,
+  RgbStretchSettings,
+} from './layer-manager/types';
 
 const log = logger.child('StacBrowser');
 
@@ -180,7 +185,9 @@ export class StacBrowser {
     this.connectBtn = document.getElementById('stac-connect-btn') as HTMLButtonElement | null;
     this.catalogInfo = document.getElementById('stac-catalog-info');
     this.collectionsSection = document.getElementById('stac-collections');
-    this.collectionSelect = document.getElementById('stac-collection-select') as HTMLSelectElement | null;
+    this.collectionSelect = document.getElementById(
+      'stac-collection-select'
+    ) as HTMLSelectElement | null;
     this.collectionInfo = document.getElementById('stac-collection-info');
     this.searchSection = document.getElementById('stac-search');
     this.useViewBtn = document.getElementById('stac-use-view');
@@ -195,7 +202,9 @@ export class StacBrowser {
     this.resultsCount = document.getElementById('stac-results-count');
     this.resultsList = document.getElementById('stac-results-list');
     this.clearResultsBtn = document.getElementById('stac-clear-results');
-    this.toggleFootprintsBtn = document.getElementById('stac-toggle-footprints') as HTMLButtonElement | null;
+    this.toggleFootprintsBtn = document.getElementById(
+      'stac-toggle-footprints'
+    ) as HTMLButtonElement | null;
     this.itemDetailSection = document.getElementById('stac-item-detail');
     this.itemTitle = document.getElementById('stac-item-title');
     this.itemProperties = document.getElementById('stac-item-properties');
@@ -417,7 +426,10 @@ export class StacBrowser {
       showToast(`Connected to ${catalog.title || catalog.id}`, 'success');
       log.info('Connected to STAC API', { catalog: catalog.id, collections: collections.length });
     } catch (error) {
-      log.error('Failed to connect to STAC API', error instanceof Error ? error : { error: String(error) });
+      log.error(
+        'Failed to connect to STAC API',
+        error instanceof Error ? error : { error: String(error) }
+      );
       showError('Connection failed', error instanceof Error ? error : String(error));
     } finally {
       if (this.connectBtn) {
@@ -1054,8 +1066,23 @@ export class StacBrowser {
       }
 
       const dataKeys = [
-        'visual', 'B01', 'B02', 'B03', 'B04', 'B05', 'B06', 'B07', 'B08',
-        'B8A', 'B09', 'B11', 'B12', 'red', 'green', 'blue', 'nir',
+        'visual',
+        'B01',
+        'B02',
+        'B03',
+        'B04',
+        'B05',
+        'B06',
+        'B07',
+        'B08',
+        'B8A',
+        'B09',
+        'B11',
+        'B12',
+        'red',
+        'green',
+        'blue',
+        'nir',
       ];
       if (dataKeys.includes(key)) {
         return true;
@@ -1254,12 +1281,16 @@ export class StacBrowser {
       });
 
       // Add click handler
-      map.on('click', this.footprintFillLayerId, (e: maplibregl.MapMouseEvent & { features?: maplibregl.MapGeoJSONFeature[] }) => {
-        if (e.features && e.features.length > 0) {
-          const itemId = e.features[0].properties?.id;
-          if (itemId) this.selectItem(itemId);
+      map.on(
+        'click',
+        this.footprintFillLayerId,
+        (e: maplibregl.MapMouseEvent & { features?: maplibregl.MapGeoJSONFeature[] }) => {
+          if (e.features && e.features.length > 0) {
+            const itemId = e.features[0].properties?.id;
+            if (itemId) this.selectItem(itemId);
+          }
         }
-      });
+      );
 
       // Change cursor on hover
       map.on('mouseenter', this.footprintFillLayerId, () => {
@@ -1389,7 +1420,10 @@ export class StacBrowser {
       log.info('Asset loaded successfully', { id: metadata.id });
     } catch (error) {
       console.error('[STAC] Raw error loading asset:', error);
-      log.error('Failed to load STAC asset', error instanceof Error ? error : { error: String(error) });
+      log.error(
+        'Failed to load STAC asset',
+        error instanceof Error ? error : { error: String(error) }
+      );
       showError('Failed to load asset', error instanceof Error ? error : String(error));
     } finally {
       hideLoading();

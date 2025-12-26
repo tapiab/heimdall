@@ -100,13 +100,7 @@ export interface TauriCommands {
   // Raster commands
   open_raster(path: string): Promise<RasterMetadata>;
   close_dataset(id: string): Promise<void>;
-  get_tile(
-    id: string,
-    z: number,
-    x: number,
-    y: number,
-    band: number
-  ): Promise<Uint8Array>;
+  get_tile(id: string, z: number, x: number, y: number, band: number): Promise<Uint8Array>;
   get_tile_stretched(
     id: string,
     z: number,

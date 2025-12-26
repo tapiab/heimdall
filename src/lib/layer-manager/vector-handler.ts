@@ -322,9 +322,7 @@ export function setColorByField(
   const features = layer.geojson?.features || [];
   const values = [
     ...new Set(
-      features
-        .map(f => f.properties?.[fieldName])
-        .filter(v => v !== null && v !== undefined)
+      features.map(f => f.properties?.[fieldName]).filter(v => v !== null && v !== undefined)
     ),
   ] as (string | number)[];
 
@@ -440,10 +438,7 @@ export function showFeaturePopup(
  * @param manager - The LayerManager instance
  * @param layerId - Layer ID
  */
-export function showAttributeTable(
-  manager: LayerManagerInterface,
-  layerId: string
-): void {
+export function showAttributeTable(manager: LayerManagerInterface, layerId: string): void {
   const layer = manager.layers.get(layerId) as VectorLayer | undefined;
   if (!layer || layer.type !== 'vector') return;
 

@@ -3,7 +3,10 @@
  * @module layer-manager/composition-handler
  */
 
-import { setupCompositionTileProtocol, setupCrossLayerCompositionTileProtocol } from './tile-protocol';
+import {
+  setupCompositionTileProtocol,
+  setupCrossLayerCompositionTileProtocol,
+} from './tile-protocol';
 import { logger } from '../logger';
 import type { LayerManagerInterface, RasterLayer } from './types';
 import type maplibregl from 'maplibre-gl';
@@ -260,10 +263,7 @@ export async function createCrossLayerRgbCompositionLayer(
  * @param manager - The LayerManager instance
  * @param id - Composition layer ID
  */
-export function refreshCompositionTiles(
-  manager: LayerManagerInterface,
-  id: string
-): void {
+export function refreshCompositionTiles(manager: LayerManagerInterface, id: string): void {
   const layer = manager.layers.get(id) as RasterLayer | undefined;
   if (!layer || !layer.isComposition) return;
 
@@ -278,7 +278,9 @@ export function refreshCompositionTiles(
   }
 
   // Force map to reload tiles
-  const source = manager.mapManager.map.getSource(sourceId) as maplibregl.RasterTileSource | undefined;
+  const source = manager.mapManager.map.getSource(sourceId) as
+    | maplibregl.RasterTileSource
+    | undefined;
   if (source) {
     const cacheBuster = Date.now();
     source.setTiles([`${protocolName}://{z}/{x}/{y}?v=${cacheBuster}`]);

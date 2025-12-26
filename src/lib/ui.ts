@@ -352,7 +352,9 @@ export function setupUI(
   // Terrain controls
   const terrainToggle = document.getElementById('terrain-toggle') as HTMLInputElement | null;
   const terrainExaggeration = document.getElementById('terrain-exaggeration');
-  const exaggerationSlider = document.getElementById('exaggeration-slider') as HTMLInputElement | null;
+  const exaggerationSlider = document.getElementById(
+    'exaggeration-slider'
+  ) as HTMLInputElement | null;
   const exaggerationValue = document.getElementById('exaggeration-value');
 
   if (terrainToggle) {
@@ -728,7 +730,9 @@ function setupBasemapSettingsDialog(
   const cancelBtn = document.getElementById('basemap-settings-cancel');
   const saveBtn = document.getElementById('basemap-settings-save');
   const urlInput = document.getElementById('custom-basemap-url') as HTMLInputElement | null;
-  const attrInput = document.getElementById('custom-basemap-attribution') as HTMLInputElement | null;
+  const attrInput = document.getElementById(
+    'custom-basemap-attribution'
+  ) as HTMLInputElement | null;
 
   if (!dialog || !settingsBtn) return;
 
@@ -813,28 +817,100 @@ async function openFileDialog(layerManager: LayerManager): Promise<void> {
         {
           name: 'Geospatial Files',
           extensions: [
-            'tif', 'tiff', 'geotiff', 'img', 'vrt', 'ntf', 'nitf',
-            'dt0', 'dt1', 'dt2', 'hgt', 'ers', 'ecw', 'jp2', 'j2k',
-            'sid', 'png', 'jpg', 'jpeg', 'gif', 'bmp', 'hdr', 'bil',
-            'bsq', 'bip', 'grd', 'asc', 'dem', 'nc', 'hdf', 'h5',
-            'shp', 'geojson', 'json', 'gpkg', 'kml', 'kmz', 'gml',
-            'gpx', 'fgb', 'tab', 'mif',
+            'tif',
+            'tiff',
+            'geotiff',
+            'img',
+            'vrt',
+            'ntf',
+            'nitf',
+            'dt0',
+            'dt1',
+            'dt2',
+            'hgt',
+            'ers',
+            'ecw',
+            'jp2',
+            'j2k',
+            'sid',
+            'png',
+            'jpg',
+            'jpeg',
+            'gif',
+            'bmp',
+            'hdr',
+            'bil',
+            'bsq',
+            'bip',
+            'grd',
+            'asc',
+            'dem',
+            'nc',
+            'hdf',
+            'h5',
+            'shp',
+            'geojson',
+            'json',
+            'gpkg',
+            'kml',
+            'kmz',
+            'gml',
+            'gpx',
+            'fgb',
+            'tab',
+            'mif',
           ],
         },
         {
           name: 'Vector Files',
           extensions: [
-            'shp', 'geojson', 'json', 'gpkg', 'kml', 'kmz', 'gml',
-            'gpx', 'fgb', 'tab', 'mif',
+            'shp',
+            'geojson',
+            'json',
+            'gpkg',
+            'kml',
+            'kmz',
+            'gml',
+            'gpx',
+            'fgb',
+            'tab',
+            'mif',
           ],
         },
         {
           name: 'Raster Images',
           extensions: [
-            'tif', 'tiff', 'geotiff', 'img', 'vrt', 'ntf', 'nitf',
-            'dt0', 'dt1', 'dt2', 'hgt', 'ers', 'ecw', 'jp2', 'j2k',
-            'sid', 'png', 'jpg', 'jpeg', 'gif', 'bmp', 'hdr', 'bil',
-            'bsq', 'bip', 'grd', 'asc', 'dem', 'nc', 'hdf', 'h5',
+            'tif',
+            'tiff',
+            'geotiff',
+            'img',
+            'vrt',
+            'ntf',
+            'nitf',
+            'dt0',
+            'dt1',
+            'dt2',
+            'hgt',
+            'ers',
+            'ecw',
+            'jp2',
+            'j2k',
+            'sid',
+            'png',
+            'jpg',
+            'jpeg',
+            'gif',
+            'bmp',
+            'hdr',
+            'bil',
+            'bsq',
+            'bip',
+            'grd',
+            'asc',
+            'dem',
+            'nc',
+            'hdf',
+            'h5',
           ],
         },
         {
@@ -848,8 +924,17 @@ async function openFileDialog(layerManager: LayerManager): Promise<void> {
       // Handle both single and multiple file selection
       const files = Array.isArray(selected) ? selected : [selected];
       const vectorExtensions = [
-        'shp', 'geojson', 'json', 'gpkg', 'kml', 'kmz', 'gml',
-        'gpx', 'fgb', 'tab', 'mif',
+        'shp',
+        'geojson',
+        'json',
+        'gpkg',
+        'kml',
+        'kmz',
+        'gml',
+        'gpx',
+        'fgb',
+        'tab',
+        'mif',
       ];
 
       for (const file of files) {

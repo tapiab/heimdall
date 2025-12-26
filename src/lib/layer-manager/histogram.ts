@@ -30,7 +30,9 @@ export async function showHistogram(
   const maxSpan = document.getElementById('histogram-max');
   const closeBtn = document.getElementById('histogram-panel-close');
   const bandSelect = document.getElementById('histogram-band') as HTMLSelectElement | null;
-  const logScaleCheckbox = document.getElementById('histogram-log-scale') as HTMLInputElement | null;
+  const logScaleCheckbox = document.getElementById(
+    'histogram-log-scale'
+  ) as HTMLInputElement | null;
   const tooltip = document.getElementById('histogram-tooltip');
 
   if (!panel || !canvas) return;
@@ -105,9 +107,12 @@ export async function showHistogram(
     // Setup log scale toggle handler
     if (logScaleCheckbox) {
       logScaleCheckbox.onchange = () => {
-        const currentLayerId = (manager as unknown as { currentHistogramLayerId: string }).currentHistogramLayerId;
+        const currentLayerId = (manager as unknown as { currentHistogramLayerId: string })
+          .currentHistogramLayerId;
         const currentLayer = manager.layers.get(currentLayerId);
-        const currentCanvas = document.getElementById('histogram-canvas') as HTMLCanvasElement | null;
+        const currentCanvas = document.getElementById(
+          'histogram-canvas'
+        ) as HTMLCanvasElement | null;
         const currentTooltip = document.getElementById('histogram-tooltip');
         if (manager.currentHistogram && currentCanvas && currentLayer?.type === 'raster') {
           drawHistogram(

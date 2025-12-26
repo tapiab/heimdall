@@ -186,7 +186,9 @@ export class LayerManager {
       // Check if this is a remote layer (vsicurl path)
       if (layer.path && layer.path.startsWith('/vsicurl/')) {
         const sourceId = `raster-source-${id}`;
-        const source = this.mapManager.map.getSource(sourceId) as maplibregl.RasterTileSource | undefined;
+        const source = this.mapManager.map.getSource(sourceId) as
+          | maplibregl.RasterTileSource
+          | undefined;
 
         if (source) {
           // Add cache buster to force tile reload
@@ -313,7 +315,13 @@ export class LayerManager {
    * @param max - Maximum stretch value
    * @param gamma - Gamma correction value
    */
-  setRgbStretch(id: string, channel: 'r' | 'g' | 'b', min: number, max: number, gamma: number): void {
+  setRgbStretch(
+    id: string,
+    channel: 'r' | 'g' | 'b',
+    min: number,
+    max: number,
+    gamma: number
+  ): void {
     setRgbStretch(this, id, channel, min, max, gamma);
   }
 

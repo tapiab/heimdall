@@ -184,7 +184,7 @@ export class ConfigManager {
    * Check if custom basemap is configured
    */
   hasCustomBasemap(): boolean {
-    return !!(this.config?.basemaps?.custom?.url);
+    return !!this.config?.basemaps?.custom?.url;
   }
 
   /**

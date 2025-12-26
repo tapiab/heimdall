@@ -23,12 +23,12 @@
 //! which enables efficient tile-based streaming without downloading entire files.
 
 use crate::gdal::dataset_cache::DatasetCache;
-use tracing::{debug, error, info};
 use gdal::spatial_ref::{CoordTransform, SpatialRef};
 use gdal::{Dataset, Metadata};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use tauri::State;
+use tracing::{debug, error, info};
 
 use super::raster::{BandStats, RasterMetadata};
 

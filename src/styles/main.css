@@ -2493,7 +2493,7 @@ body,
   margin-bottom: 6px;
 }
 
-.form-group input[type="text"] {
+.form-group input[type='text'] {
   width: 100%;
   padding: 8px 10px;
   background: #1a1a1a;
@@ -2503,12 +2503,12 @@ body,
   font-size: 13px;
 }
 
-.form-group input[type="text"]:focus {
+.form-group input[type='text']:focus {
   outline: none;
   border-color: #4a9eff;
 }
 
-.form-group input[type="text"]::placeholder {
+.form-group input[type='text']::placeholder {
   color: #555;
 }
 

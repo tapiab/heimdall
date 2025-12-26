@@ -17,7 +17,13 @@ interface LayerManagerWithUI extends LayerManagerInterface {
   setLayerBand: (id: string, band: number) => void;
   setLayerStretch: (id: string, min: number, max: number, gamma: number) => void;
   setRgbBands: (id: string, r: number, g: number, b: number) => void;
-  setRgbStretch: (id: string, channel: 'r' | 'g' | 'b', min: number, max: number, gamma: number) => void;
+  setRgbStretch: (
+    id: string,
+    channel: 'r' | 'g' | 'b',
+    min: number,
+    max: number,
+    gamma: number
+  ) => void;
   setVectorStyle: (id: string, property: string, value: string | number) => void;
   setColorByField: (id: string, fieldName: string | null) => void;
   showAttributeTable: (layerId: string) => void;
@@ -327,10 +333,18 @@ function renderVectorControls(
  */
 function attachVectorEventListeners(manager: LayerManagerWithUI, layer: VectorLayer): void {
   const fillColorInput = document.getElementById('vector-fill-color') as HTMLInputElement | null;
-  const fillOpacityInput = document.getElementById('vector-fill-opacity') as HTMLInputElement | null;
-  const strokeColorInput = document.getElementById('vector-stroke-color') as HTMLInputElement | null;
-  const strokeWidthInput = document.getElementById('vector-stroke-width') as HTMLInputElement | null;
-  const pointRadiusInput = document.getElementById('vector-point-radius') as HTMLInputElement | null;
+  const fillOpacityInput = document.getElementById(
+    'vector-fill-opacity'
+  ) as HTMLInputElement | null;
+  const strokeColorInput = document.getElementById(
+    'vector-stroke-color'
+  ) as HTMLInputElement | null;
+  const strokeWidthInput = document.getElementById(
+    'vector-stroke-width'
+  ) as HTMLInputElement | null;
+  const pointRadiusInput = document.getElementById(
+    'vector-point-radius'
+  ) as HTMLInputElement | null;
   const showAttributesBtn = document.getElementById('show-attributes');
   const colorByFieldSelect = document.getElementById('color-by-field') as HTMLSelectElement | null;
 
@@ -870,7 +884,9 @@ function attachRgbListeners(manager: LayerManagerWithUI, layer: RasterLayerWithU
     });
   }
 
-  const showStretchCheckbox = document.getElementById('show-rgb-stretch') as HTMLInputElement | null;
+  const showStretchCheckbox = document.getElementById(
+    'show-rgb-stretch'
+  ) as HTMLInputElement | null;
   if (showStretchCheckbox) {
     showStretchCheckbox.addEventListener('change', e => {
       const target = e.target as HTMLInputElement;
