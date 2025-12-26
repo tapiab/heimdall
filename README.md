@@ -300,7 +300,7 @@ Heimdall includes a built-in STAC (SpatioTemporal Asset Catalog) browser for sea
 
 ## CI/CD
 
-The project includes GitLab CI configuration (`.gitlab-ci.yml`) for automated testing and multi-platform builds.
+The project includes GitHub Actions configuration (`.github/workflows/ci.yml`) for automated testing and multi-platform builds.
 
 ### Pipeline Stages
 

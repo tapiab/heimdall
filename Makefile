@@ -34,7 +34,7 @@ help:
 	@echo "  cargo-check    Run cargo check"
 	@echo "  cargo-test     Run cargo tests"
 	@echo ""
-	@echo "CI (used by GitLab CI):"
+	@echo "CI (used by GitHub Actions):"
 	@echo "  ci-install     Install dependencies for CI"
 	@echo "  ci-lint-js     Run JS linting in CI"
 	@echo "  ci-lint-rust   Run Rust linting in CI"
@@ -109,7 +109,7 @@ clean:
 	rm -rf src-tauri/target
 	rm -rf node_modules/.vite
 
-# CI targets (used by GitLab CI)
+# CI targets (used by GitHub Actions)
 ci-install:
 	npm ci
 

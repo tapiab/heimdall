@@ -98,7 +98,7 @@ heimdall/
 ├── docs/                         # Documentation
 │   └── ARCHITECTURE.md           # This file
 │
-├── .gitlab-ci.yml                # CI/CD pipeline configuration
+├── .github/workflows/ci.yml      # CI/CD pipeline configuration
 ├── vitest.config.js              # JavaScript test configuration
 ├── index.html                    # HTML entry point
 ├── package.json                  # Node.js dependencies
@@ -251,7 +251,7 @@ MapLibre renders tile
 
 ## CI/CD
 
-GitLab CI pipeline (`.gitlab-ci.yml`) provides:
+GitHub Actions pipeline (`.github/workflows/ci.yml`) provides:
 - **Check stage**: Linting (clippy, fmt) and JS tests
 - **Test stage**: Full unit test suites
 - **Build stage**: Multi-platform builds (Linux/macOS/Windows, x86_64/ARM64)
