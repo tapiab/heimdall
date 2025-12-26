@@ -72,9 +72,11 @@
             <select id="basemap-select">
               <option value="osm">OSM</option>
               <option value="satellite">Satellite</option>
+              <option value="custom">Custom</option>
               <option value="pixel">Pixel Grid</option>
               <option value="none">None</option>
             </select>
+            <button id="basemap-settings-btn" class="icon-btn" title="Configure custom basemap">&#9881;</button>
           </div>
           <div id="terrain-row" class="layer-item terrain-item">
             <label class="terrain-toggle-label">
@@ -236,6 +238,35 @@
               <h6>Available Assets</h6>
               <div id="stac-asset-list"></div>
             </div>
+          </div>
+        </div>
+      </div>
+      <div id="basemap-settings-dialog" class="modal-dialog hidden">
+        <div class="modal-content">
+          <div class="modal-header">
+            <h4>Custom Basemap Settings</h4>
+            <button id="basemap-settings-close" class="modal-close">&times;</button>
+          </div>
+          <div class="modal-body">
+            <div class="form-group">
+              <label for="custom-basemap-url">Tile URL Template</label>
+              <input type="text" id="custom-basemap-url"
+                     placeholder="https://example.com/tiles/{z}/{x}/{y}.png">
+              <p class="form-help">Use {z}, {x}, {y} placeholders for tile coordinates.</p>
+            </div>
+            <div class="form-group">
+              <label for="custom-basemap-attribution">Attribution</label>
+              <input type="text" id="custom-basemap-attribution"
+                     placeholder="&copy; Your attribution">
+            </div>
+            <div class="form-info">
+              <p><strong>Default Satellite:</strong> Sentinel-2 Cloudless (CC BY 4.0)</p>
+              <p>Configure a custom tile URL to use your own satellite imagery or other basemap services.</p>
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button id="basemap-settings-cancel" class="btn btn-secondary">Cancel</button>
+            <button id="basemap-settings-save" class="btn btn-primary">Save</button>
           </div>
         </div>
       </div>

@@ -1820,10 +1820,10 @@ body,
 
 #stac-panel {
   position: absolute;
-  top: 60px;
+  top: 120px;
   right: 10px;
   width: 360px;
-  max-height: calc(100vh - 120px);
+  max-height: calc(100vh - 180px);
   background: #252525;
   border: 1px solid #3a3a3a;
   border-radius: 4px;
@@ -2385,4 +2385,185 @@ body,
 .stac-loading .spinner {
   width: 14px;
   height: 14px;
+}
+
+/* Icon button (settings gear) */
+.icon-btn {
+  background: transparent;
+  border: none;
+  color: #666;
+  font-size: 14px;
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 3px;
+  line-height: 1;
+}
+
+.icon-btn:hover {
+  color: #4a9eff;
+  background: #333;
+}
+
+/* Modal dialog */
+.modal-dialog {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.7);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10000;
+}
+
+.modal-dialog.hidden {
+  display: none;
+}
+
+.modal-content {
+  background: #2a2a2a;
+  border: 1px solid #3a3a3a;
+  border-radius: 8px;
+  width: 420px;
+  max-width: 90vw;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+}
+
+.modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 16px;
+  border-bottom: 1px solid #3a3a3a;
+  background: #252525;
+  border-radius: 8px 8px 0 0;
+}
+
+.modal-header h4 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: #e0e0e0;
+}
+
+.modal-close {
+  background: none;
+  border: none;
+  color: #888;
+  font-size: 20px;
+  cursor: pointer;
+  padding: 0 4px;
+  line-height: 1;
+}
+
+.modal-close:hover {
+  color: #fff;
+}
+
+.modal-body {
+  padding: 16px;
+}
+
+.modal-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 12px 16px;
+  border-top: 1px solid #3a3a3a;
+  background: #252525;
+  border-radius: 0 0 8px 8px;
+}
+
+/* Form elements in modal */
+.form-group {
+  margin-bottom: 16px;
+}
+
+.form-group:last-of-type {
+  margin-bottom: 0;
+}
+
+.form-group label {
+  display: block;
+  font-size: 12px;
+  font-weight: 500;
+  color: #aaa;
+  margin-bottom: 6px;
+}
+
+.form-group input[type="text"] {
+  width: 100%;
+  padding: 8px 10px;
+  background: #1a1a1a;
+  border: 1px solid #3a3a3a;
+  border-radius: 4px;
+  color: #e0e0e0;
+  font-size: 13px;
+}
+
+.form-group input[type="text"]:focus {
+  outline: none;
+  border-color: #4a9eff;
+}
+
+.form-group input[type="text"]::placeholder {
+  color: #555;
+}
+
+.form-help {
+  margin-top: 4px;
+  font-size: 11px;
+  color: #666;
+}
+
+.form-info {
+  margin-top: 16px;
+  padding: 10px;
+  background: #1a1a1a;
+  border-radius: 4px;
+  font-size: 12px;
+  color: #888;
+  line-height: 1.5;
+}
+
+.form-info p {
+  margin: 0 0 6px 0;
+}
+
+.form-info p:last-child {
+  margin-bottom: 0;
+}
+
+.form-info strong {
+  color: #4a9eff;
+}
+
+/* Buttons */
+.btn {
+  padding: 8px 16px;
+  border: none;
+  border-radius: 4px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.btn-primary {
+  background: #4a9eff;
+  color: white;
+}
+
+.btn-primary:hover {
+  background: #3a8adf;
+}
+
+.btn-secondary {
+  background: #3a3a3a;
+  color: #e0e0e0;
+}
+
+.btn-secondary:hover {
+  background: #4a4a4a;
 }

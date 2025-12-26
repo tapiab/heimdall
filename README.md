@@ -24,7 +24,7 @@ Just as Heimdall watches over the realms, this application lets you observe and 
 - **Dynamic adjustment** - Real-time min/max/gamma controls per band
 - **RGB compositing** - Combine bands from single or multiple files
 - **Vector styling** - Color by field, adjust fill/stroke, view attribute table
-- **Basemaps** - OpenStreetMap, Satellite imagery, or none
+- **Basemaps** - OpenStreetMap, Sentinel-2 Cloudless satellite imagery, custom tile URLs, or none
 - **3D Terrain** - Visualize elevation with adjustable exaggeration
 - **Non-georeferenced images** - View regular images with pixel coordinates and grid overlay
 - **Distance measurement** - Measure distances in meters/km (geographic) or pixels (non-geo images)
@@ -223,6 +223,33 @@ cargo fmt --check # Formatting
 3. **Adjust display**: Use the controls panel to adjust min/max/gamma
 4. **RGB composite**: Select "RGB Composite" or "Cross-Layer RGB" mode
 5. **Layer management**: Toggle visibility, adjust opacity, reorder by dragging
+
+## Basemaps
+
+Heimdall provides several basemap options:
+
+| Basemap | Description |
+|---------|-------------|
+| **OSM** | OpenStreetMap - street map with roads, buildings, labels |
+| **Satellite** | Sentinel-2 Cloudless (CC BY 4.0) - global 10m resolution imagery |
+| **Custom** | User-configured tile URL (e.g., Mapbox, your own tile server) |
+| **Pixel Grid** | For non-georeferenced images - shows pixel coordinates |
+| **None** | Transparent background |
+
+### Custom Basemap Configuration
+
+To configure a custom basemap (e.g., Mapbox Satellite, your own tile server):
+
+1. Click the ⚙ gear icon next to the basemap dropdown
+2. Enter a tile URL template with `{z}`, `{x}`, `{y}` placeholders
+3. Optionally add attribution text
+4. Click "Save"
+
+Example URLs:
+- Mapbox: `https://api.mapbox.com/v4/mapbox.satellite/{z}/{x}/{y}.png?access_token=YOUR_TOKEN`
+- Custom TMS: `https://your-server.com/tiles/{z}/{x}/{y}.png`
+
+Custom basemap settings are stored in a config file and persist across sessions.
 
 ## STAC Browser
 

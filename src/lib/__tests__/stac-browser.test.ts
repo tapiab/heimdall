@@ -955,7 +955,7 @@ describe('StacBrowser', () => {
   });
 
   describe('getDefaultStretch', () => {
-    it('should return stretch from matching band stats', () => {
+    it('should apply smart stretch for 16-bit reflectance data (max >= 10000)', () => {
       const bandStats = [
         { band: 1, min: 0, max: 10000 },
         { band: 2, min: 0, max: 8000 },
@@ -963,37 +963,49 @@ describe('StacBrowser', () => {
 
       const stretch = stacBrowser.getDefaultStretch(bandStats, 1);
 
-      expect(stretch).toEqual({ min: 0, max: 10000, gamma: 1.0 });
+      // Smart stretch caps high-range data to 3500 for better display
+      expect(stretch).toEqual({ min: 0, max: 3500, gamma: 1.0 });
     });
 
-    it('should return first band stats if no match', () => {
-      const bandStats = [{ band: 1, min: 0, max: 10000 }];
+    it('should apply smart stretch for mid-range data (1000 < max < 10000)', () => {
+      const bandStats = [{ band: 1, min: 0, max: 5000 }];
 
-      const stretch = stacBrowser.getDefaultStretch(bandStats, 5);
+      const stretch = stacBrowser.getDefaultStretch(bandStats, 1);
 
-      expect(stretch).toEqual({ min: 0, max: 10000, gamma: 1.0 });
+      // Smart stretch uses ~35% of max for good contrast
+      expect(stretch).toEqual({ min: 0, max: 1750, gamma: 1.0 });
+    });
+
+    it('should preserve 8-bit data range (max <= 255)', () => {
+      const bandStats = [{ band: 1, min: 0, max: 255 }];
+
+      const stretch = stacBrowser.getDefaultStretch(bandStats, 1);
+
+      expect(stretch).toEqual({ min: 0, max: 255, gamma: 1.0 });
     });
 
     it('should return default values when no stats', () => {
       const stretch = stacBrowser.getDefaultStretch(null, 1);
 
-      expect(stretch).toEqual({ min: 0, max: 10000, gamma: 1.0 });
+      // Default for no stats is 0-3000 (common reflectance range)
+      expect(stretch).toEqual({ min: 0, max: 3000, gamma: 1.0 });
     });
   });
 
   describe('getDefaultRgbStretch', () => {
-    it('should return stretch for RGB bands', () => {
+    it('should return smart stretch for RGB bands', () => {
       const bandStats = [
-        { band: 1, min: 0, max: 10000 },
-        { band: 2, min: 0, max: 8000 },
-        { band: 3, min: 0, max: 9000 },
+        { band: 1, min: 0, max: 255 },
+        { band: 2, min: 0, max: 255 },
+        { band: 3, min: 0, max: 255 },
       ];
 
       const rgbStretch = stacBrowser.getDefaultRgbStretch(bandStats);
 
-      expect(rgbStretch.r).toEqual({ min: 0, max: 10000, gamma: 1.0 });
-      expect(rgbStretch.g).toEqual({ min: 0, max: 8000, gamma: 1.0 });
-      expect(rgbStretch.b).toEqual({ min: 0, max: 9000, gamma: 1.0 });
+      // 8-bit data preserves full range
+      expect(rgbStretch.r).toEqual({ min: 0, max: 255, gamma: 1.0 });
+      expect(rgbStretch.g).toEqual({ min: 0, max: 255, gamma: 1.0 });
+      expect(rgbStretch.b).toEqual({ min: 0, max: 255, gamma: 1.0 });
     });
   });
 

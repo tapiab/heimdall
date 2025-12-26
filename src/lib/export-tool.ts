@@ -4,20 +4,29 @@
 
 import { save } from '@tauri-apps/plugin-dialog';
 import { writeFile } from '@tauri-apps/plugin-fs';
-import { showToast, showError, showLoading, hideLoading } from './notifications.js';
+import { showToast, showError, showLoading, hideLoading } from './notifications';
+import type { Map as MapLibreMap } from 'maplibre-gl';
+
+// Interface for MapManager (will be properly typed when MapManager is migrated)
+interface MapManager {
+  map: MapLibreMap;
+}
+
+type ImageFormat = 'png' | 'jpeg';
 
 export class ExportTool {
-  constructor(mapManager) {
+  private mapManager: MapManager;
+  private map: MapLibreMap;
+
+  constructor(mapManager: MapManager) {
     this.mapManager = mapManager;
     this.map = mapManager.map;
   }
 
   /**
    * Export current map view to an image file
-   * @param {string} format - 'png' or 'jpeg'
-   * @param {number} quality - JPEG quality (0-1), ignored for PNG
    */
-  async exportView(format = 'png', quality = 0.92) {
+  async exportView(format: ImageFormat = 'png', quality: number = 0.92): Promise<void> {
     showLoading('Preparing export...');
 
     try {
@@ -30,12 +39,16 @@ export class ExportTool {
       exportCanvas.height = canvas.height;
       const ctx = exportCanvas.getContext('2d');
 
+      if (!ctx) {
+        throw new Error('Failed to get canvas context');
+      }
+
       // Draw the map canvas
       ctx.drawImage(canvas, 0, 0);
 
       // Convert to blob
       const mimeType = format === 'jpeg' ? 'image/jpeg' : 'image/png';
-      const blob = await new Promise(resolve => {
+      const blob = await new Promise<Blob | null>(resolve => {
         exportCanvas.toBlob(resolve, mimeType, quality);
       });
 
@@ -73,7 +86,7 @@ export class ExportTool {
       showToast(`Exported to ${filePath.split('/').pop()}`, 'success');
     } catch (error) {
       console.error('Export failed:', error);
-      showError('Export failed', error);
+      showError('Export failed', error instanceof Error ? error : String(error));
     } finally {
       hideLoading();
     }
@@ -81,10 +94,8 @@ export class ExportTool {
 
   /**
    * Export with scale factor for higher resolution
-   * @param {number} scale - Scale factor (2 = 2x resolution)
-   * @param {string} format - 'png' or 'jpeg'
    */
-  async exportHighRes(scale = 2, format = 'png') {
+  async exportHighRes(scale: number = 2, format: ImageFormat = 'png'): Promise<void> {
     showLoading('Rendering high-resolution export...');
 
     try {
@@ -98,13 +109,17 @@ export class ExportTool {
       exportCanvas.height = originalHeight * scale;
       const ctx = exportCanvas.getContext('2d');
 
+      if (!ctx) {
+        throw new Error('Failed to get canvas context');
+      }
+
       // Scale and draw
       ctx.scale(scale, scale);
       ctx.drawImage(canvas, 0, 0);
 
       // Convert to blob
       const mimeType = format === 'jpeg' ? 'image/jpeg' : 'image/png';
-      const blob = await new Promise(resolve => {
+      const blob = await new Promise<Blob | null>(resolve => {
         exportCanvas.toBlob(resolve, mimeType, 0.92);
       });
 
@@ -137,7 +152,7 @@ export class ExportTool {
       showToast(`Exported ${scale}x image to ${filePath.split('/').pop()}`, 'success');
     } catch (error) {
       console.error('High-res export failed:', error);
-      showError('Export failed', error);
+      showError('Export failed', error instanceof Error ? error : String(error));
     } finally {
       hideLoading();
     }
@@ -146,11 +161,11 @@ export class ExportTool {
   /**
    * Copy current view to clipboard
    */
-  async copyToClipboard() {
+  async copyToClipboard(): Promise<void> {
     try {
       const canvas = this.map.getCanvas();
 
-      const blob = await new Promise(resolve => {
+      const blob = await new Promise<Blob | null>(resolve => {
         canvas.toBlob(resolve, 'image/png');
       });
 
@@ -163,11 +178,11 @@ export class ExportTool {
       showToast('Copied to clipboard', 'success', 2000);
     } catch (error) {
       console.error('Copy to clipboard failed:', error);
-      showError('Copy failed', error);
+      showError('Copy failed', error instanceof Error ? error : String(error));
     }
   }
 
-  getTimestamp() {
+  private getTimestamp(): string {
     const now = new Date();
     return now.toISOString().replace(/[:.]/g, '-').slice(0, 19);
   }

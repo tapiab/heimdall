@@ -30,6 +30,10 @@ Geo Viewer is a desktop application built with Tauri, combining a Rust backend f
 │  │ - protocols │  │ - basemap   │  │ - Dynamic controls  │  │
 │  │ - tiles     │  │ - coords    │  │ - Keyboard handler  │  │
 │  └─────────────┘  └─────────────┘  └─────────────────────┘  │
+│                                                              │
+│  ┌─────────────────────────────────────────────────────────┐ │
+│  │ ConfigManager - User settings persistence (basemaps)   │ │
+│  └─────────────────────────────────────────────────────────┘ │
 └─────────────────────────────────────────────────────────────┘
                         ↕ IPC (Tauri Commands)
 ┌─────────────────────────────────────────────────────────────┐
@@ -60,16 +64,18 @@ Geo Viewer is a desktop application built with Tauri, combining a Rust backend f
 ## Directory Structure
 
 ```
-geo-viewer/
+heimdall/
 ├── src/                          # Frontend code
 │   ├── main.js                   # App entry point
 │   ├── lib/
 │   │   ├── map-manager.js        # MapLibre initialization & controls
 │   │   ├── layer-manager.js      # Layer state, tile protocols, UI
+│   │   ├── config-manager.js     # User configuration persistence
 │   │   ├── geo-utils.js          # Geospatial utility functions
 │   │   ├── ui.js                 # Keyboard shortcuts, file dialog
 │   │   └── __tests__/            # JavaScript unit tests
 │   │       ├── geo-utils.test.js # Utility function tests
+│   │       ├── config-manager.test.js # Config manager tests
 │   │       ├── fixtures.test.js  # Fixture-based tests
 │   │       └── fixtures.js       # Test data fixtures
 │   └── styles/
@@ -158,9 +164,17 @@ MapLibre renders tile
 
 #### MapManager (`map-manager.js`)
 - Initializes MapLibre GL JS map
-- Manages basemap layers (OSM, Satellite)
+- Manages basemap layers (OSM, Satellite, Custom)
+- Supports configurable satellite imagery (default: Sentinel-2 Cloudless)
+- Supports custom tile URL configuration
 - Handles coordinate display (geographic or pixel)
 - Provides layer/source management helpers
+
+#### ConfigManager (`config-manager.js`)
+- Manages user configuration stored in app data directory
+- Persists custom basemap URL and attribution
+- Singleton pattern for app-wide access
+- Uses Tauri's fs plugin for file operations
 
 #### LayerManager (`layer-manager.js`)
 - Maintains layer state (visibility, opacity, stretch params)

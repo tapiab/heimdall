@@ -1,7 +1,24 @@
+/**
+ * UI setup and interactions - file dialogs, keyboard shortcuts, tool activation
+ * @module ui
+ */
+
 import { open } from '@tauri-apps/plugin-dialog';
 import { listen } from '@tauri-apps/api/event';
-import { showToast } from './notifications.js';
+import { showToast } from './notifications';
+import type { MapManager } from './map-manager';
+import type { LayerManager } from './layer-manager/index';
+import type { MeasureTool } from './measure-tool';
+import type { InspectTool } from './inspect-tool';
+import type { ExportTool } from './export-tool';
+import type { ProfileTool } from './profile-tool';
+import type { AnnotationTool } from './annotation-tool';
+import type { ZoomRectTool } from './zoom-rect-tool';
+import type { ProjectManager } from './project-manager';
+import type { StacBrowser } from './stac-browser';
+import type { ConfigManager } from './config-manager';
 
+/** Supported vector file extensions */
 const VECTOR_EXTENSIONS = [
   'shp',
   'geojson',
@@ -16,8 +33,20 @@ const VECTOR_EXTENSIONS = [
   'mif',
 ];
 
-// Setup drag and drop file handling
-async function setupDragAndDrop(layerManager) {
+/** Tool collection for deactivation */
+interface ToolCollection {
+  measureTool?: MeasureTool | null;
+  inspectTool?: InspectTool | null;
+  profileTool?: ProfileTool | null;
+  annotationTool?: AnnotationTool | null;
+  zoomRectTool?: ZoomRectTool | null;
+}
+
+/**
+ * Setup drag and drop file handling for the application.
+ * @param layerManager - LayerManager instance for adding layers
+ */
+async function setupDragAndDrop(layerManager: LayerManager): Promise<void> {
   let dropOverlay = document.getElementById('drop-overlay');
   if (!dropOverlay) {
     dropOverlay = document.createElement('div');
@@ -28,24 +57,24 @@ async function setupDragAndDrop(layerManager) {
 
   // Listen for drag enter
   await listen('tauri://drag-enter', () => {
-    dropOverlay.classList.add('visible');
+    dropOverlay!.classList.add('visible');
   });
 
   // Listen for drag leave
   await listen('tauri://drag-leave', () => {
-    dropOverlay.classList.remove('visible');
+    dropOverlay!.classList.remove('visible');
   });
 
   // Listen for file drop
-  await listen('tauri://drag-drop', async event => {
-    dropOverlay.classList.remove('visible');
+  await listen<{ paths: string[] }>('tauri://drag-drop', async event => {
+    dropOverlay!.classList.remove('visible');
 
     const { paths } = event.payload;
     if (!paths || paths.length === 0) return;
 
     for (const filePath of paths) {
       try {
-        const ext = filePath.split('.').pop().toLowerCase();
+        const ext = filePath.split('.').pop()?.toLowerCase() || '';
         if (VECTOR_EXTENSIONS.includes(ext)) {
           await layerManager.addVectorLayer(filePath);
         } else {
@@ -59,8 +88,11 @@ async function setupDragAndDrop(layerManager) {
   });
 }
 
-// Helper to deactivate tools
-function deactivateTools(tools) {
+/**
+ * Deactivate all active tools.
+ * @param tools - Collection of tool instances to deactivate
+ */
+function deactivateTools(tools: ToolCollection): void {
   const { measureTool, inspectTool, profileTool, annotationTool, zoomRectTool } = tools;
 
   if (measureTool && measureTool.isActive()) {
@@ -90,18 +122,33 @@ function deactivateTools(tools) {
   }
 }
 
+/**
+ * Setup all UI interactions for the application.
+ * @param mapManager - MapManager instance
+ * @param layerManager - LayerManager instance
+ * @param measureTool - MeasureTool instance
+ * @param inspectTool - InspectTool instance
+ * @param exportTool - ExportTool instance
+ * @param profileTool - ProfileTool instance
+ * @param annotationTool - AnnotationTool instance
+ * @param zoomRectTool - ZoomRectTool instance
+ * @param projectManager - ProjectManager instance
+ * @param stacBrowser - StacBrowser instance
+ * @param configManager - ConfigManager instance
+ */
 export function setupUI(
-  mapManager,
-  layerManager,
-  measureTool = null,
-  inspectTool = null,
-  exportTool = null,
-  profileTool = null,
-  annotationTool = null,
-  zoomRectTool = null,
-  projectManager = null,
-  stacBrowser = null
-) {
+  mapManager: MapManager,
+  layerManager: LayerManager,
+  measureTool: MeasureTool | null = null,
+  inspectTool: InspectTool | null = null,
+  exportTool: ExportTool | null = null,
+  profileTool: ProfileTool | null = null,
+  annotationTool: AnnotationTool | null = null,
+  zoomRectTool: ZoomRectTool | null = null,
+  projectManager: ProjectManager | null = null,
+  stacBrowser: StacBrowser | null = null,
+  configManager: ConfigManager | null = null
+): void {
   // File menu
   const fileMenuBtn = document.getElementById('file-menu-btn');
   const fileMenuDropdown = document.getElementById('file-menu-dropdown');
@@ -124,7 +171,8 @@ export function setupUI(
     fileMenuDropdown.querySelectorAll('.menu-item').forEach(item => {
       item.addEventListener('click', e => {
         e.stopPropagation();
-        const { action } = item.dataset;
+        const menuItem = item as HTMLElement;
+        const { action } = menuItem.dataset;
         fileMenuDropdown.classList.remove('visible');
 
         switch (action) {
@@ -222,8 +270,8 @@ export function setupUI(
           annotationDropdown.style.left = `${rect.left}px`;
         }
         // Close file menu if open
-        const fileMenuDropdown = document.getElementById('file-menu-dropdown');
-        if (fileMenuDropdown) fileMenuDropdown.classList.remove('visible');
+        const fileMenuDropdownEl = document.getElementById('file-menu-dropdown');
+        if (fileMenuDropdownEl) fileMenuDropdownEl.classList.remove('visible');
       }
     });
 
@@ -232,19 +280,23 @@ export function setupUI(
       annotationDropdown.querySelectorAll('.menu-item').forEach(option => {
         option.addEventListener('click', e => {
           e.stopPropagation();
-          const { mode } = option.dataset;
+          const optionEl = option as HTMLElement;
+          const { mode } = optionEl.dataset;
 
           // Deactivate other tools
           deactivateTools({ measureTool, inspectTool, profileTool, zoomRectTool });
 
           // Set annotation mode
-          annotationTool.setMode(mode);
+          if (mode) {
+            annotationTool.setMode(mode as 'marker' | 'line' | 'polygon');
+          }
           annotateBtn.classList.add('active');
           annotationDropdown.classList.remove('visible');
 
           // Update active state in dropdown
           annotationDropdown.querySelectorAll('.menu-item').forEach(opt => {
-            opt.classList.toggle('active', opt.dataset.mode === mode);
+            const optElement = opt as HTMLElement;
+            optElement.classList.toggle('active', optElement.dataset.mode === mode);
           });
         });
       });
@@ -253,10 +305,10 @@ export function setupUI(
 
   // Close all dropdowns when clicking elsewhere
   document.addEventListener('click', () => {
-    const fileMenuDropdown = document.getElementById('file-menu-dropdown');
-    const annotationDropdown = document.getElementById('annotation-dropdown');
-    if (fileMenuDropdown) fileMenuDropdown.classList.remove('visible');
-    if (annotationDropdown) annotationDropdown.classList.remove('visible');
+    const fileMenuDropdownEl = document.getElementById('file-menu-dropdown');
+    const annotationDropdownEl = document.getElementById('annotation-dropdown');
+    if (fileMenuDropdownEl) fileMenuDropdownEl.classList.remove('visible');
+    if (annotationDropdownEl) annotationDropdownEl.classList.remove('visible');
   });
 
   // Setup drag and drop
@@ -269,13 +321,27 @@ export function setupUI(
   }
 
   // Basemap selector
-  const basemapSelect = document.getElementById('basemap-select');
+  const basemapSelect = document.getElementById('basemap-select') as HTMLSelectElement | null;
   if (basemapSelect) {
     basemapSelect.value = mapManager.getBasemap();
     basemapSelect.addEventListener('change', e => {
-      mapManager.setBasemap(e.target.value);
+      const target = e.target as HTMLSelectElement;
+      const value = target.value;
+      // Check if custom basemap is selected but not configured
+      if (value === 'custom' && !mapManager.hasCustomBasemap()) {
+        showToast('Configure a custom basemap URL first', 'error');
+        basemapSelect.value = mapManager.getBasemap();
+        // Open settings dialog
+        const dialog = document.getElementById('basemap-settings-dialog');
+        if (dialog) dialog.classList.remove('hidden');
+        return;
+      }
+      mapManager.setBasemap(value as 'osm' | 'satellite' | 'custom' | 'pixel' | 'none');
     });
   }
+
+  // Basemap settings dialog
+  setupBasemapSettingsDialog(mapManager, configManager);
 
   // Reset view button
   const resetViewBtn = document.getElementById('reset-view');
@@ -284,18 +350,19 @@ export function setupUI(
   }
 
   // Terrain controls
-  const terrainToggle = document.getElementById('terrain-toggle');
+  const terrainToggle = document.getElementById('terrain-toggle') as HTMLInputElement | null;
   const terrainExaggeration = document.getElementById('terrain-exaggeration');
-  const exaggerationSlider = document.getElementById('exaggeration-slider');
+  const exaggerationSlider = document.getElementById('exaggeration-slider') as HTMLInputElement | null;
   const exaggerationValue = document.getElementById('exaggeration-value');
 
   if (terrainToggle) {
     terrainToggle.addEventListener('change', e => {
-      if (e.target.checked) {
+      const target = e.target as HTMLInputElement;
+      if (target.checked) {
         const result = mapManager.enableTerrain();
         if (!result.success) {
           // Terrain not available (e.g., in pixel coord mode or network error)
-          e.target.checked = false;
+          target.checked = false;
           console.warn('Failed to enable terrain:', result.error);
           alert(`3D terrain is not available: ${result.error}`);
           return;
@@ -314,7 +381,8 @@ export function setupUI(
 
   if (exaggerationSlider) {
     exaggerationSlider.addEventListener('input', e => {
-      const value = parseFloat(e.target.value);
+      const target = e.target as HTMLInputElement;
+      const value = parseFloat(target.value);
       if (exaggerationValue) {
         exaggerationValue.textContent = value.toFixed(1);
       }
@@ -331,7 +399,8 @@ export function setupUI(
   // Keyboard shortcuts
   document.addEventListener('keydown', e => {
     // Don't trigger shortcuts when typing in inputs
-    if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') {
+    const target = e.target as HTMLElement;
+    if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') {
       return;
     }
 
@@ -365,7 +434,7 @@ export function setupUI(
     // B to cycle basemap (osm -> satellite -> pixel -> none -> osm)
     if (e.key === 'b' && !e.ctrlKey && !e.metaKey && !e.altKey) {
       const current = mapManager.getBasemap();
-      let next;
+      let next: 'osm' | 'satellite' | 'pixel' | 'none';
       if (current === 'osm') next = 'satellite';
       else if (current === 'satellite') next = mapManager.isPixelCoordMode() ? 'pixel' : 'none';
       else if (current === 'pixel') next = 'none';
@@ -378,23 +447,23 @@ export function setupUI(
     // T to toggle 3D terrain
     if (e.key === 't' && !e.ctrlKey && !e.metaKey && !e.altKey) {
       const result = mapManager.toggleTerrain();
-      const terrainToggle = document.getElementById('terrain-toggle');
-      const terrainExaggeration = document.getElementById('terrain-exaggeration');
+      const terrainToggleEl = document.getElementById('terrain-toggle') as HTMLInputElement | null;
+      const terrainExaggerationEl = document.getElementById('terrain-exaggeration');
 
       if (!result.success && result.error) {
         console.warn('Failed to toggle terrain:', result.error);
         return;
       }
 
-      const { enabled } = result;
-      if (terrainToggle) {
-        terrainToggle.checked = enabled;
+      const enabled = result.enabled ?? false;
+      if (terrainToggleEl) {
+        terrainToggleEl.checked = enabled;
       }
-      if (terrainExaggeration) {
+      if (terrainExaggerationEl) {
         if (enabled) {
-          terrainExaggeration.classList.remove('hidden');
+          terrainExaggerationEl.classList.remove('hidden');
         } else {
-          terrainExaggeration.classList.add('hidden');
+          terrainExaggerationEl.classList.add('hidden');
         }
       }
     }
@@ -432,7 +501,8 @@ export function setupUI(
       if (layerManager.selectedLayerId) {
         const layer = layerManager.layers.get(layerManager.selectedLayerId);
         if (layer && layer.type === 'raster') {
-          layerManager.showHistogram(layerManager.selectedLayerId, layer.band || 1);
+          const rasterLayer = layer as { band?: number };
+          layerManager.showHistogram(layerManager.selectedLayerId, rasterLayer.band || 1);
         }
       }
     }
@@ -441,9 +511,9 @@ export function setupUI(
       if (zoomRectTool) {
         deactivateTools({ measureTool, inspectTool, profileTool, annotationTool });
         const active = zoomRectTool.toggle();
-        const zoomRectBtn = document.getElementById('zoom-rect-btn');
-        if (zoomRectBtn) {
-          zoomRectBtn.classList.toggle('active', active);
+        const zoomRectBtnEl = document.getElementById('zoom-rect-btn');
+        if (zoomRectBtnEl) {
+          zoomRectBtnEl.classList.toggle('active', active);
         }
       }
     }
@@ -452,9 +522,9 @@ export function setupUI(
       if (measureTool) {
         deactivateTools({ inspectTool, profileTool, annotationTool, zoomRectTool });
         const active = measureTool.toggle();
-        const measureBtn = document.getElementById('measure-btn');
-        if (measureBtn) {
-          measureBtn.classList.toggle('active', active);
+        const measureBtnEl = document.getElementById('measure-btn');
+        if (measureBtnEl) {
+          measureBtnEl.classList.toggle('active', active);
         }
       }
     }
@@ -463,9 +533,9 @@ export function setupUI(
       if (inspectTool) {
         deactivateTools({ measureTool, profileTool, annotationTool, zoomRectTool });
         const active = inspectTool.toggle();
-        const inspectBtn = document.getElementById('inspect-btn');
-        if (inspectBtn) {
-          inspectBtn.classList.toggle('active', active);
+        const inspectBtnEl = document.getElementById('inspect-btn');
+        if (inspectBtnEl) {
+          inspectBtnEl.classList.toggle('active', active);
         }
       }
     }
@@ -474,13 +544,13 @@ export function setupUI(
       if (annotationTool) {
         if (annotationTool.isActive()) {
           annotationTool.deactivate();
-          const annotateBtn = document.getElementById('annotate-btn');
-          if (annotateBtn) annotateBtn.classList.remove('active');
+          const annotateBtnEl = document.getElementById('annotate-btn');
+          if (annotateBtnEl) annotateBtnEl.classList.remove('active');
         } else {
           deactivateTools({ measureTool, inspectTool, profileTool, zoomRectTool });
           annotationTool.activate('marker');
-          const annotateBtn = document.getElementById('annotate-btn');
-          if (annotateBtn) annotateBtn.classList.add('active');
+          const annotateBtnEl = document.getElementById('annotate-btn');
+          if (annotateBtnEl) annotateBtnEl.classList.add('active');
         }
       }
     }
@@ -509,9 +579,9 @@ export function setupUI(
       if (profileTool) {
         deactivateTools({ measureTool, inspectTool, annotationTool, zoomRectTool });
         const active = profileTool.toggle();
-        const profileBtn = document.getElementById('profile-btn');
-        if (profileBtn) {
-          profileBtn.classList.toggle('active', active);
+        const profileBtnEl = document.getElementById('profile-btn');
+        if (profileBtnEl) {
+          profileBtnEl.classList.toggle('active', active);
         }
       }
     }
@@ -521,11 +591,7 @@ export function setupUI(
         stacBrowser.toggle();
       }
     }
-    // Enter to generate profile when in profile mode
-    if (e.key === 'Enter' && profileTool && profileTool.isActive()) {
-      e.preventDefault();
-      profileTool.generateProfile();
-    }
+    // Note: Enter key for profile generation is handled by ProfileTool internally
     // Escape to close panels and cancel tools
     if (e.key === 'Escape') {
       // Cancel all active tools
@@ -562,14 +628,20 @@ export function setupUI(
   });
 }
 
-function toggleLayerPanel() {
+/**
+ * Toggle the layer panel visibility.
+ */
+function toggleLayerPanel(): void {
   const panel = document.getElementById('layer-panel');
   if (panel) {
     panel.classList.toggle('collapsed');
   }
 }
 
-function toggleControlsPanel() {
+/**
+ * Toggle the controls panel visibility.
+ */
+function toggleControlsPanel(): void {
   const panel = document.getElementById('controls-panel');
   const toggleBtn = document.getElementById('controls-panel-toggle');
   if (panel) {
@@ -580,7 +652,10 @@ function toggleControlsPanel() {
   }
 }
 
-function showShortcutsHelp() {
+/**
+ * Show the keyboard shortcuts help overlay.
+ */
+function showShortcutsHelp(): void {
   const existingHelp = document.getElementById('shortcuts-help');
   if (existingHelp) {
     existingHelp.remove();
@@ -631,13 +706,106 @@ function showShortcutsHelp() {
 
   // Close on click outside or button
   helpDiv.addEventListener('click', e => {
-    if (e.target === helpDiv || e.target.classList.contains('close-help')) {
+    const target = e.target as HTMLElement;
+    if (target === helpDiv || target.classList.contains('close-help')) {
       helpDiv.remove();
     }
   });
 }
 
-async function openFileDialog(layerManager) {
+/**
+ * Setup the basemap settings dialog.
+ * @param mapManager - MapManager instance
+ * @param configManager - ConfigManager instance
+ */
+function setupBasemapSettingsDialog(
+  mapManager: MapManager,
+  configManager: ConfigManager | null
+): void {
+  const dialog = document.getElementById('basemap-settings-dialog');
+  const settingsBtn = document.getElementById('basemap-settings-btn');
+  const closeBtn = document.getElementById('basemap-settings-close');
+  const cancelBtn = document.getElementById('basemap-settings-cancel');
+  const saveBtn = document.getElementById('basemap-settings-save');
+  const urlInput = document.getElementById('custom-basemap-url') as HTMLInputElement | null;
+  const attrInput = document.getElementById('custom-basemap-attribution') as HTMLInputElement | null;
+
+  if (!dialog || !settingsBtn) return;
+
+  // Open dialog
+  settingsBtn.addEventListener('click', () => {
+    // Populate current values
+    if (configManager) {
+      const customConfig = configManager.getCustomConfig();
+      if (urlInput) urlInput.value = customConfig?.url || '';
+      if (attrInput) attrInput.value = customConfig?.attribution || '';
+    }
+    dialog.classList.remove('hidden');
+  });
+
+  // Close dialog functions
+  const closeDialog = (): void => {
+    dialog.classList.add('hidden');
+  };
+
+  if (closeBtn) closeBtn.addEventListener('click', closeDialog);
+  if (cancelBtn) cancelBtn.addEventListener('click', closeDialog);
+
+  // Close on backdrop click
+  dialog.addEventListener('click', e => {
+    if (e.target === dialog) closeDialog();
+  });
+
+  // Close on escape
+  dialog.addEventListener('keydown', e => {
+    if (e.key === 'Escape') closeDialog();
+  });
+
+  // Save custom basemap
+  if (saveBtn) {
+    saveBtn.addEventListener('click', async () => {
+      const url = urlInput?.value?.trim() || '';
+      const attribution = attrInput?.value?.trim() || '';
+
+      if (!url) {
+        showToast('Please enter a tile URL', 'error');
+        return;
+      }
+
+      // Validate URL has placeholders
+      if (!url.includes('{z}') || !url.includes('{x}') || !url.includes('{y}')) {
+        showToast('URL must contain {z}, {x}, {y} placeholders', 'error');
+        return;
+      }
+
+      // Save to config
+      if (configManager) {
+        const saved = await configManager.setCustomBasemap(url, attribution);
+        if (!saved) {
+          showToast('Failed to save configuration', 'error');
+          return;
+        }
+      }
+
+      // Update map source
+      mapManager.setCustomBasemapSource(url, attribution);
+
+      showToast('Custom basemap saved', 'success');
+      closeDialog();
+
+      // Switch to custom basemap
+      mapManager.setBasemap('custom');
+      const basemapSelect = document.getElementById('basemap-select') as HTMLSelectElement | null;
+      if (basemapSelect) basemapSelect.value = 'custom';
+    });
+  }
+}
+
+/**
+ * Open the file dialog and load selected files.
+ * @param layerManager - LayerManager instance for adding layers
+ */
+async function openFileDialog(layerManager: LayerManager): Promise<void> {
   try {
     const selected = await open({
       multiple: true,
@@ -645,100 +813,28 @@ async function openFileDialog(layerManager) {
         {
           name: 'Geospatial Files',
           extensions: [
-            'tif',
-            'tiff',
-            'geotiff',
-            'img',
-            'vrt',
-            'ntf',
-            'nitf',
-            'dt0',
-            'dt1',
-            'dt2',
-            'hgt',
-            'ers',
-            'ecw',
-            'jp2',
-            'j2k',
-            'sid',
-            'png',
-            'jpg',
-            'jpeg',
-            'gif',
-            'bmp',
-            'hdr',
-            'bil',
-            'bsq',
-            'bip',
-            'grd',
-            'asc',
-            'dem',
-            'nc',
-            'hdf',
-            'h5',
-            'shp',
-            'geojson',
-            'json',
-            'gpkg',
-            'kml',
-            'kmz',
-            'gml',
-            'gpx',
-            'fgb',
-            'tab',
-            'mif',
+            'tif', 'tiff', 'geotiff', 'img', 'vrt', 'ntf', 'nitf',
+            'dt0', 'dt1', 'dt2', 'hgt', 'ers', 'ecw', 'jp2', 'j2k',
+            'sid', 'png', 'jpg', 'jpeg', 'gif', 'bmp', 'hdr', 'bil',
+            'bsq', 'bip', 'grd', 'asc', 'dem', 'nc', 'hdf', 'h5',
+            'shp', 'geojson', 'json', 'gpkg', 'kml', 'kmz', 'gml',
+            'gpx', 'fgb', 'tab', 'mif',
           ],
         },
         {
           name: 'Vector Files',
           extensions: [
-            'shp',
-            'geojson',
-            'json',
-            'gpkg',
-            'kml',
-            'kmz',
-            'gml',
-            'gpx',
-            'fgb',
-            'tab',
-            'mif',
+            'shp', 'geojson', 'json', 'gpkg', 'kml', 'kmz', 'gml',
+            'gpx', 'fgb', 'tab', 'mif',
           ],
         },
         {
           name: 'Raster Images',
           extensions: [
-            'tif',
-            'tiff',
-            'geotiff',
-            'img',
-            'vrt',
-            'ntf',
-            'nitf',
-            'dt0',
-            'dt1',
-            'dt2',
-            'hgt',
-            'ers',
-            'ecw',
-            'jp2',
-            'j2k',
-            'sid',
-            'png',
-            'jpg',
-            'jpeg',
-            'gif',
-            'bmp',
-            'hdr',
-            'bil',
-            'bsq',
-            'bip',
-            'grd',
-            'asc',
-            'dem',
-            'nc',
-            'hdf',
-            'h5',
+            'tif', 'tiff', 'geotiff', 'img', 'vrt', 'ntf', 'nitf',
+            'dt0', 'dt1', 'dt2', 'hgt', 'ers', 'ecw', 'jp2', 'j2k',
+            'sid', 'png', 'jpg', 'jpeg', 'gif', 'bmp', 'hdr', 'bil',
+            'bsq', 'bip', 'grd', 'asc', 'dem', 'nc', 'hdf', 'h5',
           ],
         },
         {
@@ -752,21 +848,12 @@ async function openFileDialog(layerManager) {
       // Handle both single and multiple file selection
       const files = Array.isArray(selected) ? selected : [selected];
       const vectorExtensions = [
-        'shp',
-        'geojson',
-        'json',
-        'gpkg',
-        'kml',
-        'kmz',
-        'gml',
-        'gpx',
-        'fgb',
-        'tab',
-        'mif',
+        'shp', 'geojson', 'json', 'gpkg', 'kml', 'kmz', 'gml',
+        'gpx', 'fgb', 'tab', 'mif',
       ];
 
       for (const file of files) {
-        const ext = file.split('.').pop().toLowerCase();
+        const ext = file.split('.').pop()?.toLowerCase() || '';
         if (vectorExtensions.includes(ext)) {
           await layerManager.addVectorLayer(file);
         } else {

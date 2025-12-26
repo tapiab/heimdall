@@ -2,24 +2,30 @@
  * UI notification utilities for toast messages and loading indicators
  */
 
+type ToastType = 'info' | 'error' | 'success';
+
 let loadingCount = 0;
 
 /**
  * Reset loading count (for testing purposes)
  */
-export function resetLoadingCount() {
+export function resetLoadingCount(): void {
   loadingCount = 0;
 }
 
 /**
  * Show a toast notification
- * @param {string} message - Message to display
- * @param {'info' | 'error' | 'success'} type - Type of notification
- * @param {number} duration - Duration in ms (default 4000, 0 for persistent)
+ * @param message - Message to display
+ * @param type - Type of notification
+ * @param duration - Duration in ms (default 4000, 0 for persistent)
  */
-export function showToast(message, type = 'info', duration = 4000) {
+export function showToast(
+  message: string,
+  type: ToastType = 'info',
+  duration: number = 4000
+): HTMLDivElement | undefined {
   const container = document.getElementById('toast-container');
-  if (!container) return;
+  if (!container) return undefined;
 
   const toast = document.createElement('div');
   toast.className = `toast ${type}`;
@@ -39,10 +45,10 @@ export function showToast(message, type = 'info', duration = 4000) {
 
 /**
  * Show an error toast with the error message
- * @param {string} context - What was being attempted
- * @param {Error|string} error - The error that occurred
+ * @param context - What was being attempted
+ * @param error - The error that occurred
  */
-export function showError(context, error) {
+export function showError(context: string, error: Error | string): void {
   const message = error instanceof Error ? error.message : String(error);
   // Simplify technical error messages for users
   const userMessage = simplifyErrorMessage(message);
@@ -52,7 +58,7 @@ export function showError(context, error) {
 /**
  * Simplify technical error messages for end users
  */
-function simplifyErrorMessage(message) {
+function simplifyErrorMessage(message: string): string {
   // Keep STAC-specific errors as-is (they're already informative)
   if (message.includes('STAC')) {
     // Truncate if too long but preserve the prefix
@@ -104,9 +110,9 @@ function simplifyErrorMessage(message) {
 
 /**
  * Show loading indicator
- * @param {string} message - Optional loading message
+ * @param message - Optional loading message
  */
-export function showLoading(message = 'Loading...') {
+export function showLoading(message: string = 'Loading...'): void {
   loadingCount++;
   const indicator = document.getElementById('loading-indicator');
   if (indicator) {
@@ -119,7 +125,7 @@ export function showLoading(message = 'Loading...') {
 /**
  * Hide loading indicator (only hides when all loading operations complete)
  */
-export function hideLoading() {
+export function hideLoading(): void {
   loadingCount = Math.max(0, loadingCount - 1);
   if (loadingCount === 0) {
     const indicator = document.getElementById('loading-indicator');
@@ -131,11 +137,14 @@ export function hideLoading() {
 
 /**
  * Execute an async operation with loading indicator
- * @param {Promise} promise - The async operation
- * @param {string} loadingMessage - Message to show while loading
- * @returns {Promise} - The result of the operation
+ * @param promise - The async operation
+ * @param loadingMessage - Message to show while loading
+ * @returns The result of the operation
  */
-export async function withLoading(promise, loadingMessage = 'Loading...') {
+export async function withLoading<T>(
+  promise: Promise<T>,
+  loadingMessage: string = 'Loading...'
+): Promise<T> {
   showLoading(loadingMessage);
   try {
     return await promise;
@@ -143,3 +152,5 @@ export async function withLoading(promise, loadingMessage = 'Loading...') {
     hideLoading();
   }
 }
+
+export type { ToastType };

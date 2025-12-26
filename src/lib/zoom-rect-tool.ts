@@ -2,8 +2,26 @@
  * Zoom Rectangle Tool - Draw a rectangle to zoom into that area
  */
 
+import type { Map as MapLibreMap, LngLatBoundsLike } from 'maplibre-gl';
+
+// Interface for MapManager (will be properly typed when MapManager is migrated)
+interface MapManager {
+  map: MapLibreMap;
+}
+
+interface Point {
+  x: number;
+  y: number;
+}
+
 export class ZoomRectTool {
-  constructor(mapManager) {
+  private mapManager: MapManager;
+  private map: MapLibreMap;
+  private active: boolean;
+  private startPoint: Point | null;
+  private box: HTMLDivElement | null;
+
+  constructor(mapManager: MapManager) {
     this.mapManager = mapManager;
     this.map = mapManager.map;
     this.active = false;
@@ -16,7 +34,7 @@ export class ZoomRectTool {
     this.handleKeyDown = this.handleKeyDown.bind(this);
   }
 
-  activate() {
+  activate(): void {
     if (this.active) return;
     this.active = true;
     this.map.getCanvas().style.cursor = 'crosshair';
@@ -30,7 +48,7 @@ export class ZoomRectTool {
     this.showInstruction();
   }
 
-  deactivate() {
+  deactivate(): void {
     if (!this.active) return;
     this.active = false;
     this.map.getCanvas().style.cursor = '';
@@ -48,7 +66,7 @@ export class ZoomRectTool {
     this.startPoint = null;
   }
 
-  toggle() {
+  toggle(): boolean {
     if (this.active) {
       this.deactivate();
     } else {
@@ -57,12 +75,12 @@ export class ZoomRectTool {
     return this.active;
   }
 
-  isActive() {
+  isActive(): boolean {
     return this.active;
   }
 
-  showInstruction() {
-    let instruction = document.getElementById('zoom-rect-instruction');
+  private showInstruction(): void {
+    let instruction = document.getElementById('zoom-rect-instruction') as HTMLDivElement | null;
     if (!instruction) {
       instruction = document.createElement('div');
       instruction.id = 'zoom-rect-instruction';
@@ -73,14 +91,14 @@ export class ZoomRectTool {
     instruction.style.display = 'block';
   }
 
-  hideInstruction() {
+  private hideInstruction(): void {
     const instruction = document.getElementById('zoom-rect-instruction');
     if (instruction) {
       instruction.style.display = 'none';
     }
   }
 
-  handleMouseDown(e) {
+  private handleMouseDown(e: MouseEvent): void {
     // Only respond to left mouse button
     if (e.button !== 0) return;
 
@@ -101,7 +119,7 @@ export class ZoomRectTool {
     e.preventDefault();
   }
 
-  handleMouseMove(e) {
+  private handleMouseMove(e: MouseEvent): void {
     if (!this.startPoint || !this.box) return;
 
     const rect = this.map.getCanvas().getBoundingClientRect();
@@ -123,7 +141,7 @@ export class ZoomRectTool {
     this.box.style.height = `${maxY - minY}px`;
   }
 
-  handleMouseUp(e) {
+  private handleMouseUp(e: MouseEvent): void {
     if (!this.startPoint) return;
 
     const rect = this.map.getCanvas().getBoundingClientRect();
@@ -145,17 +163,15 @@ export class ZoomRectTool {
       const ne = this.map.unproject([maxX, minY]); // top-right
 
       // Fit the map to these bounds
-      this.map.fitBounds(
-        [
-          [sw.lng, sw.lat],
-          [ne.lng, ne.lat],
-        ],
-        {
-          padding: 0,
-          animate: true,
-          duration: 300,
-        }
-      );
+      const bounds: LngLatBoundsLike = [
+        [sw.lng, sw.lat],
+        [ne.lng, ne.lat],
+      ];
+      this.map.fitBounds(bounds, {
+        padding: 0,
+        animate: true,
+        duration: 300,
+      });
     }
 
     // Clean up
@@ -174,7 +190,7 @@ export class ZoomRectTool {
     }
   }
 
-  handleKeyDown(e) {
+  private handleKeyDown(e: KeyboardEvent): void {
     if (e.key === 'Escape') {
       this.deactivate();
       const btn = document.getElementById('zoom-rect-btn');
@@ -184,7 +200,7 @@ export class ZoomRectTool {
     }
   }
 
-  createBox() {
+  private createBox(): void {
     this.removeBox();
 
     this.box = document.createElement('div');
@@ -201,7 +217,7 @@ export class ZoomRectTool {
     this.map.getContainer().appendChild(this.box);
   }
 
-  removeBox() {
+  private removeBox(): void {
     if (this.box) {
       this.box.remove();
       this.box = null;

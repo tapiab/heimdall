@@ -1,73 +1,160 @@
-import maplibregl from 'maplibre-gl';
-import { logger } from './logger.js';
-
-const log = logger.child('MapManager');
-
 /**
  * MapManager handles the MapLibre GL map instance and basemap management.
  * Provides methods for map initialization, basemap switching, terrain control,
  * and layer management operations.
  */
+
+import maplibregl, {
+  type Map as MapLibreMap,
+  type LngLatBoundsLike,
+  type SourceSpecification,
+  type LayerSpecification,
+  type FitBoundsOptions,
+} from 'maplibre-gl';
+
+// MapLibre error event type (not exported from the package)
+interface MapErrorEvent {
+  error: Error;
+}
+import { logger } from './logger';
+import type { BasemapConfig } from '../types/config';
+
+const log = logger.child('MapManager');
+
+// Default satellite basemap (open source friendly - CC BY 4.0)
+const DEFAULT_SATELLITE: BasemapConfig = {
+  url: 'https://tiles.maps.eox.at/wmts/1.0.0/s2cloudless-2021_3857/default/GoogleMapsCompatible/{z}/{y}/{x}.jpg',
+  attribution: 'Sentinel-2 cloudless by EOX - CC BY 4.0',
+  name: 'Sentinel-2 Cloudless',
+};
+
+type BasemapType = 'osm' | 'satellite' | 'custom' | 'pixel' | 'none';
+
+interface PixelExtent {
+  width: number;
+  height: number;
+  scale: number;
+  offsetX: number;
+  offsetY: number;
+}
+
+interface TerrainResult {
+  success: boolean;
+  enabled?: boolean;
+  error?: string;
+}
+
+interface ConfigManager {
+  getSatelliteConfig: () => BasemapConfig | null;
+  getCustomConfig: () => BasemapConfig | null;
+}
+
 export class MapManager {
+  private containerId: string;
+  private configManager: ConfigManager | null;
+  map: MapLibreMap | null;
+  private basemapVisible: boolean;
+  private currentBasemap: BasemapType;
+  private previousBasemap: BasemapType;
+  pixelCoordMode: boolean;
+  pixelExtent: PixelExtent | null;
+  terrainEnabled: boolean;
+  terrainExaggeration: number;
+  private pixelGridCanvas: HTMLCanvasElement | null;
+  private _terrainErrorHandlerBound: boolean;
+  private _boundTerrainErrorHandler: ((e: MapErrorEvent) => void) | null;
+
   /**
    * Create a new MapManager instance
-   * @param {string} containerId - DOM element ID for the map container
+   * @param containerId - DOM element ID for the map container
+   * @param configManager - Optional config manager for custom basemaps
    */
-  constructor(containerId) {
+  constructor(containerId: string, configManager: ConfigManager | null = null) {
     this.containerId = containerId;
+    this.configManager = configManager;
     this.map = null;
     this.basemapVisible = true;
-    this.currentBasemap = 'osm'; // 'osm', 'satellite', 'pixel', or 'none'
-    this.previousBasemap = 'osm'; // Store previous basemap when switching to pixel mode
-    this.pixelCoordMode = false; // true when viewing non-georeferenced images
-    this.pixelExtent = null; // { width, height } of current non-geo image
+    this.currentBasemap = 'osm';
+    this.previousBasemap = 'osm';
+    this.pixelCoordMode = false;
+    this.pixelExtent = null;
     this.terrainEnabled = false;
     this.terrainExaggeration = 1.5;
     this.pixelGridCanvas = null;
+    this._terrainErrorHandlerBound = false;
+    this._boundTerrainErrorHandler = null;
   }
 
   /**
    * Initialize the map with default settings and basemaps
-   * @returns {Promise<void>} Resolves when map is loaded and ready
+   * @returns Resolves when map is loaded and ready
    */
-  async init() {
+  async init(): Promise<void> {
+    // Get satellite config from config manager or use defaults
+    const satelliteConfig = this.configManager?.getSatelliteConfig() || DEFAULT_SATELLITE;
+    const customConfig = this.configManager?.getCustomConfig();
+
+    const sources: Record<string, SourceSpecification> = {
+      osm: {
+        type: 'raster',
+        tiles: ['https://tile.openstreetmap.org/{z}/{x}/{y}.png'],
+        tileSize: 256,
+        attribution: '&copy; OpenStreetMap contributors',
+      },
+      satellite: {
+        type: 'raster',
+        tiles: [satelliteConfig.url],
+        tileSize: 256,
+        attribution: satelliteConfig.attribution,
+      },
+    };
+
+    // Add custom basemap source if configured
+    if (customConfig?.url) {
+      sources.custom = {
+        type: 'raster',
+        tiles: [customConfig.url],
+        tileSize: 256,
+        attribution: customConfig.attribution || '',
+      };
+    }
+
+    const layers: LayerSpecification[] = [
+      {
+        id: 'osm-tiles',
+        type: 'raster',
+        source: 'osm',
+        minzoom: 0,
+        maxzoom: 19,
+      },
+      {
+        id: 'satellite-tiles',
+        type: 'raster',
+        source: 'satellite',
+        minzoom: 0,
+        maxzoom: 19,
+        layout: { visibility: 'none' },
+      },
+    ];
+
+    // Add custom basemap layer if configured
+    if (customConfig?.url) {
+      layers.push({
+        id: 'custom-tiles',
+        type: 'raster',
+        source: 'custom',
+        minzoom: 0,
+        maxzoom: 19,
+        layout: { visibility: 'none' },
+      });
+    }
+
     this.map = new maplibregl.Map({
       container: this.containerId,
       style: {
         version: 8,
-        sources: {
-          osm: {
-            type: 'raster',
-            tiles: ['https://tile.openstreetmap.org/{z}/{x}/{y}.png'],
-            tileSize: 256,
-            attribution: '&copy; OpenStreetMap contributors',
-          },
-          satellite: {
-            type: 'raster',
-            tiles: [
-              'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
-            ],
-            tileSize: 256,
-            attribution: '&copy; Esri',
-          },
-        },
-        layers: [
-          {
-            id: 'osm-tiles',
-            type: 'raster',
-            source: 'osm',
-            minzoom: 0,
-            maxzoom: 19,
-          },
-          {
-            id: 'satellite-tiles',
-            type: 'raster',
-            source: 'satellite',
-            minzoom: 0,
-            maxzoom: 19,
-            layout: { visibility: 'none' },
-          },
-        ],
+        sources,
+        layers,
       },
       center: [0, 0],
       zoom: 2,
@@ -90,14 +177,16 @@ export class MapManager {
 
     // Wait for map to load
     return new Promise(resolve => {
-      this.map.on('load', () => {
+      this.map!.on('load', () => {
         this.setupEventListeners();
         resolve();
       });
     });
   }
 
-  setupEventListeners() {
+  private setupEventListeners(): void {
+    if (!this.map) return;
+
     // Update coordinates on mouse move
     this.map.on('mousemove', e => {
       const coordsEl = document.getElementById('coordinates');
@@ -140,14 +229,16 @@ export class MapManager {
     this.updatePitchDisplay();
   }
 
-  updateZoomDisplay() {
+  private updateZoomDisplay(): void {
     const zoomEl = document.getElementById('zoom-level');
-    if (zoomEl) {
+    if (zoomEl && this.map) {
       zoomEl.textContent = `Zoom: ${this.map.getZoom().toFixed(2)}`;
     }
   }
 
-  updateBearingDisplay() {
+  private updateBearingDisplay(): void {
+    if (!this.map) return;
+
     const bearing = this.map.getBearing();
     const bearingEl = document.getElementById('bearing');
     if (bearingEl) {
@@ -161,105 +252,150 @@ export class MapManager {
     }
   }
 
-  resetNorth() {
-    this.map.easeTo({ bearing: 0, pitch: 0 });
+  resetNorth(): void {
+    this.map?.easeTo({ bearing: 0, pitch: 0 });
   }
 
-  getBearing() {
-    return this.map.getBearing();
+  getBearing(): number {
+    return this.map?.getBearing() ?? 0;
   }
 
-  fitBounds(bounds, options = {}) {
-    this.map.fitBounds(bounds, {
+  fitBounds(bounds: LngLatBoundsLike, options: FitBoundsOptions = {}): void {
+    this.map?.fitBounds(bounds, {
       padding: 50,
       ...options,
     });
   }
 
-  addSource(id, source) {
-    if (!this.map.getSource(id)) {
+  addSource(id: string, source: SourceSpecification): void {
+    if (this.map && !this.map.getSource(id)) {
       this.map.addSource(id, source);
     }
   }
 
-  removeSource(id) {
-    if (this.map.getSource(id)) {
+  removeSource(id: string): void {
+    if (this.map?.getSource(id)) {
       this.map.removeSource(id);
     }
   }
 
-  addLayer(layer, beforeId) {
-    if (!this.map.getLayer(layer.id)) {
+  addLayer(layer: LayerSpecification, beforeId?: string): void {
+    if (this.map && !this.map.getLayer(layer.id)) {
       this.map.addLayer(layer, beforeId);
     }
   }
 
-  removeLayer(id) {
-    if (this.map.getLayer(id)) {
+  removeLayer(id: string): void {
+    if (this.map?.getLayer(id)) {
       this.map.removeLayer(id);
     }
   }
 
-  moveLayer(id, beforeId) {
-    if (this.map.getLayer(id)) {
+  moveLayer(id: string, beforeId?: string): void {
+    if (this.map?.getLayer(id)) {
       this.map.moveLayer(id, beforeId);
     }
   }
 
-  setLayerVisibility(id, visible) {
-    if (this.map.getLayer(id)) {
+  setLayerVisibility(id: string, visible: boolean): void {
+    if (this.map?.getLayer(id)) {
       this.map.setLayoutProperty(id, 'visibility', visible ? 'visible' : 'none');
     }
   }
 
-  setLayerOpacity(id, opacity) {
-    if (this.map.getLayer(id)) {
+  setLayerOpacity(id: string, opacity: number): void {
+    if (this.map?.getLayer(id)) {
       this.map.setPaintProperty(id, 'raster-opacity', opacity);
     }
   }
 
-  toggleBasemap() {
+  toggleBasemap(): boolean {
     this.basemapVisible = !this.basemapVisible;
     if (this.basemapVisible) {
       this.setBasemap(this.currentBasemap);
     } else {
       this.setLayerVisibility('osm-tiles', false);
       this.setLayerVisibility('satellite-tiles', false);
+      this.setLayerVisibility('custom-tiles', false);
     }
     return this.basemapVisible;
   }
 
-  setBasemap(type) {
-    // type: 'osm', 'satellite', 'pixel', or 'none'
+  setBasemap(type: BasemapType): void {
     this.currentBasemap = type;
 
     if (type === 'none') {
       this.basemapVisible = false;
       this.setLayerVisibility('osm-tiles', false);
       this.setLayerVisibility('satellite-tiles', false);
+      this.setLayerVisibility('custom-tiles', false);
       this.setLayerVisibility('pixel-grid', false);
     } else if (type === 'pixel') {
       this.basemapVisible = true;
       this.setLayerVisibility('osm-tiles', false);
       this.setLayerVisibility('satellite-tiles', false);
+      this.setLayerVisibility('custom-tiles', false);
       this.setLayerVisibility('pixel-grid', true);
     } else {
       this.basemapVisible = true;
       this.setLayerVisibility('osm-tiles', type === 'osm');
       this.setLayerVisibility('satellite-tiles', type === 'satellite');
+      this.setLayerVisibility('custom-tiles', type === 'custom');
       this.setLayerVisibility('pixel-grid', false);
     }
   }
 
-  getBasemap() {
+  /**
+   * Check if a custom basemap is available
+   */
+  hasCustomBasemap(): boolean {
+    return !!this.map?.getSource('custom');
+  }
+
+  /**
+   * Update or add a custom basemap source
+   */
+  setCustomBasemapSource(url: string, attribution: string = ''): void {
+    if (!url || !this.map) return;
+
+    // Remove existing custom source and layer if they exist
+    if (this.map.getLayer('custom-tiles')) {
+      this.map.removeLayer('custom-tiles');
+    }
+    if (this.map.getSource('custom')) {
+      this.map.removeSource('custom');
+    }
+
+    // Add new custom source
+    this.map.addSource('custom', {
+      type: 'raster',
+      tiles: [url],
+      tileSize: 256,
+      attribution,
+    });
+
+    // Add custom layer
+    this.map.addLayer({
+      id: 'custom-tiles',
+      type: 'raster',
+      source: 'custom',
+      minzoom: 0,
+      maxzoom: 19,
+      layout: { visibility: 'none' },
+    });
+
+    log.info('Custom basemap source updated', { url });
+  }
+
+  getBasemap(): string {
     return this.basemapVisible ? this.currentBasemap : 'none';
   }
 
-  isBasemapVisible() {
+  isBasemapVisible(): boolean {
     return this.basemapVisible;
   }
 
-  setPixelCoordMode(enabled, extent = null) {
+  setPixelCoordMode(enabled: boolean, extent: PixelExtent | null = null): void {
     this.pixelCoordMode = enabled;
     this.pixelExtent = extent;
 
@@ -277,7 +413,7 @@ export class MapManager {
         this.createPixelGridBasemap(extent);
         this.setBasemap('pixel');
         // Update basemap selector UI
-        const basemapSelect = document.getElementById('basemap-select');
+        const basemapSelect = document.getElementById('basemap-select') as HTMLSelectElement | null;
         if (basemapSelect) {
           basemapSelect.value = 'pixel';
         }
@@ -288,7 +424,7 @@ export class MapManager {
       if (this.previousBasemap && this.previousBasemap !== 'pixel') {
         this.setBasemap(this.previousBasemap);
         // Update basemap selector UI
-        const basemapSelect = document.getElementById('basemap-select');
+        const basemapSelect = document.getElementById('basemap-select') as HTMLSelectElement | null;
         if (basemapSelect) {
           basemapSelect.value = this.previousBasemap;
         }
@@ -299,14 +435,16 @@ export class MapManager {
   /**
    * Create a pixel grid basemap for non-georeferenced images
    */
-  createPixelGridBasemap(extent) {
+  private createPixelGridBasemap(extent: PixelExtent): void {
+    if (!this.map) return;
+
     const { width, height, offsetX, offsetY } = extent;
 
     // Remove existing pixel grid if any
     this.removePixelGridBasemap();
 
     // Calculate bounds in pseudo-geographic coordinates
-    const bounds = [
+    const bounds: [[number, number], [number, number], [number, number], [number, number]] = [
       [-offsetX, -offsetY], // SW corner
       [offsetX, -offsetY], // SE corner
       [offsetX, offsetY], // NE corner
@@ -319,6 +457,8 @@ export class MapManager {
     canvas.width = gridResolution;
     canvas.height = gridResolution;
     const ctx = canvas.getContext('2d');
+
+    if (!ctx) return;
 
     // Transparent background - grid lines only
     ctx.clearRect(0, 0, canvas.width, canvas.height);
@@ -434,7 +574,7 @@ export class MapManager {
   /**
    * Calculate appropriate grid spacing based on image dimensions
    */
-  calculateGridSpacing(width, height) {
+  private calculateGridSpacing(width: number, height: number): number {
     const maxDim = Math.max(width, height);
     // Target roughly 10 major grid lines
     const targetLines = 10;
@@ -444,7 +584,7 @@ export class MapManager {
     const magnitude = Math.pow(10, Math.floor(Math.log10(rawSpacing)));
     const normalized = rawSpacing / magnitude;
 
-    let niceSpacing;
+    let niceSpacing: number;
     if (normalized <= 1) niceSpacing = magnitude;
     else if (normalized <= 2) niceSpacing = 2 * magnitude;
     else if (normalized <= 5) niceSpacing = 5 * magnitude;
@@ -456,7 +596,9 @@ export class MapManager {
   /**
    * Remove the pixel grid basemap
    */
-  removePixelGridBasemap() {
+  private removePixelGridBasemap(): void {
+    if (!this.map) return;
+
     if (this.map.getLayer('pixel-grid')) {
       this.map.removeLayer('pixel-grid');
     }
@@ -466,12 +608,14 @@ export class MapManager {
     this.pixelGridCanvas = null;
   }
 
-  isPixelCoordMode() {
+  isPixelCoordMode(): boolean {
     return this.pixelCoordMode;
   }
 
   // Terrain methods
-  initTerrain() {
+  private initTerrain(): boolean {
+    if (!this.map) return false;
+
     if (this.map.getSource('terrain-dem')) {
       return true;
     }
@@ -495,29 +639,40 @@ export class MapManager {
 
       return true;
     } catch (error) {
-      log.error('Failed to initialize terrain source', error);
+      log.error('Failed to initialize terrain source', { error: String(error) });
       return false;
     }
   }
 
-  handleTerrainError(e) {
+  private handleTerrainError(e: MapErrorEvent): void {
     // Check if error is related to terrain tiles
     try {
-      if (e.sourceId === 'terrain-dem' || (e.source && e.source.id === 'terrain-dem')) {
-        log.warn('Terrain tile loading failed', { error: e.error?.message || 'Unknown error' });
+      const sourceId = (e as unknown as { sourceId?: string }).sourceId;
+      const source = (e as unknown as { source?: { id?: string } }).source;
+
+      if (sourceId === 'terrain-dem' || source?.id === 'terrain-dem') {
+        log.warn('Terrain tile loading failed', {
+          error: e.error?.message || 'Unknown error',
+        });
         // Don't disable terrain entirely - some tiles may still load
         // Just log the error for debugging
       }
     } catch (err) {
       // Ignore errors in error handler to prevent cascading issues
-      log.warn('Error in terrain error handler', { error: err.message });
+      log.warn('Error in terrain error handler', {
+        error: err instanceof Error ? err.message : String(err),
+      });
     }
   }
 
-  enableTerrain(exaggeration = null) {
+  enableTerrain(exaggeration: number | null = null): TerrainResult {
     if (this.pixelCoordMode) {
       // Terrain not available for non-georeferenced images
       return { success: false, error: 'Terrain not available for non-georeferenced images' };
+    }
+
+    if (!this.map) {
+      return { success: false, error: 'Map not initialized' };
     }
 
     if (!this.map.getSource('terrain-dem')) {
@@ -545,18 +700,18 @@ export class MapManager {
 
       return { success: true };
     } catch (error) {
-      log.error('Failed to enable terrain', error);
-      return { success: false, error: error.message };
+      log.error('Failed to enable terrain', { error: String(error) });
+      return { success: false, error: error instanceof Error ? error.message : String(error) };
     }
   }
 
-  disableTerrain() {
-    this.map.setTerrain(null);
+  disableTerrain(): void {
+    this.map?.setTerrain(null);
     this.terrainEnabled = false;
     this.removeSkyLayer();
   }
 
-  toggleTerrain() {
+  toggleTerrain(): TerrainResult {
     if (this.terrainEnabled) {
       this.disableTerrain();
       return { success: true, enabled: false };
@@ -569,9 +724,9 @@ export class MapManager {
     }
   }
 
-  setTerrainExaggeration(value) {
+  setTerrainExaggeration(value: number): void {
     this.terrainExaggeration = value;
-    if (this.terrainEnabled) {
+    if (this.terrainEnabled && this.map) {
       this.map.setTerrain({
         source: 'terrain-dem',
         exaggeration: value,
@@ -579,18 +734,19 @@ export class MapManager {
     }
   }
 
-  getTerrainExaggeration() {
+  getTerrainExaggeration(): number {
     return this.terrainExaggeration;
   }
 
-  isTerrainEnabled() {
+  isTerrainEnabled(): boolean {
     return this.terrainEnabled;
   }
 
-  addSkyLayer() {
-    if (this.map.getLayer('sky')) {
+  private addSkyLayer(): void {
+    if (!this.map || this.map.getLayer('sky')) {
       return;
     }
+    // Sky layer is a MapLibre-specific layer type not in the base LayerSpecification
     this.map.addLayer({
       id: 'sky',
       type: 'sky',
@@ -599,16 +755,18 @@ export class MapManager {
         'sky-atmosphere-sun': [0.0, 90.0],
         'sky-atmosphere-sun-intensity': 15,
       },
-    });
+    } as unknown as LayerSpecification);
   }
 
-  removeSkyLayer() {
-    if (this.map.getLayer('sky')) {
+  private removeSkyLayer(): void {
+    if (this.map?.getLayer('sky')) {
       this.map.removeLayer('sky');
     }
   }
 
-  updatePitchDisplay() {
+  private updatePitchDisplay(): void {
+    if (!this.map) return;
+
     const pitch = this.map.getPitch();
     const pitchEl = document.getElementById('pitch-display');
     if (pitchEl) {
@@ -616,16 +774,16 @@ export class MapManager {
     }
   }
 
-  getPitch() {
-    return this.map.getPitch();
+  getPitch(): number {
+    return this.map?.getPitch() ?? 0;
   }
 
-  setPitch(pitch) {
-    this.map.easeTo({ pitch });
+  setPitch(pitch: number): void {
+    this.map?.easeTo({ pitch });
   }
 
-  resetView() {
-    this.map.easeTo({
+  resetView(): void {
+    this.map?.easeTo({
       bearing: 0,
       pitch: 0,
     });

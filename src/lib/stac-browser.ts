@@ -1,61 +1,201 @@
+/**
+ * STAC Browser - Browse and load data from STAC APIs
+ * @module stac-browser
+ *
+ * Provides a UI for connecting to SpatioTemporal Asset Catalogs (STAC),
+ * searching for imagery, and loading assets as map layers.
+ */
+
 import { invoke } from '@tauri-apps/api/core';
 import maplibregl from 'maplibre-gl';
-import { showToast, showError, showLoading, hideLoading } from './notifications.js';
-import { logger } from './logger.js';
+import { showToast, showError, showLoading, hideLoading } from './notifications';
+import { logger } from './logger';
+import type { LayerManager } from './layer-manager/index';
+import type { MapManager } from './map-manager';
+import type { RasterLayer, BandStats, StretchSettings, RgbStretchSettings } from './layer-manager/types';
 
 const log = logger.child('StacBrowser');
 
+/** STAC Catalog metadata */
+interface StacCatalog {
+  id: string;
+  title?: string;
+  description?: string;
+}
+
+/** STAC Collection metadata */
+interface StacCollection {
+  id: string;
+  title?: string;
+  description?: string;
+  extent?: {
+    spatial?: { bbox?: number[][] };
+    temporal?: { interval?: Array<[string | null, string | null]> };
+  };
+}
+
+/** STAC Item */
+interface StacItem {
+  id: string;
+  collection?: string;
+  geometry?: GeoJSON.Geometry;
+  bbox?: number[];
+  properties?: {
+    datetime?: string;
+    cloud_cover?: number;
+    [key: string]: unknown;
+  };
+  assets?: Record<string, StacAsset>;
+}
+
+/** STAC Asset */
+interface StacAsset {
+  href: string;
+  title?: string;
+  description?: string;
+  media_type?: string;
+  roles?: string[];
+}
+
+/** Search parameters */
+interface StacSearchParams {
+  collections: string[];
+  limit: number;
+  bbox?: number[];
+  datetime?: string;
+}
+
+/** Search result */
+interface StacSearchResult {
+  features: StacItem[];
+  number_matched?: number;
+  context?: { matched?: number };
+}
+
+/** Raster metadata from backend */
+interface RasterMetadata {
+  id: string;
+  path: string;
+  width: number;
+  height: number;
+  bands: number;
+  bounds: [number, number, number, number];
+  native_bounds?: [number, number, number, number];
+  projection?: string;
+  pixel_size?: [number, number];
+  nodata?: number | null;
+  band_stats: Array<BandStats & { band?: number }>;
+  is_georeferenced: boolean;
+}
+
+/** STAC layer data extending RasterLayer */
+interface StacLayerData extends RasterLayer {
+  stacInfo?: {
+    itemId: string;
+    collection?: string;
+    assetKey: string;
+    assetTitle: string;
+  };
+}
+
 /**
- * STAC Browser - Browse and load data from STAC APIs
+ * STAC Browser - Browse and load data from STAC APIs.
+ *
+ * Provides functionality for:
+ * - Connecting to STAC API catalogs
+ * - Browsing collections
+ * - Searching for items with spatial/temporal filters
+ * - Loading COG/GeoTIFF assets as map layers
  */
 export class StacBrowser {
-  constructor(layerManager, mapManager) {
+  private layerManager: LayerManager;
+  private mapManager: MapManager;
+
+  // State
+  private currentCatalogUrl: string | null = null;
+  private currentCatalog: StacCatalog | null = null;
+  private collections: StacCollection[] = [];
+  private selectedCollection: StacCollection | null = null;
+  private searchResults: StacItem[] = [];
+  private selectedItem: StacItem | null = null;
+  private searchBbox: number[] | null = null;
+
+  // Map layer IDs for footprints
+  private footprintSourceId = 'stac-footprints';
+  private footprintFillLayerId = 'stac-footprints-fill';
+  private footprintLineLayerId = 'stac-footprints-line';
+
+  // Drawing state
+  private isDrawing = false;
+  private drawStart: maplibregl.LngLat | null = null;
+  private _onMouseDown: ((e: maplibregl.MapMouseEvent) => void) | null = null;
+  private _onMouseMove: ((e: maplibregl.MapMouseEvent) => void) | null = null;
+  private _onMouseUp: ((e: maplibregl.MapMouseEvent) => void) | null = null;
+
+  // DOM elements
+  private panel: HTMLElement | null;
+  private apiSelect: HTMLSelectElement | null;
+  private customUrlRow: HTMLElement | null;
+  private urlInput: HTMLInputElement | null;
+  private connectBtn: HTMLButtonElement | null;
+  private catalogInfo: HTMLElement | null;
+  private collectionsSection: HTMLElement | null;
+  private collectionSelect: HTMLSelectElement | null;
+  private collectionInfo: HTMLElement | null;
+  private searchSection: HTMLElement | null;
+  private useViewBtn: HTMLElement | null;
+  private bboxDisplay: HTMLElement | null;
+  private dateStart: HTMLInputElement | null;
+  private dateEnd: HTMLInputElement | null;
+  private cloudCover: HTMLInputElement | null;
+  private cloudValue: HTMLElement | null;
+  private limitSelect: HTMLSelectElement | null;
+  private searchBtn: HTMLButtonElement | null;
+  private resultsSection: HTMLElement | null;
+  private resultsCount: HTMLElement | null;
+  private resultsList: HTMLElement | null;
+  private clearResultsBtn: HTMLElement | null;
+  private toggleFootprintsBtn: HTMLButtonElement | null;
+  private footprintsVisible = true;
+  private itemDetailSection: HTMLElement | null;
+  private itemTitle: HTMLElement | null;
+  private itemProperties: HTMLElement | null;
+  private assetList: HTMLElement | null;
+  private itemBackBtn: HTMLElement | null;
+
+  /**
+   * Create a new StacBrowser instance.
+   * @param layerManager - LayerManager for adding loaded assets
+   * @param mapManager - MapManager for map operations
+   */
+  constructor(layerManager: LayerManager, mapManager: MapManager) {
     this.layerManager = layerManager;
     this.mapManager = mapManager;
 
-    // State
-    this.currentCatalogUrl = null;
-    this.currentCatalog = null;
-    this.collections = [];
-    this.selectedCollection = null;
-    this.searchResults = [];
-    this.selectedItem = null;
-    this.searchBbox = null;
-
-    // Map layer IDs for footprints
-    this.footprintSourceId = 'stac-footprints';
-    this.footprintFillLayerId = 'stac-footprints-fill';
-    this.footprintLineLayerId = 'stac-footprints-line';
-
-    // Drawing state
-    this.isDrawing = false;
-    this.drawStart = null;
-
     // DOM elements
     this.panel = document.getElementById('stac-panel');
-    this.apiSelect = document.getElementById('stac-api-select');
+    this.apiSelect = document.getElementById('stac-api-select') as HTMLSelectElement | null;
     this.customUrlRow = document.getElementById('stac-custom-url-row');
-    this.urlInput = document.getElementById('stac-url');
-    this.connectBtn = document.getElementById('stac-connect-btn');
+    this.urlInput = document.getElementById('stac-url') as HTMLInputElement | null;
+    this.connectBtn = document.getElementById('stac-connect-btn') as HTMLButtonElement | null;
     this.catalogInfo = document.getElementById('stac-catalog-info');
     this.collectionsSection = document.getElementById('stac-collections');
-    this.collectionSelect = document.getElementById('stac-collection-select');
+    this.collectionSelect = document.getElementById('stac-collection-select') as HTMLSelectElement | null;
     this.collectionInfo = document.getElementById('stac-collection-info');
     this.searchSection = document.getElementById('stac-search');
     this.useViewBtn = document.getElementById('stac-use-view');
     this.bboxDisplay = document.getElementById('stac-bbox-display');
-    this.dateStart = document.getElementById('stac-date-start');
-    this.dateEnd = document.getElementById('stac-date-end');
-    this.cloudCover = document.getElementById('stac-cloud-cover');
+    this.dateStart = document.getElementById('stac-date-start') as HTMLInputElement | null;
+    this.dateEnd = document.getElementById('stac-date-end') as HTMLInputElement | null;
+    this.cloudCover = document.getElementById('stac-cloud-cover') as HTMLInputElement | null;
     this.cloudValue = document.getElementById('stac-cloud-value');
-    this.limitSelect = document.getElementById('stac-limit');
-    this.searchBtn = document.getElementById('stac-search-btn');
+    this.limitSelect = document.getElementById('stac-limit') as HTMLSelectElement | null;
+    this.searchBtn = document.getElementById('stac-search-btn') as HTMLButtonElement | null;
     this.resultsSection = document.getElementById('stac-results');
     this.resultsCount = document.getElementById('stac-results-count');
     this.resultsList = document.getElementById('stac-results-list');
     this.clearResultsBtn = document.getElementById('stac-clear-results');
-    this.toggleFootprintsBtn = document.getElementById('stac-toggle-footprints');
-    this.footprintsVisible = true;
+    this.toggleFootprintsBtn = document.getElementById('stac-toggle-footprints') as HTMLButtonElement | null;
     this.itemDetailSection = document.getElementById('stac-item-detail');
     this.itemTitle = document.getElementById('stac-item-title');
     this.itemProperties = document.getElementById('stac-item-properties');
@@ -66,7 +206,10 @@ export class StacBrowser {
     this.setDefaultDates();
   }
 
-  setupEventListeners() {
+  /**
+   * Setup all event listeners for the STAC browser UI.
+   */
+  private setupEventListeners(): void {
     // Close button
     const closeBtn = document.getElementById('stac-panel-close');
     if (closeBtn) {
@@ -76,7 +219,7 @@ export class StacBrowser {
     // API select dropdown - show/hide custom URL input and reset state
     if (this.apiSelect) {
       this.apiSelect.addEventListener('change', () => {
-        const isCustom = this.apiSelect.value === 'custom';
+        const isCustom = this.apiSelect?.value === 'custom';
         if (this.customUrlRow) {
           this.customUrlRow.classList.toggle('hidden', !isCustom);
           if (isCustom && this.urlInput) {
@@ -127,7 +270,7 @@ export class StacBrowser {
     // Cloud cover slider
     if (this.cloudCover) {
       this.cloudCover.addEventListener('input', () => {
-        if (this.cloudValue) {
+        if (this.cloudValue && this.cloudCover) {
           this.cloudValue.textContent = `${this.cloudCover.value}%`;
         }
       });
@@ -154,8 +297,10 @@ export class StacBrowser {
     }
   }
 
-  setDefaultDates() {
-    // Default to last 30 days
+  /**
+   * Set default date range (last 30 days).
+   */
+  private setDefaultDates(): void {
     const today = new Date();
     const thirtyDaysAgo = new Date(today);
     thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
@@ -172,7 +317,10 @@ export class StacBrowser {
   // Panel visibility
   // ============================================
 
-  show() {
+  /**
+   * Show the STAC browser panel.
+   */
+  show(): void {
     if (this.panel) {
       this.panel.classList.add('visible');
       const stacBtn = document.getElementById('stac-btn');
@@ -184,7 +332,10 @@ export class StacBrowser {
     }
   }
 
-  hide() {
+  /**
+   * Hide the STAC browser panel.
+   */
+  hide(): void {
     if (this.panel) {
       this.panel.classList.remove('visible');
       const stacBtn = document.getElementById('stac-btn');
@@ -194,7 +345,10 @@ export class StacBrowser {
     this.setFootprintsVisibility(false);
   }
 
-  toggle() {
+  /**
+   * Toggle the STAC browser panel visibility.
+   */
+  toggle(): void {
     if (this.panel && this.panel.classList.contains('visible')) {
       this.hide();
     } else {
@@ -202,17 +356,23 @@ export class StacBrowser {
     }
   }
 
-  isVisible() {
-    return this.panel && this.panel.classList.contains('visible');
+  /**
+   * Check if the STAC browser panel is visible.
+   */
+  isVisible(): boolean {
+    return this.panel ? this.panel.classList.contains('visible') : false;
   }
 
   // ============================================
   // API Connection
   // ============================================
 
-  async connect() {
+  /**
+   * Connect to a STAC API.
+   */
+  async connect(): Promise<void> {
     // Get URL from dropdown or custom input
-    let url;
+    let url: string | undefined;
     if (this.apiSelect?.value === 'custom') {
       url = this.urlInput?.value?.trim();
       if (!url) {
@@ -228,14 +388,16 @@ export class StacBrowser {
       return;
     }
 
-    this.connectBtn.disabled = true;
-    this.connectBtn.textContent = 'Connecting...';
+    if (this.connectBtn) {
+      this.connectBtn.disabled = true;
+      this.connectBtn.textContent = 'Connecting...';
+    }
 
     try {
-      log.info('Connecting to STAC API', url);
+      log.info('Connecting to STAC API', { url });
 
       // Connect to catalog
-      const catalog = await invoke('connect_stac_api', { url });
+      const catalog = await invoke<StacCatalog>('connect_stac_api', { url });
       this.currentCatalogUrl = url;
       this.currentCatalog = catalog;
 
@@ -243,7 +405,7 @@ export class StacBrowser {
       this.showCatalogInfo(catalog);
 
       // Fetch collections
-      const collections = await invoke('list_stac_collections', { url });
+      const collections = await invoke<StacCollection[]>('list_stac_collections', { url });
       this.collections = collections;
 
       // Populate collection select
@@ -255,15 +417,20 @@ export class StacBrowser {
       showToast(`Connected to ${catalog.title || catalog.id}`, 'success');
       log.info('Connected to STAC API', { catalog: catalog.id, collections: collections.length });
     } catch (error) {
-      log.error('Failed to connect to STAC API', error);
-      showError('Connection failed', error);
+      log.error('Failed to connect to STAC API', error instanceof Error ? error : { error: String(error) });
+      showError('Connection failed', error instanceof Error ? error : String(error));
     } finally {
-      this.connectBtn.disabled = false;
-      this.connectBtn.textContent = 'Connect';
+      if (this.connectBtn) {
+        this.connectBtn.disabled = false;
+        this.connectBtn.textContent = 'Connect';
+      }
     }
   }
 
-  showCatalogInfo(catalog) {
+  /**
+   * Display catalog information.
+   */
+  private showCatalogInfo(catalog: StacCatalog): void {
     if (!this.catalogInfo) return;
 
     this.catalogInfo.innerHTML = `
@@ -273,7 +440,10 @@ export class StacBrowser {
     this.catalogInfo.classList.remove('hidden');
   }
 
-  populateCollections(collections) {
+  /**
+   * Populate the collections dropdown.
+   */
+  private populateCollections(collections: StacCollection[]): void {
     if (!this.collectionSelect) return;
 
     // Clear existing options
@@ -284,21 +454,24 @@ export class StacBrowser {
       const option = document.createElement('option');
       option.value = col.id;
       option.textContent = col.title || col.id;
-      this.collectionSelect.appendChild(option);
+      this.collectionSelect!.appendChild(option);
     });
   }
 
-  onCollectionChange() {
+  /**
+   * Handle collection selection change.
+   */
+  private onCollectionChange(): void {
     const collectionId = this.collectionSelect?.value;
     if (!collectionId) {
       this.selectedCollection = null;
       this.searchSection?.classList.add('hidden');
-      this.collectionInfo.innerHTML = '';
+      if (this.collectionInfo) this.collectionInfo.innerHTML = '';
       return;
     }
 
     // Find collection
-    this.selectedCollection = this.collections.find(c => c.id === collectionId);
+    this.selectedCollection = this.collections.find(c => c.id === collectionId) || null;
 
     // Show collection info
     if (this.selectedCollection && this.collectionInfo) {
@@ -323,17 +496,23 @@ export class StacBrowser {
   // Bounding Box
   // ============================================
 
-  useCurrentViewBbox() {
+  /**
+   * Use the current map view as the search bounding box.
+   */
+  private useCurrentViewBbox(): void {
     const map = this.mapManager?.map;
     if (!map) return;
 
     const bounds = map.getBounds();
     this.setBbox([bounds.getWest(), bounds.getSouth(), bounds.getEast(), bounds.getNorth()]);
 
-    log.info('Set search bbox from current view', this.searchBbox);
+    log.info('Set search bbox from current view', { bbox: this.searchBbox });
   }
 
-  setBbox(bbox) {
+  /**
+   * Set the search bounding box.
+   */
+  private setBbox(bbox: number[]): void {
     this.searchBbox = bbox;
 
     // Display bbox
@@ -351,7 +530,10 @@ export class StacBrowser {
     this.drawBboxRectangle(bbox);
   }
 
-  clearBbox() {
+  /**
+   * Clear the search bounding box.
+   */
+  private clearBbox(): void {
     this.searchBbox = null;
 
     // Clear display
@@ -372,7 +554,10 @@ export class StacBrowser {
     this.stopDrawing();
   }
 
-  drawBboxRectangle(bbox) {
+  /**
+   * Draw a bounding box rectangle on the map.
+   */
+  private drawBboxRectangle(bbox: number[]): void {
     const map = this.mapManager?.map;
     if (!map) return;
 
@@ -380,8 +565,9 @@ export class StacBrowser {
     this.removeBboxRectangle();
 
     // Create GeoJSON for the bbox
-    const geojson = {
+    const geojson: GeoJSON.Feature = {
       type: 'Feature',
+      properties: {},
       geometry: {
         type: 'Polygon',
         coordinates: [
@@ -424,7 +610,10 @@ export class StacBrowser {
     });
   }
 
-  removeBboxRectangle() {
+  /**
+   * Remove the bounding box rectangle from the map.
+   */
+  private removeBboxRectangle(): void {
     const map = this.mapManager?.map;
     if (!map) return;
 
@@ -439,7 +628,10 @@ export class StacBrowser {
     }
   }
 
-  startDrawing() {
+  /**
+   * Start drawing a bounding box.
+   */
+  private startDrawing(): void {
     const map = this.mapManager?.map;
     if (!map) return;
 
@@ -462,16 +654,19 @@ export class StacBrowser {
     }
 
     // Add event listeners
-    this._onMouseDown = e => this.onDrawMouseDown(e);
-    this._onMouseMove = e => this.onDrawMouseMove(e);
-    this._onMouseUp = e => this.onDrawMouseUp(e);
+    this._onMouseDown = (e: maplibregl.MapMouseEvent) => this.onDrawMouseDown(e);
+    this._onMouseMove = (e: maplibregl.MapMouseEvent) => this.onDrawMouseMove(e);
+    this._onMouseUp = (e: maplibregl.MapMouseEvent) => this.onDrawMouseUp(e);
 
     map.on('mousedown', this._onMouseDown);
     map.on('mousemove', this._onMouseMove);
     map.on('mouseup', this._onMouseUp);
   }
 
-  stopDrawing() {
+  /**
+   * Stop drawing a bounding box.
+   */
+  private stopDrawing(): void {
     const map = this.mapManager?.map;
     if (!map) return;
 
@@ -491,7 +686,11 @@ export class StacBrowser {
     // Remove event listeners
     if (this._onMouseDown) {
       map.off('mousedown', this._onMouseDown);
+    }
+    if (this._onMouseMove) {
       map.off('mousemove', this._onMouseMove);
+    }
+    if (this._onMouseUp) {
       map.off('mouseup', this._onMouseUp);
     }
 
@@ -504,7 +703,10 @@ export class StacBrowser {
     }
   }
 
-  onDrawMouseDown(e) {
+  /**
+   * Handle mouse down during bbox drawing.
+   */
+  private onDrawMouseDown(e: maplibregl.MapMouseEvent): void {
     if (!this.isDrawing) return;
 
     this.drawStart = e.lngLat;
@@ -513,7 +715,10 @@ export class StacBrowser {
     e.preventDefault();
   }
 
-  onDrawMouseMove(e) {
+  /**
+   * Handle mouse move during bbox drawing.
+   */
+  private onDrawMouseMove(e: maplibregl.MapMouseEvent): void {
     if (!this.isDrawing || !this.drawStart) return;
 
     const map = this.mapManager?.map;
@@ -531,8 +736,9 @@ export class StacBrowser {
     ];
 
     // Update temporary drawing
-    const geojson = {
+    const geojson: GeoJSON.Feature = {
       type: 'Feature',
+      properties: {},
       geometry: {
         type: 'Polygon',
         coordinates: [
@@ -547,7 +753,7 @@ export class StacBrowser {
       },
     };
 
-    const source = map.getSource('stac-bbox-drawing');
+    const source = map.getSource('stac-bbox-drawing') as maplibregl.GeoJSONSource | undefined;
     if (source) {
       source.setData(geojson);
     } else {
@@ -568,7 +774,10 @@ export class StacBrowser {
     }
   }
 
-  onDrawMouseUp(e) {
+  /**
+   * Handle mouse up during bbox drawing.
+   */
+  private onDrawMouseUp(e: maplibregl.MapMouseEvent): void {
     if (!this.isDrawing || !this.drawStart) return;
 
     const start = this.drawStart;
@@ -586,19 +795,22 @@ export class StacBrowser {
     const minSize = 0.001; // ~100m at equator
     if (Math.abs(bbox[2] - bbox[0]) > minSize && Math.abs(bbox[3] - bbox[1]) > minSize) {
       this.setBbox(bbox);
-      log.info('Drew search bbox', bbox);
+      log.info('Drew search bbox', { bbox });
     }
 
     this.stopDrawing();
   }
 
-  toggleDrawing() {
+  /**
+   * Toggle bounding box drawing mode.
+   */
+  private toggleDrawing(): void {
     if (this.isDrawing) {
       this.stopDrawing();
       // Restore previous bbox display if we had one
-      if (this.searchBbox) {
+      if (this.searchBbox && this.bboxDisplay) {
         this.bboxDisplay.textContent = this.searchBbox.map(v => v.toFixed(4)).join(', ');
-      } else {
+      } else if (this.bboxDisplay) {
         this.bboxDisplay.textContent = '';
       }
     } else {
@@ -610,7 +822,10 @@ export class StacBrowser {
   // Search
   // ============================================
 
-  async search() {
+  /**
+   * Search for STAC items.
+   */
+  async search(): Promise<void> {
     if (!this.currentCatalogUrl) {
       showError('Not connected', 'Please connect to a STAC API first');
       return;
@@ -622,7 +837,7 @@ export class StacBrowser {
     }
 
     // Build search params
-    const params = {
+    const params: StacSearchParams = {
       collections: [this.selectedCollection.id],
       limit: parseInt(this.limitSelect?.value || '20', 10),
     };
@@ -636,29 +851,23 @@ export class StacBrowser {
     const startDate = this.dateStart?.value;
     const endDate = this.dateEnd?.value;
     if (startDate && endDate) {
-      // Both dates set - use range format with T00:00:00Z timestamps
       params.datetime = `${startDate}T00:00:00Z/${endDate}T23:59:59Z`;
     } else if (startDate) {
-      // Only start date - search from that date onwards
       params.datetime = `${startDate}T00:00:00Z/..`;
     } else if (endDate) {
-      // Only end date - search up to that date
       params.datetime = `../${endDate}T23:59:59Z`;
     }
-    // If neither date is set, don't include datetime param (search all time)
 
-    // Note: Cloud cover filter removed - not all STAC APIs support CQL2 filter extension
-    // If needed in the future, can add: params.filter = {...} with filter-lang: 'cql2-json'
-    // For now, cloud cover filtering is done client-side after results are returned
-
-    this.searchBtn.disabled = true;
-    this.searchBtn.textContent = 'Searching...';
+    if (this.searchBtn) {
+      this.searchBtn.disabled = true;
+      this.searchBtn.textContent = 'Searching...';
+    }
 
     try {
-      log.info('Searching STAC items', params);
+      log.info('Searching STAC items', { params });
       console.log('STAC search params:', JSON.stringify(params, null, 2));
 
-      const result = await invoke('search_stac_items', {
+      const result = await invoke<StacSearchResult>('search_stac_items', {
         url: this.currentCatalogUrl,
         params,
       });
@@ -673,17 +882,21 @@ export class StacBrowser {
 
       log.info('Search completed', { count: this.searchResults.length });
     } catch (error) {
-      // Log full error details for debugging
-      log.error('Search failed', error);
+      log.error('Search failed', error instanceof Error ? error : { error: String(error) });
       console.error('STAC search error details:', error);
       showError('Search failed', String(error));
     } finally {
-      this.searchBtn.disabled = false;
-      this.searchBtn.textContent = 'Search';
+      if (this.searchBtn) {
+        this.searchBtn.disabled = false;
+        this.searchBtn.textContent = 'Search';
+      }
     }
   }
 
-  renderResults(items, totalMatched) {
+  /**
+   * Render search results.
+   */
+  private renderResults(items: StacItem[], totalMatched?: number): void {
     if (!this.resultsList) return;
 
     // Show results section
@@ -725,13 +938,16 @@ export class StacBrowser {
     // Add click handlers
     this.resultsList.querySelectorAll('.stac-result-item').forEach(el => {
       el.addEventListener('click', () => {
-        const itemId = el.dataset.itemId;
-        this.selectItem(itemId);
+        const itemId = (el as HTMLElement).dataset.itemId;
+        if (itemId) this.selectItem(itemId);
       });
     });
   }
 
-  selectItem(itemId) {
+  /**
+   * Select an item from search results.
+   */
+  private selectItem(itemId: string): void {
     // Find item
     const item = this.searchResults.find(i => i.id === itemId);
     if (!item) return;
@@ -740,7 +956,7 @@ export class StacBrowser {
 
     // Highlight in list
     this.resultsList?.querySelectorAll('.stac-result-item').forEach(el => {
-      el.classList.toggle('selected', el.dataset.itemId === itemId);
+      el.classList.toggle('selected', (el as HTMLElement).dataset.itemId === itemId);
     });
 
     // Highlight on map
@@ -761,7 +977,10 @@ export class StacBrowser {
     }
   }
 
-  showItemDetail(item) {
+  /**
+   * Show item detail view.
+   */
+  private showItemDetail(item: StacItem): void {
     // Hide results list, show detail
     this.resultsSection?.classList.add('hidden');
     this.itemDetailSection?.classList.remove('hidden');
@@ -776,7 +995,7 @@ export class StacBrowser {
       const props = item.properties || {};
       const datetime = props.datetime ? new Date(props.datetime).toLocaleString() : 'Unknown';
       const cloudCover =
-        props.cloud_cover !== undefined ? `${props.cloud_cover.toFixed(1)}%` : 'N/A';
+        props.cloud_cover !== undefined ? `${(props.cloud_cover as number).toFixed(1)}%` : 'N/A';
 
       this.itemProperties.innerHTML = `
         <div class="stac-property-row">
@@ -798,7 +1017,10 @@ export class StacBrowser {
     this.renderAssets(item);
   }
 
-  renderAssets(item) {
+  /**
+   * Render item assets.
+   */
+  private renderAssets(item: StacItem): void {
     if (!this.assetList) return;
 
     const assets = item.assets || {};
@@ -810,50 +1032,30 @@ export class StacBrowser {
     }
 
     // Helper to check if asset is a loadable raster (COG/GeoTIFF/JP2)
-    const isLoadableRaster = (asset, key) => {
+    const isLoadableRaster = (asset: StacAsset, key: string): boolean => {
       const type = (asset.media_type || '').toLowerCase();
       const href = (asset.href || '').toLowerCase();
       const roles = asset.roles || [];
 
-      // Check media type for GeoTIFF/COG
       if (type.includes('geotiff') || type.includes('cloud-optimized')) {
         return true;
       }
 
-      // Check for TIFF files (but not thumbnails)
       if (type.includes('tiff') && !roles.includes('thumbnail')) {
         return true;
       }
 
-      // Check for JPEG2000 (common in Sentinel data)
       if (type.includes('jp2') || href.endsWith('.jp2')) {
         return true;
       }
 
-      // Check href extension for TIF files
       if (href.includes('.tif')) {
         return true;
       }
 
-      // Known data asset keys (not thumbnails/overviews)
       const dataKeys = [
-        'visual',
-        'B01',
-        'B02',
-        'B03',
-        'B04',
-        'B05',
-        'B06',
-        'B07',
-        'B08',
-        'B8A',
-        'B09',
-        'B11',
-        'B12',
-        'red',
-        'green',
-        'blue',
-        'nir',
+        'visual', 'B01', 'B02', 'B03', 'B04', 'B05', 'B06', 'B07', 'B08',
+        'B8A', 'B09', 'B11', 'B12', 'red', 'green', 'blue', 'nir',
       ];
       if (dataKeys.includes(key)) {
         return true;
@@ -894,18 +1096,24 @@ export class StacBrowser {
     this.assetList.querySelectorAll('.stac-asset-load-btn').forEach(btn => {
       btn.addEventListener('click', e => {
         e.stopPropagation();
-        const assetKey = btn.dataset.assetKey;
-        this.loadAsset(item, assetKey);
+        const assetKey = (btn as HTMLElement).dataset.assetKey;
+        if (assetKey) this.loadAsset(item, assetKey);
       });
     });
   }
 
-  showResultsList() {
+  /**
+   * Show the results list view.
+   */
+  private showResultsList(): void {
     this.itemDetailSection?.classList.add('hidden');
     this.resultsSection?.classList.remove('hidden');
   }
 
-  clearResults() {
+  /**
+   * Clear search results.
+   */
+  private clearResults(): void {
     this.searchResults = [];
     this.selectedItem = null;
 
@@ -923,9 +1131,9 @@ export class StacBrowser {
   }
 
   /**
-   * Reset all state when changing STAC API
+   * Reset all state when changing STAC API.
    */
-  resetState() {
+  private resetState(): void {
     // Clear catalog state
     this.currentCatalogUrl = null;
     this.currentCatalog = null;
@@ -972,7 +1180,10 @@ export class StacBrowser {
   // Footprints on Map
   // ============================================
 
-  displayFootprints(items) {
+  /**
+   * Display item footprints on the map.
+   */
+  private displayFootprints(items: StacItem[]): void {
     const map = this.mapManager?.map;
     if (!map) return;
 
@@ -983,12 +1194,12 @@ export class StacBrowser {
     }
 
     // Create GeoJSON feature collection
-    const geojson = {
+    const geojson: GeoJSON.FeatureCollection = {
       type: 'FeatureCollection',
       features: items.map(item => ({
-        type: 'Feature',
+        type: 'Feature' as const,
         id: item.id,
-        geometry: item.geometry,
+        geometry: item.geometry as GeoJSON.Geometry,
         properties: {
           id: item.id,
           datetime: item.properties?.datetime,
@@ -998,7 +1209,7 @@ export class StacBrowser {
     };
 
     // Check if source exists
-    const source = map.getSource(this.footprintSourceId);
+    const source = map.getSource(this.footprintSourceId) as maplibregl.GeoJSONSource | undefined;
 
     if (source) {
       // Update existing source
@@ -1043,10 +1254,10 @@ export class StacBrowser {
       });
 
       // Add click handler
-      map.on('click', this.footprintFillLayerId, e => {
+      map.on('click', this.footprintFillLayerId, (e: maplibregl.MapMouseEvent & { features?: maplibregl.MapGeoJSONFeature[] }) => {
         if (e.features && e.features.length > 0) {
-          const itemId = e.features[0].properties.id;
-          this.selectItem(itemId);
+          const itemId = e.features[0].properties?.id;
+          if (itemId) this.selectItem(itemId);
         }
       });
 
@@ -1076,7 +1287,10 @@ export class StacBrowser {
     }
   }
 
-  highlightFootprint(itemId) {
+  /**
+   * Highlight a footprint on the map.
+   */
+  private highlightFootprint(itemId: string): void {
     const map = this.mapManager?.map;
     if (!map) return;
 
@@ -1091,7 +1305,10 @@ export class StacBrowser {
     }
   }
 
-  clearFootprints() {
+  /**
+   * Clear footprints from the map.
+   */
+  private clearFootprints(): void {
     const map = this.mapManager?.map;
     if (!map) return;
 
@@ -1109,7 +1326,10 @@ export class StacBrowser {
     }
   }
 
-  toggleFootprints() {
+  /**
+   * Toggle footprints visibility.
+   */
+  private toggleFootprints(): void {
     this.footprintsVisible = !this.footprintsVisible;
     this.setFootprintsVisibility(this.footprintsVisible);
 
@@ -1119,7 +1339,10 @@ export class StacBrowser {
     }
   }
 
-  setFootprintsVisibility(visible) {
+  /**
+   * Set footprints visibility.
+   */
+  private setFootprintsVisibility(visible: boolean): void {
     const map = this.mapManager?.map;
     if (!map) return;
 
@@ -1137,7 +1360,10 @@ export class StacBrowser {
   // Asset Loading
   // ============================================
 
-  async loadAsset(item, assetKey) {
+  /**
+   * Load a STAC asset as a map layer.
+   */
+  async loadAsset(item: StacItem, assetKey: string): Promise<void> {
     const asset = item.assets?.[assetKey];
     if (!asset) {
       showError('Asset not found', `Asset "${assetKey}" not found in item`);
@@ -1154,7 +1380,7 @@ export class StacBrowser {
       log.info('Loading STAC asset', { itemId: item.id, assetKey, href: assetHref });
 
       // Call backend to open via /vsicurl/
-      const metadata = await invoke('open_stac_asset', { assetHref });
+      const metadata = await invoke<RasterMetadata>('open_stac_asset', { assetHref });
 
       // Add to layer manager using existing infrastructure
       await this.addAssetToMap(metadata, item, assetKey, assetTitle);
@@ -1162,35 +1388,39 @@ export class StacBrowser {
       showToast(`Loaded ${assetTitle}`, 'success');
       log.info('Asset loaded successfully', { id: metadata.id });
     } catch (error) {
-      // Log raw error to console for debugging
       console.error('[STAC] Raw error loading asset:', error);
-      log.error('Failed to load STAC asset', error);
-      showError('Failed to load asset', error);
+      log.error('Failed to load STAC asset', error instanceof Error ? error : { error: String(error) });
+      showError('Failed to load asset', error instanceof Error ? error : String(error));
     } finally {
       hideLoading();
     }
   }
 
-  async addAssetToMap(metadata, item, assetKey, assetTitle) {
+  /**
+   * Add a loaded asset to the map.
+   */
+  private async addAssetToMap(
+    metadata: RasterMetadata,
+    item: StacItem,
+    assetKey: string,
+    assetTitle: string
+  ): Promise<void> {
     // Create layer name from item ID and asset key
     const layerName = `${item.id}/${assetTitle}`;
 
     // Create layer data structure compatible with LayerManager
-    const layerData = {
+    // Smart stretch detection handles different data types automatically
+    const layerData: StacLayerData = {
       id: metadata.id,
       path: metadata.path,
       type: 'raster',
-      name: layerName,
+      displayName: layerName,
       visible: true,
       opacity: 1.0,
       width: metadata.width,
       height: metadata.height,
       bands: metadata.bands,
       bounds: metadata.bounds,
-      native_bounds: metadata.native_bounds,
-      projection: metadata.projection,
-      pixel_size: metadata.pixel_size,
-      nodata: metadata.nodata,
       band_stats: metadata.band_stats,
       is_georeferenced: metadata.is_georeferenced,
       displayMode: metadata.bands >= 3 ? 'rgb' : 'grayscale',
@@ -1198,7 +1428,6 @@ export class StacBrowser {
       stretch: this.getDefaultStretch(metadata.band_stats, 1),
       rgbBands: { r: 1, g: 2, b: 3 },
       rgbStretch: this.getDefaultRgbStretch(metadata.band_stats),
-      // STAC metadata
       stacInfo: {
         itemId: item.id,
         collection: item.collection,
@@ -1217,6 +1446,9 @@ export class StacBrowser {
 
     // Add to map
     const map = this.mapManager.map;
+    if (!map) {
+      throw new Error('Map not initialized');
+    }
 
     // Add source
     map.addSource(`raster-source-${metadata.id}`, {
@@ -1256,19 +1488,81 @@ export class StacBrowser {
     }
   }
 
-  getDefaultStretch(bandStats, bandNum) {
-    const stats = bandStats?.find(s => s.band === bandNum) || bandStats?.[0];
-    if (stats) {
-      return {
-        min: stats.min,
-        max: stats.max,
-        gamma: 1.0,
-      };
+  /**
+   * Determine appropriate stretch range based on statistics and asset type.
+   *
+   * For satellite imagery:
+   * - 8-bit data (max ~255): use full range 0-255
+   * - 16-bit reflectance (max ~10000): use display-friendly range like 0-3000
+   * - If stats look like defaults, use sensible visual defaults
+   */
+  private getSmartStretchRange(
+    bandStats: Array<BandStats & { band?: number }>,
+    bandNum: number
+  ): { min: number; max: number } {
+    const stats = bandStats?.find(s => s.band === bandNum) || bandStats?.[bandNum - 1];
+
+    if (!stats) {
+      // No stats available - use common reflectance default
+      return { min: 0, max: 3000 };
     }
-    return { min: 0, max: 10000, gamma: 1.0 };
+
+    const { min, max } = stats;
+
+    // 8-bit data (0-255 range)
+    if (max <= 255) {
+      return { min: 0, max: 255 };
+    }
+
+    // 16-bit but looks like scaled 8-bit (max around 255-300)
+    if (max <= 300) {
+      return { min: 0, max: Math.ceil(max) };
+    }
+
+    // Float data normalized to 0-1
+    if (max <= 1.0) {
+      return { min: 0, max: 1 };
+    }
+
+    // 16-bit reflectance data (typically 0-10000 scale)
+    // Use a display-friendly range - most land surfaces are 0-3000
+    // This provides good contrast for typical scenes
+    if (max >= 10000) {
+      return { min: 0, max: 3500 };
+    }
+
+    // For other ranges, use ~30% of max for good contrast
+    // (similar to 2-98% percentile stretch)
+    if (max > 1000) {
+      return { min: 0, max: Math.round(max * 0.35) };
+    }
+
+    // Default: use actual range
+    return { min, max };
   }
 
-  getDefaultRgbStretch(bandStats) {
+  /**
+   * Get default stretch settings for a band.
+   * Uses smart detection of data range for optimal display.
+   */
+  private getDefaultStretch(
+    bandStats: Array<BandStats & { band?: number }>,
+    bandNum: number
+  ): StretchSettings {
+    const range = this.getSmartStretchRange(bandStats, bandNum);
+    return {
+      min: range.min,
+      max: range.max,
+      gamma: 1.0,
+    };
+  }
+
+  /**
+   * Get default RGB stretch settings.
+   */
+  private getDefaultRgbStretch(
+    bandStats: Array<BandStats & { band?: number }>
+  ): RgbStretchSettings {
     return {
       r: this.getDefaultStretch(bandStats, 1),
       g: this.getDefaultStretch(bandStats, 2),

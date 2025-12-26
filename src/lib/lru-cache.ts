@@ -2,12 +2,29 @@
  * LRU (Least Recently Used) Cache implementation
  * Automatically evicts oldest entries when capacity is exceeded
  */
-export class LRUCache {
+
+interface CacheStats {
+  hits: number;
+  misses: number;
+  evictions: number;
+}
+
+interface CacheStatsWithMetrics extends CacheStats {
+  size: number;
+  maxSize: number;
+  hitRate: number;
+}
+
+export class LRUCache<T> {
+  private maxSize: number;
+  private cache: Map<string, T>;
+  private stats: CacheStats;
+
   /**
    * Create a new LRU cache
-   * @param {number} maxSize - Maximum number of entries (default 500)
+   * @param maxSize - Maximum number of entries (default 500)
    */
-  constructor(maxSize = 500) {
+  constructor(maxSize: number = 500) {
     this.maxSize = maxSize;
     this.cache = new Map();
     this.stats = {
@@ -19,17 +36,17 @@ export class LRUCache {
 
   /**
    * Get a value from the cache
-   * @param {string} key - Cache key
-   * @returns {*} Cached value or undefined
+   * @param key - Cache key
+   * @returns Cached value or undefined
    */
-  get(key) {
+  get(key: string): T | undefined {
     if (!this.cache.has(key)) {
       this.stats.misses++;
       return undefined;
     }
 
     // Move to end (most recently used)
-    const value = this.cache.get(key);
+    const value = this.cache.get(key)!;
     this.cache.delete(key);
     this.cache.set(key, value);
     this.stats.hits++;
@@ -38,10 +55,10 @@ export class LRUCache {
 
   /**
    * Set a value in the cache
-   * @param {string} key - Cache key
-   * @param {*} value - Value to cache
+   * @param key - Cache key
+   * @param value - Value to cache
    */
-  set(key, value) {
+  set(key: string, value: T): void {
     // If key exists, delete it first (to update position)
     if (this.cache.has(key)) {
       this.cache.delete(key);
@@ -50,8 +67,10 @@ export class LRUCache {
     // Evict oldest entries if at capacity
     while (this.cache.size >= this.maxSize) {
       const oldestKey = this.cache.keys().next().value;
-      this.cache.delete(oldestKey);
-      this.stats.evictions++;
+      if (oldestKey !== undefined) {
+        this.cache.delete(oldestKey);
+        this.stats.evictions++;
+      }
     }
 
     this.cache.set(key, value);
@@ -59,42 +78,41 @@ export class LRUCache {
 
   /**
    * Check if key exists in cache
-   * @param {string} key - Cache key
-   * @returns {boolean}
+   * @param key - Cache key
+   * @returns True if key exists
    */
-  has(key) {
+  has(key: string): boolean {
     return this.cache.has(key);
   }
 
   /**
    * Delete a specific key from cache
-   * @param {string} key - Cache key
-   * @returns {boolean} True if key existed
+   * @param key - Cache key
+   * @returns True if key existed
    */
-  delete(key) {
+  delete(key: string): boolean {
     return this.cache.delete(key);
   }
 
   /**
    * Clear all entries from cache
    */
-  clear() {
+  clear(): void {
     this.cache.clear();
   }
 
   /**
    * Get current cache size
-   * @returns {number}
    */
-  get size() {
+  get size(): number {
     return this.cache.size;
   }
 
   /**
    * Get cache statistics
-   * @returns {Object} Stats object with hits, misses, evictions, size, hitRate
+   * @returns Stats object with hits, misses, evictions, size, hitRate
    */
-  getStats() {
+  getStats(): CacheStatsWithMetrics {
     const total = this.stats.hits + this.stats.misses;
     return {
       ...this.stats,
@@ -107,7 +125,7 @@ export class LRUCache {
   /**
    * Reset statistics
    */
-  resetStats() {
+  resetStats(): void {
     this.stats = {
       hits: 0,
       misses: 0,

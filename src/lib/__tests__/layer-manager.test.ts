@@ -77,7 +77,7 @@ function createMockMapManager() {
 }
 
 // Import after mocks are set up
-import { LayerManager } from '../layer-manager.js';
+import { LayerManager } from '../layer-manager/index.js';
 import { invoke } from '@tauri-apps/api/core';
 
 describe('LayerManager', () => {
@@ -160,12 +160,13 @@ describe('LayerManager', () => {
       visible: true,
       opacity: 1.0,
       color: '#ff0000',
-      lineWidth: 2,
+      strokeWidth: 2,
       pointRadius: 5,
       style: {
         fillColor: '#ff0000',
-        lineColor: '#000000',
-        lineWidth: 2,
+        fillOpacity: 0.5,
+        strokeColor: '#000000',
+        strokeWidth: 2,
         pointRadius: 5,
       },
     };
@@ -275,10 +276,10 @@ describe('LayerManager', () => {
         expect(layer.style.fillColor).toBe('#00ff00');
       });
 
-      it('should update line width', () => {
-        layerManager.setVectorStyle('test-vector-1', 'lineWidth', 5);
+      it('should update stroke width', () => {
+        layerManager.setVectorStyle('test-vector-1', 'strokeWidth', 5);
         const layer = layerManager.layers.get('test-vector-1');
-        expect(layer.style.lineWidth).toBe(5);
+        expect(layer.style.strokeWidth).toBe(5);
       });
 
       it('should update point radius', () => {

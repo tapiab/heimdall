@@ -1,10 +1,11 @@
 import js from '@eslint/js';
 import globals from 'globals';
+import tseslint from 'typescript-eslint';
 
 export default [
   js.configs.recommended,
   {
-    files: ['src/**/*.js'],
+    files: ['src/**/*.js', 'src/**/*.ts'],
     languageOptions: {
       ecmaVersion: 2022,
       sourceType: 'module',
@@ -82,9 +83,52 @@ export default [
   },
   {
     // Test files - relax some rules
-    files: ['src/**/*.test.js', 'src/**/*.spec.js'],
+    files: ['src/**/*.test.js', 'src/**/*.spec.js', 'src/**/*.test.ts', 'src/**/*.spec.ts'],
     rules: {
       'no-unused-expressions': 'off',
+    },
+  },
+  // TypeScript-specific configuration (excluding test files)
+  ...tseslint.configs.recommended.map(config => ({
+    ...config,
+    files: ['src/**/*.ts'],
+    ignores: ['src/**/__tests__/**'],
+  })),
+  {
+    files: ['src/**/*.ts'],
+    ignores: ['src/**/__tests__/**'],
+    languageOptions: {
+      parser: tseslint.parser,
+      parserOptions: {
+        project: './tsconfig.json',
+      },
+    },
+    rules: {
+      // TypeScript handles these better
+      'no-unused-vars': 'off',
+      '@typescript-eslint/no-unused-vars': ['error', {
+        argsIgnorePattern: '^_',
+        varsIgnorePattern: '^_',
+        caughtErrorsIgnorePattern: '^_',
+      }],
+      'no-use-before-define': 'off',
+      '@typescript-eslint/no-use-before-define': ['error', { functions: false, classes: true }],
+      // TypeScript-specific rules
+      '@typescript-eslint/explicit-function-return-type': 'off', // Too strict for migration
+      '@typescript-eslint/no-explicit-any': 'warn',
+      '@typescript-eslint/no-non-null-assertion': 'warn',
+    },
+  },
+  {
+    // Test files - use TypeScript parser but without project (relaxed checking)
+    files: ['src/**/__tests__/**/*.ts'],
+    languageOptions: {
+      parser: tseslint.parser,
+    },
+    rules: {
+      'no-unused-vars': 'off',
+      '@typescript-eslint/no-unused-vars': 'off', // Tests often have unused vars in mocks
+      '@typescript-eslint/no-explicit-any': 'off', // Tests need flexibility with mocks
     },
   },
   {

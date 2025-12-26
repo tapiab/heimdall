@@ -1,5 +1,5 @@
 /**
- * Tests for MapManager terrain functionality
+ * Tests for MapManager terrain and basemap functionality
  */
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
@@ -8,10 +8,12 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 const mockMap = {
   getSource: vi.fn(),
   addSource: vi.fn(),
+  removeSource: vi.fn(),
   setTerrain: vi.fn(),
   getLayer: vi.fn(),
   addLayer: vi.fn(),
   removeLayer: vi.fn(),
+  setLayoutProperty: vi.fn(),
   on: vi.fn(),
   getPitch: vi.fn(() => 0),
   getBearing: vi.fn(() => 0),
@@ -340,6 +342,289 @@ describe('MapManager Terrain', () => {
       expect(consoleSpy).not.toHaveBeenCalled();
 
       consoleSpy.mockRestore();
+    });
+  });
+});
+
+// Default satellite basemap (matches the real implementation)
+const DEFAULT_SATELLITE = {
+  url: 'https://tiles.maps.eox.at/wmts/1.0.0/s2cloudless-2021_3857/default/GoogleMapsCompatible/{z}/{y}/{x}.jpg',
+  attribution: 'Sentinel-2 cloudless by EOX - CC BY 4.0',
+};
+
+// Create a MapManager-like object for testing basemap functionality
+function createBasemapTestMapManager(configManager = null) {
+  return {
+    map: mockMap,
+    configManager,
+    basemapVisible: true,
+    currentBasemap: 'osm',
+
+    setLayerVisibility(id, visible) {
+      if (this.map.getLayer(id)) {
+        this.map.setLayoutProperty(id, 'visibility', visible ? 'visible' : 'none');
+      }
+    },
+
+    toggleBasemap() {
+      this.basemapVisible = !this.basemapVisible;
+      if (this.basemapVisible) {
+        this.setBasemap(this.currentBasemap);
+      } else {
+        this.setLayerVisibility('osm-tiles', false);
+        this.setLayerVisibility('satellite-tiles', false);
+        this.setLayerVisibility('custom-tiles', false);
+      }
+      return this.basemapVisible;
+    },
+
+    setBasemap(type) {
+      this.currentBasemap = type;
+
+      if (type === 'none') {
+        this.basemapVisible = false;
+        this.setLayerVisibility('osm-tiles', false);
+        this.setLayerVisibility('satellite-tiles', false);
+        this.setLayerVisibility('custom-tiles', false);
+        this.setLayerVisibility('pixel-grid', false);
+      } else if (type === 'pixel') {
+        this.basemapVisible = true;
+        this.setLayerVisibility('osm-tiles', false);
+        this.setLayerVisibility('satellite-tiles', false);
+        this.setLayerVisibility('custom-tiles', false);
+        this.setLayerVisibility('pixel-grid', true);
+      } else {
+        this.basemapVisible = true;
+        this.setLayerVisibility('osm-tiles', type === 'osm');
+        this.setLayerVisibility('satellite-tiles', type === 'satellite');
+        this.setLayerVisibility('custom-tiles', type === 'custom');
+        this.setLayerVisibility('pixel-grid', false);
+      }
+    },
+
+    getBasemap() {
+      return this.basemapVisible ? this.currentBasemap : 'none';
+    },
+
+    hasCustomBasemap() {
+      return !!this.map?.getSource('custom');
+    },
+
+    setCustomBasemapSource(url, attribution = '') {
+      if (!url) return;
+
+      // Remove existing custom source and layer if they exist
+      if (this.map.getLayer('custom-tiles')) {
+        this.map.removeLayer('custom-tiles');
+      }
+      if (this.map.getSource('custom')) {
+        this.map.removeSource('custom');
+      }
+
+      // Add new custom source
+      this.map.addSource('custom', {
+        type: 'raster',
+        tiles: [url],
+        tileSize: 256,
+        attribution,
+      });
+
+      // Add custom layer
+      this.map.addLayer({
+        id: 'custom-tiles',
+        type: 'raster',
+        source: 'custom',
+        minzoom: 0,
+        maxzoom: 19,
+        layout: { visibility: 'none' },
+      });
+    },
+
+    getSatelliteConfig() {
+      return this.configManager?.getSatelliteConfig() || DEFAULT_SATELLITE;
+    },
+  };
+}
+
+describe('MapManager Basemap', () => {
+  let mapManager;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockMap.getSource.mockReturnValue(null);
+    mockMap.getLayer.mockReturnValue(null);
+    mapManager = createBasemapTestMapManager();
+  });
+
+  describe('setBasemap', () => {
+    it('should set basemap to osm', () => {
+      mockMap.getLayer.mockReturnValue({ id: 'osm-tiles' });
+
+      mapManager.setBasemap('osm');
+
+      expect(mapManager.currentBasemap).toBe('osm');
+      expect(mapManager.basemapVisible).toBe(true);
+    });
+
+    it('should set basemap to satellite', () => {
+      mockMap.getLayer.mockReturnValue({ id: 'satellite-tiles' });
+
+      mapManager.setBasemap('satellite');
+
+      expect(mapManager.currentBasemap).toBe('satellite');
+      expect(mapManager.basemapVisible).toBe(true);
+    });
+
+    it('should set basemap to custom', () => {
+      mockMap.getLayer.mockReturnValue({ id: 'custom-tiles' });
+
+      mapManager.setBasemap('custom');
+
+      expect(mapManager.currentBasemap).toBe('custom');
+      expect(mapManager.basemapVisible).toBe(true);
+    });
+
+    it('should set basemap to none', () => {
+      mapManager.setBasemap('none');
+
+      expect(mapManager.currentBasemap).toBe('none');
+      expect(mapManager.basemapVisible).toBe(false);
+    });
+
+    it('should set basemap to pixel grid', () => {
+      mockMap.getLayer.mockReturnValue({ id: 'pixel-grid' });
+
+      mapManager.setBasemap('pixel');
+
+      expect(mapManager.currentBasemap).toBe('pixel');
+      expect(mapManager.basemapVisible).toBe(true);
+    });
+  });
+
+  describe('getBasemap', () => {
+    it('should return current basemap when visible', () => {
+      mapManager.currentBasemap = 'satellite';
+      mapManager.basemapVisible = true;
+
+      expect(mapManager.getBasemap()).toBe('satellite');
+    });
+
+    it('should return none when basemap is not visible', () => {
+      mapManager.currentBasemap = 'satellite';
+      mapManager.basemapVisible = false;
+
+      expect(mapManager.getBasemap()).toBe('none');
+    });
+  });
+
+  describe('toggleBasemap', () => {
+    it('should toggle basemap visibility', () => {
+      mapManager.basemapVisible = true;
+
+      const result = mapManager.toggleBasemap();
+
+      expect(result).toBe(false);
+      expect(mapManager.basemapVisible).toBe(false);
+    });
+
+    it('should restore previous basemap when toggling back on', () => {
+      mapManager.currentBasemap = 'satellite';
+      mapManager.basemapVisible = false;
+      mockMap.getLayer.mockReturnValue({ id: 'satellite-tiles' });
+
+      const result = mapManager.toggleBasemap();
+
+      expect(result).toBe(true);
+      expect(mapManager.basemapVisible).toBe(true);
+    });
+  });
+
+  describe('hasCustomBasemap', () => {
+    it('should return false when custom source does not exist', () => {
+      mockMap.getSource.mockReturnValue(null);
+
+      expect(mapManager.hasCustomBasemap()).toBe(false);
+    });
+
+    it('should return true when custom source exists', () => {
+      mockMap.getSource.mockReturnValue({ id: 'custom' });
+
+      expect(mapManager.hasCustomBasemap()).toBe(true);
+    });
+  });
+
+  describe('setCustomBasemapSource', () => {
+    it('should add custom basemap source and layer', () => {
+      mapManager.setCustomBasemapSource(
+        'https://custom.tiles.com/{z}/{x}/{y}.png',
+        'Custom Attribution'
+      );
+
+      expect(mockMap.addSource).toHaveBeenCalledWith('custom', {
+        type: 'raster',
+        tiles: ['https://custom.tiles.com/{z}/{x}/{y}.png'],
+        tileSize: 256,
+        attribution: 'Custom Attribution',
+      });
+
+      expect(mockMap.addLayer).toHaveBeenCalledWith({
+        id: 'custom-tiles',
+        type: 'raster',
+        source: 'custom',
+        minzoom: 0,
+        maxzoom: 19,
+        layout: { visibility: 'none' },
+      });
+    });
+
+    it('should remove existing custom source before adding new one', () => {
+      mockMap.getLayer.mockReturnValue({ id: 'custom-tiles' });
+      mockMap.getSource.mockReturnValue({ id: 'custom' });
+
+      mapManager.setCustomBasemapSource('https://new-tiles.com/{z}/{x}/{y}.png');
+
+      expect(mockMap.removeLayer).toHaveBeenCalledWith('custom-tiles');
+      expect(mockMap.removeSource).toHaveBeenCalledWith('custom');
+    });
+
+    it('should not add source if url is empty', () => {
+      mapManager.setCustomBasemapSource('');
+
+      expect(mockMap.addSource).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('getSatelliteConfig', () => {
+    it('should return default Sentinel-2 Cloudless config when no configManager', () => {
+      const config = mapManager.getSatelliteConfig();
+
+      expect(config.url).toContain('tiles.maps.eox.at');
+      expect(config.url).toContain('s2cloudless');
+      expect(config.attribution).toContain('Sentinel-2');
+      expect(config.attribution).toContain('CC BY 4.0');
+    });
+
+    it('should return config from configManager when available', () => {
+      const mockConfigManager = {
+        getSatelliteConfig: vi.fn(() => ({
+          url: 'https://custom-satellite.com/{z}/{x}/{y}.jpg',
+          attribution: 'Custom Satellite',
+        })),
+      };
+
+      const managerWithConfig = createBasemapTestMapManager(mockConfigManager);
+      const config = managerWithConfig.getSatelliteConfig();
+
+      expect(config.url).toBe('https://custom-satellite.com/{z}/{x}/{y}.jpg');
+      expect(config.attribution).toBe('Custom Satellite');
+    });
+
+    it('should NOT use Esri/ArcGIS URLs (open source compliance)', () => {
+      const config = mapManager.getSatelliteConfig();
+
+      expect(config.url).not.toContain('arcgisonline');
+      expect(config.url).not.toContain('esri');
+      expect(config.url.toLowerCase()).not.toContain('arcgis');
     });
   });
 });

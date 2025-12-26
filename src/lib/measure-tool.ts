@@ -1,11 +1,46 @@
-import maplibregl from 'maplibre-gl';
-
 /**
  * Distance measurement tool for measuring distances on the map.
  * Supports both geodesic (geographic) and pixel-based (non-georeferenced) measurements.
  */
+
+import maplibregl, {
+  type Map as MapLibreMap,
+  type MapMouseEvent,
+  type Marker,
+  type Popup,
+  type GeoJSONSource,
+} from 'maplibre-gl';
+import type { Feature, LineString } from 'geojson';
+
+// Interface for MapManager (will be properly typed when MapManager is migrated)
+interface PixelExtent {
+  scale?: number;
+  offsetX?: number;
+  offsetY?: number;
+}
+
+interface MapManager {
+  map: MapLibreMap;
+  isPixelCoordMode: () => boolean;
+  pixelExtent: PixelExtent | null;
+}
+
+type Coordinate = [number, number];
+
+interface Distance {
+  value: number;
+  unit: 'meters' | 'pixels';
+}
+
 export class MeasureTool {
-  constructor(mapManager) {
+  private mapManager: MapManager;
+  private map: MapLibreMap;
+  private active: boolean;
+  private points: Coordinate[];
+  private markers: Marker[];
+  private popup: Popup | null;
+
+  constructor(mapManager: MapManager) {
     this.mapManager = mapManager;
     this.map = mapManager.map;
     this.active = false;
@@ -19,7 +54,7 @@ export class MeasureTool {
   /**
    * Activate measurement mode
    */
-  activate() {
+  activate(): void {
     if (this.active) return;
 
     this.active = true;
@@ -36,7 +71,7 @@ export class MeasureTool {
   /**
    * Deactivate measurement mode
    */
-  deactivate() {
+  deactivate(): void {
     if (!this.active) return;
 
     this.active = false;
@@ -50,7 +85,7 @@ export class MeasureTool {
   /**
    * Toggle measurement mode
    */
-  toggle() {
+  toggle(): boolean {
     if (this.active) {
       this.deactivate();
       return false;
@@ -63,14 +98,14 @@ export class MeasureTool {
   /**
    * Check if measurement mode is active
    */
-  isActive() {
+  isActive(): boolean {
     return this.active;
   }
 
   /**
    * Handle map click events
    */
-  handleClick(e) {
+  private handleClick(e: MapMouseEvent): void {
     const { lng, lat } = e.lngLat;
 
     if (this.points.length === 0) {
@@ -97,7 +132,7 @@ export class MeasureTool {
   /**
    * Handle mouse move for preview line
    */
-  handleMouseMove(e) {
+  private handleMouseMove(e: MapMouseEvent): void {
     if (this.points.length !== 1) return;
 
     const { lng, lat } = e.lngLat;
@@ -108,10 +143,10 @@ export class MeasureTool {
   /**
    * Add a marker at the specified location
    */
-  addMarker(lng, lat, pointNumber) {
+  private addMarker(lng: number, lat: number, pointNumber: number): void {
     const el = document.createElement('div');
     el.className = 'measure-marker';
-    el.innerHTML = pointNumber;
+    el.innerHTML = String(pointNumber);
 
     const marker = new maplibregl.Marker({ element: el }).setLngLat([lng, lat]).addTo(this.map);
 
@@ -121,17 +156,19 @@ export class MeasureTool {
   /**
    * Draw line between measurement points
    */
-  drawLine() {
-    const geojson = {
+  private drawLine(): void {
+    const geojson: Feature<LineString> = {
       type: 'Feature',
+      properties: {},
       geometry: {
         type: 'LineString',
         coordinates: this.points,
       },
     };
 
-    if (this.map.getSource('measure-line')) {
-      this.map.getSource('measure-line').setData(geojson);
+    const source = this.map.getSource('measure-line') as GeoJSONSource | undefined;
+    if (source) {
+      source.setData(geojson);
     } else {
       this.map.addSource('measure-line', { type: 'geojson', data: geojson });
       this.map.addLayer({
@@ -153,17 +190,19 @@ export class MeasureTool {
   /**
    * Draw preview line from first point to cursor
    */
-  drawPreviewLine(lng, lat) {
-    const geojson = {
+  private drawPreviewLine(lng: number, lat: number): void {
+    const geojson: Feature<LineString> = {
       type: 'Feature',
+      properties: {},
       geometry: {
         type: 'LineString',
         coordinates: [this.points[0], [lng, lat]],
       },
     };
 
-    if (this.map.getSource('measure-preview-line')) {
-      this.map.getSource('measure-preview-line').setData(geojson);
+    const source = this.map.getSource('measure-preview-line') as GeoJSONSource | undefined;
+    if (source) {
+      source.setData(geojson);
     } else {
       this.map.addSource('measure-preview-line', { type: 'geojson', data: geojson });
       this.map.addLayer({
@@ -183,7 +222,7 @@ export class MeasureTool {
   /**
    * Remove preview line
    */
-  removePreviewLine() {
+  private removePreviewLine(): void {
     if (this.map.getLayer('measure-preview-line')) {
       this.map.removeLayer('measure-preview-line');
     }
@@ -195,7 +234,7 @@ export class MeasureTool {
   /**
    * Show the measured distance
    */
-  showDistance() {
+  private showDistance(): void {
     if (this.points.length < 2) return;
 
     const distance = this.calculateDistance(this.points[0], this.points[1]);
@@ -224,7 +263,7 @@ export class MeasureTool {
   /**
    * Show preview distance while moving mouse
    */
-  showPreviewDistance(lng, lat) {
+  private showPreviewDistance(lng: number, lat: number): void {
     if (this.points.length !== 1) return;
 
     const distance = this.calculateDistance(this.points[0], [lng, lat]);
@@ -237,7 +276,7 @@ export class MeasureTool {
    * Calculate distance between two points
    * Uses Haversine formula for geographic data, Euclidean for pixel coordinates
    */
-  calculateDistance(point1, point2) {
+  calculateDistance(point1: Coordinate, point2: Coordinate): Distance {
     if (this.mapManager.isPixelCoordMode() && this.mapManager.pixelExtent) {
       // Calculate pixel distance
       return this.calculatePixelDistance(point1, point2);
@@ -249,9 +288,9 @@ export class MeasureTool {
 
   /**
    * Calculate geodesic distance using Haversine formula
-   * @returns {Object} { value: number, unit: 'meters' }
+   * @returns { value: number, unit: 'meters' }
    */
-  calculateGeodesicDistance(point1, point2) {
+  calculateGeodesicDistance(point1: Coordinate, point2: Coordinate): Distance {
     const R = 6371000; // Earth's radius in meters
     const lat1 = (point1[1] * Math.PI) / 180;
     const lat2 = (point2[1] * Math.PI) / 180;
@@ -268,10 +307,10 @@ export class MeasureTool {
 
   /**
    * Calculate pixel distance for non-georeferenced images
-   * @returns {Object} { value: number, unit: 'pixels' }
+   * @returns { value: number, unit: 'pixels' }
    */
-  calculatePixelDistance(point1, point2) {
-    const extent = this.mapManager.pixelExtent;
+  calculatePixelDistance(point1: Coordinate, point2: Coordinate): Distance {
+    const extent = this.mapManager.pixelExtent!;
     const scale = extent.scale || 0.01;
     const offsetX = extent.offsetX || 0;
     const offsetY = extent.offsetY || 0;
@@ -293,7 +332,7 @@ export class MeasureTool {
   /**
    * Format distance for display
    */
-  formatDistance(distance) {
+  formatDistance(distance: Distance): string {
     const { value, unit } = distance;
 
     if (unit === 'pixels') {
@@ -311,8 +350,8 @@ export class MeasureTool {
   /**
    * Show instruction tooltip
    */
-  showInstruction(text) {
-    let instructionEl = document.getElementById('measure-instruction');
+  private showInstruction(text: string): void {
+    let instructionEl = document.getElementById('measure-instruction') as HTMLDivElement | null;
     if (!instructionEl) {
       instructionEl = document.createElement('div');
       instructionEl.id = 'measure-instruction';
@@ -325,7 +364,7 @@ export class MeasureTool {
   /**
    * Hide instruction tooltip
    */
-  hideInstruction() {
+  private hideInstruction(): void {
     const instructionEl = document.getElementById('measure-instruction');
     if (instructionEl) {
       instructionEl.style.display = 'none';
@@ -335,7 +374,7 @@ export class MeasureTool {
   /**
    * Clear all measurement elements
    */
-  clearMeasurement() {
+  clearMeasurement(): void {
     // Remove markers
     this.markers.forEach(marker => marker.remove());
     this.markers = [];

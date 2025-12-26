@@ -3,7 +3,21 @@
  * Provides log levels and can be disabled in production
  */
 
-const LOG_LEVELS = {
+type LogLevel = 'debug' | 'info' | 'warn' | 'error' | 'none';
+type LogLevelValue = 0 | 1 | 2 | 3 | 4;
+
+interface LogContext {
+  [key: string]: unknown;
+}
+
+interface ChildLogger {
+  debug: (message: string, context?: LogContext) => void;
+  info: (message: string, context?: LogContext) => void;
+  warn: (message: string, context?: LogContext) => void;
+  error: (message: string, errorOrContext?: Error | LogContext) => void;
+}
+
+const LOG_LEVELS: Record<Uppercase<LogLevel>, LogLevelValue> = {
   DEBUG: 0,
   INFO: 1,
   WARN: 2,
@@ -12,6 +26,9 @@ const LOG_LEVELS = {
 };
 
 class Logger {
+  private level: LogLevelValue;
+  private prefix: string;
+
   constructor() {
     // Default to INFO in production, DEBUG in development
     this.level = this.isProduction() ? LOG_LEVELS.INFO : LOG_LEVELS.DEBUG;
@@ -20,9 +37,8 @@ class Logger {
 
   /**
    * Check if running in production mode
-   * @returns {boolean}
    */
-  isProduction() {
+  private isProduction(): boolean {
     // Vite sets import.meta.env.PROD in production builds
     try {
       return import.meta.env?.PROD === true;
@@ -33,10 +49,9 @@ class Logger {
 
   /**
    * Set the minimum log level
-   * @param {'debug' | 'info' | 'warn' | 'error' | 'none'} level
    */
-  setLevel(level) {
-    const normalizedLevel = level.toUpperCase();
+  setLevel(level: LogLevel): void {
+    const normalizedLevel = level.toUpperCase() as Uppercase<LogLevel>;
     if (normalizedLevel in LOG_LEVELS) {
       this.level = LOG_LEVELS[normalizedLevel];
     }
@@ -44,13 +59,10 @@ class Logger {
 
   /**
    * Format a log message with optional context
-   * @param {string} message - Log message
-   * @param {Object} [context] - Additional context data
-   * @returns {Array} Arguments for console methods
    */
-  format(message, context) {
+  private format(message: string, context?: LogContext): unknown[] {
     const timestamp = new Date().toISOString().split('T')[1].slice(0, 12);
-    const args = [`${this.prefix} ${timestamp} ${message}`];
+    const args: unknown[] = [`${this.prefix} ${timestamp} ${message}`];
     if (context && Object.keys(context).length > 0) {
       args.push(context);
     }
@@ -59,10 +71,8 @@ class Logger {
 
   /**
    * Log debug message (development only)
-   * @param {string} message
-   * @param {Object} [context]
    */
-  debug(message, context) {
+  debug(message: string, context?: LogContext): void {
     if (this.level <= LOG_LEVELS.DEBUG) {
       console.debug(...this.format(message, context));
     }
@@ -70,10 +80,8 @@ class Logger {
 
   /**
    * Log info message
-   * @param {string} message
-   * @param {Object} [context]
    */
-  info(message, context) {
+  info(message: string, context?: LogContext): void {
     if (this.level <= LOG_LEVELS.INFO) {
       console.info(...this.format(message, context));
     }
@@ -81,10 +89,8 @@ class Logger {
 
   /**
    * Log warning message
-   * @param {string} message
-   * @param {Object} [context]
    */
-  warn(message, context) {
+  warn(message: string, context?: LogContext): void {
     if (this.level <= LOG_LEVELS.WARN) {
       console.warn(...this.format(message, context));
     }
@@ -92,10 +98,8 @@ class Logger {
 
   /**
    * Log error message
-   * @param {string} message
-   * @param {Error | Object} [errorOrContext]
    */
-  error(message, errorOrContext) {
+  error(message: string, errorOrContext?: Error | LogContext): void {
     if (this.level <= LOG_LEVELS.ERROR) {
       if (errorOrContext instanceof Error) {
         console.error(
@@ -109,16 +113,13 @@ class Logger {
 
   /**
    * Create a child logger with a specific component prefix
-   * @param {string} component - Component name
-   * @returns {Object} Logger-like object scoped to component
    */
-  child(component) {
-    const parent = this;
+  child(component: string): ChildLogger {
     return {
-      debug: (msg, ctx) => parent.debug(`[${component}] ${msg}`, ctx),
-      info: (msg, ctx) => parent.info(`[${component}] ${msg}`, ctx),
-      warn: (msg, ctx) => parent.warn(`[${component}] ${msg}`, ctx),
-      error: (msg, ctx) => parent.error(`[${component}] ${msg}`, ctx),
+      debug: (msg: string, ctx?: LogContext) => this.debug(`[${component}] ${msg}`, ctx),
+      info: (msg: string, ctx?: LogContext) => this.info(`[${component}] ${msg}`, ctx),
+      warn: (msg: string, ctx?: LogContext) => this.warn(`[${component}] ${msg}`, ctx),
+      error: (msg: string, ctx?: Error | LogContext) => this.error(`[${component}] ${msg}`, ctx),
     };
   }
 }
@@ -128,3 +129,4 @@ export const logger = new Logger();
 
 // Export class for testing
 export { Logger, LOG_LEVELS };
+export type { LogLevel, LogContext, ChildLogger };

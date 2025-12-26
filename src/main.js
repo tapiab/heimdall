@@ -1,7 +1,7 @@
 import 'maplibre-gl/dist/maplibre-gl.css';
 import { invoke } from '@tauri-apps/api/core';
 import { MapManager } from './lib/map-manager.js';
-import { LayerManager } from './lib/layer-manager.js';
+import { LayerManager } from './lib/layer-manager/index.js';
 import { MeasureTool } from './lib/measure-tool.js';
 import { InspectTool } from './lib/inspect-tool.js';
 import { ExportTool } from './lib/export-tool.js';
@@ -12,11 +12,21 @@ import { ProjectManager } from './lib/project-manager.js';
 import { StacBrowser } from './lib/stac-browser.js';
 import { setupUI } from './lib/ui.js';
 import { logger } from './lib/logger.js';
+import { getConfigManager } from './lib/config-manager.js';
 
 // Initialize the application
 async function init() {
-  // Create the map
-  const mapManager = new MapManager('map');
+  // Initialize config manager first
+  const configManager = getConfigManager();
+  try {
+    await configManager.init();
+    logger.info('Config loaded');
+  } catch (error) {
+    logger.warn('Could not load config, using defaults', error);
+  }
+
+  // Create the map with config manager
+  const mapManager = new MapManager('map', configManager);
   await mapManager.init();
 
   // Create layer manager
@@ -57,7 +67,8 @@ async function init() {
     annotationTool,
     zoomRectTool,
     projectManager,
-    stacBrowser
+    stacBrowser,
+    configManager
   );
 
   // Fetch and display version

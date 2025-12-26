@@ -1,49 +1,184 @@
 /**
  * Profile Tool - Draw a line and show elevation profile along it
+ *
+ * This tool allows users to draw a polyline on the map and generate
+ * an elevation profile chart showing height values along the path.
+ * Supports both georeferenced DEMs and non-georeferenced raster images.
+ *
+ * @module profile-tool
  */
 
 import { invoke } from '@tauri-apps/api/core';
-import maplibregl from 'maplibre-gl';
-import { showToast, showError, showLoading, hideLoading } from './notifications.js';
+import maplibregl, {
+  type Map as MapLibreMap,
+  type MapMouseEvent,
+  type Marker,
+  type LngLat,
+  type GeoJSONSource,
+} from 'maplibre-gl';
+import type { Feature, LineString } from 'geojson';
+import { showToast, showError, showLoading, hideLoading } from './notifications';
 
+/**
+ * Pixel extent information for non-georeferenced images
+ */
+interface PixelExtent {
+  /** Scale factor from pixels to map units */
+  scale?: number;
+  /** X offset for coordinate transformation */
+  offsetX?: number;
+  /** Y offset for coordinate transformation */
+  offsetY?: number;
+}
+
+/**
+ * MapManager interface for map operations
+ */
+interface MapManager {
+  /** The underlying MapLibre GL map instance */
+  map: MapLibreMap;
+  /** Check if currently in pixel coordinate mode */
+  isPixelCoordMode: () => boolean;
+  /** Current pixel extent configuration */
+  pixelExtent: PixelExtent | null;
+}
+
+/**
+ * Raster layer data structure
+ */
+interface RasterLayer {
+  /** Unique layer identifier */
+  id: string;
+  /** Layer type discriminator */
+  type: 'raster';
+  /** Whether layer is currently visible */
+  visible: boolean;
+}
+
+/**
+ * LayerManager interface for layer operations
+ */
+interface LayerManager {
+  /** Ordered list of layer IDs (bottom to top) */
+  layerOrder: string[];
+  /** Map of layer ID to layer data */
+  layers: Map<string, RasterLayer>;
+}
+
+/** Geographic coordinate as [longitude, latitude] */
+type Coordinate = [number, number];
+
+/**
+ * Single point in an elevation profile
+ */
+interface ProfilePoint {
+  /** Distance from start of profile in meters */
+  distance: number;
+  /** Elevation value at this point */
+  elevation: number;
+  /** Whether this is a valid elevation value */
+  is_valid: boolean;
+}
+
+/**
+ * Complete elevation profile result from backend
+ */
+interface ElevationProfileResult {
+  /** Array of sampled elevation points */
+  points: ProfilePoint[];
+  /** Total distance of the profile in meters */
+  total_distance: number;
+  /** Minimum elevation along the profile */
+  min_elevation: number;
+  /** Maximum elevation along the profile */
+  max_elevation: number;
+  /** Total elevation gain (sum of uphill segments) */
+  elevation_gain: number;
+  /** Total elevation loss (sum of downhill segments) */
+  elevation_loss: number;
+}
+
+/**
+ * ProfileTool allows users to draw a line on the map and view an elevation profile.
+ *
+ * Features:
+ * - Click to add points along the profile path
+ * - Live preview line while drawing
+ * - Press Enter to generate the elevation profile
+ * - Interactive chart showing elevation, distance, gain/loss
+ * - Hover on chart to see values at specific points
+ *
+ * @example
+ * ```typescript
+ * const profileTool = new ProfileTool(mapManager, layerManager);
+ * profileTool.activate();
+ * // User clicks points on map, then presses Enter
+ * // Profile panel appears with elevation chart
+ * profileTool.deactivate();
+ * ```
+ */
 export class ProfileTool {
-  constructor(mapManager, layerManager) {
+  private mapManager: MapManager;
+  private layerManager: LayerManager;
+  private map: MapLibreMap;
+  private active: boolean;
+  private points: Coordinate[];
+  private markers: Marker[];
+
+  /**
+   * Create a new ProfileTool instance
+   * @param mapManager - The MapManager instance for map access
+   * @param layerManager - The LayerManager instance to find elevation data layers
+   */
+  constructor(mapManager: MapManager, layerManager: LayerManager) {
     this.mapManager = mapManager;
     this.layerManager = layerManager;
     this.map = mapManager.map;
     this.active = false;
     this.points = [];
     this.markers = [];
-    this.clickHandler = this.handleClick.bind(this);
-    this.moveHandler = this.handleMouseMove.bind(this);
-    this.keyHandler = this.handleKeyDown.bind(this);
+    this.handleClick = this.handleClick.bind(this);
+    this.handleMouseMove = this.handleMouseMove.bind(this);
+    this.handleKeyDown = this.handleKeyDown.bind(this);
   }
 
-  activate() {
+  /**
+   * Activate the profile tool
+   * Sets up click/move/keyboard handlers and changes cursor to crosshair
+   */
+  activate(): void {
     if (this.active) return;
     this.active = true;
     this.points = [];
     this.clearMarkers();
     this.map.getCanvas().style.cursor = 'crosshair';
-    this.map.on('click', this.clickHandler);
-    this.map.on('mousemove', this.moveHandler);
-    document.addEventListener('keydown', this.keyHandler);
+    this.map.on('click', this.handleClick);
+    this.map.on('mousemove', this.handleMouseMove);
+    document.addEventListener('keydown', this.handleKeyDown);
     this.showInstruction('Click to set profile start point');
   }
 
-  deactivate() {
+  /**
+   * Deactivate the profile tool
+   * Removes all handlers, clears drawn markers and lines
+   */
+  deactivate(): void {
     if (!this.active) return;
     this.active = false;
     this.map.getCanvas().style.cursor = '';
-    this.map.off('click', this.clickHandler);
-    this.map.off('mousemove', this.moveHandler);
-    document.removeEventListener('keydown', this.keyHandler);
+    this.map.off('click', this.handleClick);
+    this.map.off('mousemove', this.handleMouseMove);
+    document.removeEventListener('keydown', this.handleKeyDown);
     this.hideInstruction();
     this.clearMarkers();
     this.clearLine();
   }
 
-  toggle() {
+  /**
+   * Toggle the profile tool on/off
+   * @returns True if tool is now active, false if deactivated
+   */
+  toggle(): boolean {
     if (this.active) {
       this.deactivate();
     } else {
@@ -52,12 +187,16 @@ export class ProfileTool {
     return this.active;
   }
 
-  isActive() {
+  /**
+   * Check if the profile tool is currently active
+   * @returns True if tool is active
+   */
+  isActive(): boolean {
     return this.active;
   }
 
-  showInstruction(text) {
-    let instruction = document.getElementById('profile-instruction');
+  private showInstruction(text: string): void {
+    let instruction = document.getElementById('profile-instruction') as HTMLDivElement | null;
     if (!instruction) {
       instruction = document.createElement('div');
       instruction.id = 'profile-instruction';
@@ -67,21 +206,21 @@ export class ProfileTool {
     instruction.style.display = 'block';
   }
 
-  hideInstruction() {
+  private hideInstruction(): void {
     const instruction = document.getElementById('profile-instruction');
     if (instruction) {
       instruction.style.display = 'none';
     }
   }
 
-  handleClick(e) {
+  private handleClick(e: MapMouseEvent): void {
     const { lng, lat } = e.lngLat;
     this.points.push([lng, lat]);
 
     // Add marker
     const markerEl = document.createElement('div');
     markerEl.className = 'profile-marker';
-    markerEl.textContent = this.points.length;
+    markerEl.textContent = String(this.points.length);
 
     const marker = new maplibregl.Marker({ element: markerEl })
       .setLngLat([lng, lat])
@@ -98,30 +237,32 @@ export class ProfileTool {
     }
   }
 
-  handleMouseMove(e) {
+  private handleMouseMove(e: MapMouseEvent): void {
     if (this.points.length > 0) {
       this.drawPreviewLine(e.lngLat);
     }
   }
 
-  handleKeyDown(e) {
+  private handleKeyDown(e: KeyboardEvent): void {
     if (e.key === 'Enter' && this.points.length >= 2) {
       e.preventDefault();
       this.generateProfile();
     }
   }
 
-  drawLine() {
-    const geojson = {
+  private drawLine(): void {
+    const geojson: Feature<LineString> = {
       type: 'Feature',
+      properties: {},
       geometry: {
         type: 'LineString',
         coordinates: this.points,
       },
     };
 
-    if (this.map.getSource('profile-line')) {
-      this.map.getSource('profile-line').setData(geojson);
+    const source = this.map.getSource('profile-line') as GeoJSONSource | undefined;
+    if (source) {
+      source.setData(geojson);
     } else {
       this.map.addSource('profile-line', { type: 'geojson', data: geojson });
       this.map.addLayer({
@@ -137,20 +278,22 @@ export class ProfileTool {
     }
   }
 
-  drawPreviewLine(currentLngLat) {
+  private drawPreviewLine(currentLngLat: LngLat): void {
     if (this.points.length === 0) return;
 
-    const coords = [...this.points, [currentLngLat.lng, currentLngLat.lat]];
-    const geojson = {
+    const coords: Coordinate[] = [...this.points, [currentLngLat.lng, currentLngLat.lat]];
+    const geojson: Feature<LineString> = {
       type: 'Feature',
+      properties: {},
       geometry: {
         type: 'LineString',
         coordinates: coords,
       },
     };
 
-    if (this.map.getSource('profile-preview')) {
-      this.map.getSource('profile-preview').setData(geojson);
+    const source = this.map.getSource('profile-preview') as GeoJSONSource | undefined;
+    if (source) {
+      source.setData(geojson);
     } else {
       this.map.addSource('profile-preview', { type: 'geojson', data: geojson });
       this.map.addLayer({
@@ -167,7 +310,7 @@ export class ProfileTool {
     }
   }
 
-  clearLine() {
+  private clearLine(): void {
     if (this.map.getLayer('profile-line-layer')) {
       this.map.removeLayer('profile-line-layer');
     }
@@ -182,13 +325,13 @@ export class ProfileTool {
     }
   }
 
-  clearMarkers() {
+  private clearMarkers(): void {
     this.markers.forEach(m => m.remove());
     this.markers = [];
     this.points = [];
   }
 
-  async generateProfile() {
+  private async generateProfile(): Promise<void> {
     if (this.points.length < 2) {
       showToast('Need at least 2 points for profile', 'error');
       return;
@@ -204,7 +347,7 @@ export class ProfileTool {
     showLoading('Generating elevation profile...');
 
     try {
-      let result;
+      let result: ElevationProfileResult;
 
       if (this.mapManager.isPixelCoordMode() && this.mapManager.pixelExtent) {
         // Convert pseudo-geographic coordinates to pixel coordinates
@@ -218,29 +361,29 @@ export class ProfileTool {
           Math.floor((offsetY - lat) / scale),
         ]);
 
-        result = await invoke('get_elevation_profile_pixels', {
+        result = await invoke<ElevationProfileResult>('get_elevation_profile_pixels', {
           id: rasterLayer.id,
           pixel_coords: pixelCoords,
           num_samples: 200,
         });
       } else {
-        result = await invoke('get_elevation_profile', {
+        result = await invoke<ElevationProfileResult>('get_elevation_profile', {
           id: rasterLayer.id,
           coords: this.points,
           num_samples: 200,
         });
       }
 
-      this.showProfilePanel(result, rasterLayer);
+      this.showProfilePanel(result);
     } catch (error) {
       console.error('Profile generation failed:', error);
-      showError('Profile failed', error);
+      showError('Profile failed', error instanceof Error ? error : String(error));
     } finally {
       hideLoading();
     }
   }
 
-  findElevationLayer() {
+  private findElevationLayer(): RasterLayer | null {
     // Find the topmost visible raster layer (including non-georeferenced)
     const layerOrder = [...this.layerManager.layerOrder].reverse();
     for (const id of layerOrder) {
@@ -252,7 +395,7 @@ export class ProfileTool {
     return null;
   }
 
-  showProfilePanel(result, _layer) {
+  private showProfilePanel(result: ElevationProfileResult): void {
     // Remove existing panel
     const existing = document.getElementById('profile-panel');
     if (existing) existing.remove();
@@ -282,10 +425,13 @@ export class ProfileTool {
     document.body.appendChild(panel);
 
     // Close button
-    document.getElementById('profile-panel-close').addEventListener('click', () => {
-      panel.remove();
-      this.deactivate();
-    });
+    const closeBtn = document.getElementById('profile-panel-close');
+    if (closeBtn) {
+      closeBtn.addEventListener('click', () => {
+        panel.remove();
+        this.deactivate();
+      });
+    }
 
     // Draw the chart
     this.drawProfileChart(result);
@@ -294,11 +440,14 @@ export class ProfileTool {
     this.setupChartHover(result);
   }
 
-  drawProfileChart(result) {
-    const canvas = document.getElementById('profile-canvas');
+  private drawProfileChart(result: ElevationProfileResult): void {
+    const canvas = document.getElementById('profile-canvas') as HTMLCanvasElement | null;
+    if (!canvas) return;
+
     const ctx = canvas.getContext('2d');
-    const { width } = canvas;
-    const { height } = canvas;
+    if (!ctx) return;
+
+    const { width, height } = canvas;
     const padding = { top: 20, right: 20, bottom: 30, left: 50 };
 
     const chartWidth = width - padding.left - padding.right;
@@ -390,13 +539,15 @@ export class ProfileTool {
     ctx.fillText(this.formatDistance(result.total_distance), width - padding.right, height - 10);
   }
 
-  setupChartHover(result) {
-    const canvas = document.getElementById('profile-canvas');
-    const hoverInfo = document.getElementById('profile-hover-info');
+  private setupChartHover(result: ElevationProfileResult): void {
+    const canvas = document.getElementById('profile-canvas') as HTMLCanvasElement | null;
+    const hoverInfo = document.getElementById('profile-hover-info') as HTMLDivElement | null;
+    if (!canvas || !hoverInfo) return;
+
     const padding = { left: 50, right: 20, top: 20, bottom: 30 };
     const chartWidth = canvas.width - padding.left - padding.right;
 
-    canvas.addEventListener('mousemove', e => {
+    canvas.addEventListener('mousemove', (e: MouseEvent) => {
       const rect = canvas.getBoundingClientRect();
       const x = e.clientX - rect.left;
       const relX = x - padding.left;
@@ -435,7 +586,7 @@ export class ProfileTool {
     });
   }
 
-  formatDistance(meters) {
+  private formatDistance(meters: number): string {
     if (meters < 1000) {
       return `${meters.toFixed(0)}m`;
     }
