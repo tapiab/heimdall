@@ -225,7 +225,7 @@ fn geometry_to_geojson(geom: &gdal::vector::Geometry) -> Result<Value, String> {
             .map_err(|e| format!("Failed to parse geometry JSON: {}", e)),
         Err(e) => {
             // Fallback: return null geometry
-            eprintln!("Warning: Failed to convert geometry to JSON: {}", e);
+            tracing::warn!(error = %e, "Failed to convert geometry to JSON");
             Ok(Value::Null)
         }
     }

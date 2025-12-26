@@ -23,6 +23,7 @@
 //! which enables efficient tile-based streaming without downloading entire files.
 
 use crate::gdal::dataset_cache::DatasetCache;
+use tracing::{debug, error, info};
 use gdal::spatial_ref::{CoordTransform, SpatialRef};
 use gdal::{Dataset, Metadata};
 use serde::{Deserialize, Serialize};
@@ -553,7 +554,7 @@ pub async fn open_stac_asset(
 
     let vsicurl_path = format!("/vsicurl/{}", http_href);
 
-    eprintln!("[STAC] Opening: {}", vsicurl_path);
+    info!(path = %vsicurl_path, "Opening STAC asset");
 
     // Clone values for the blocking task
     let path_clone = vsicurl_path.clone();
@@ -573,7 +574,7 @@ pub async fn open_stac_asset(
     .await
     .map_err(|e| format!("Task join error: {}", e))?
     .map_err(|e| {
-        eprintln!("[STAC] GDAL error: {}", e);
+        error!(error = %e, "GDAL error opening STAC asset");
         format!("Cannot open remote COG '{}': {}", href_clone, e)
     })?;
 
@@ -622,7 +623,7 @@ pub async fn open_stac_asset(
 async fn sign_planetary_computer_url(url: &str) -> Result<String, String> {
     let client = reqwest::Client::new();
 
-    eprintln!("[STAC] Signing Planetary Computer URL...");
+    debug!("Signing Planetary Computer URL");
 
     let response = client
         .get("https://planetarycomputer.microsoft.com/api/sas/v1/sign")
@@ -649,7 +650,7 @@ async fn sign_planetary_computer_url(url: &str) -> Result<String, String> {
         .await
         .map_err(|e| format!("Failed to parse signed URL: {}", e))?;
 
-    eprintln!("[STAC] URL signed successfully");
+    debug!("Planetary Computer URL signed successfully");
     Ok(signed.href)
 }
 

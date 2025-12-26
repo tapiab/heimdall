@@ -120,7 +120,7 @@ Any raster format supported by GDAL, including:
 
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/heimdall.git
+git clone https://github.com/tapiab/heimdall.git
 cd heimdall
 
 # Install dependencies

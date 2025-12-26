@@ -249,19 +249,46 @@ jobs:
 
       - name: Generate changelog
         id: changelog
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           PREVIOUS_TAG=$(git describe --tags --abbrev=0 ${{ github.ref_name }}^ 2>/dev/null || echo "")
+          
           if [ -n "$PREVIOUS_TAG" ]; then
-            CHANGELOG=$(git log ${PREVIOUS_TAG}..${{ github.ref_name }} --pretty=format:"- %s (%h)" --no-merges)
+            RANGE="${PREVIOUS_TAG}..${{ github.ref_name }}"
           else
-            CHANGELOG=$(git log ${{ github.ref_name }} --pretty=format:"- %s (%h)" --no-merges -20)
+            RANGE="${{ github.ref_name }}"
           fi
+          
+          # Generate changelog with commit messages
+          CHANGELOG=$(git log $RANGE --pretty=format:"- %s ([%h](https://github.com/${{ github.repository }}/commit/%H))" --no-merges | head -50)
+          
+          # Get unique contributors (using git author email to find GitHub usernames via API)
+          CONTRIBUTORS=""
+          for email in $(git log $RANGE --pretty=format:"%ae" --no-merges | sort | uniq); do
+            # Try to get GitHub username from commit
+            username=$(git log $RANGE --author="$email" --pretty=format:"%an" -1)
+            if [ -n "$username" ]; then
+              CONTRIBUTORS="${CONTRIBUTORS}- ${username}\n"
+            fi
+          done
+          CONTRIBUTORS=$(echo -e "$CONTRIBUTORS" | sort | uniq | grep -v '^$')
+          
           echo "PREVIOUS_TAG=$PREVIOUS_TAG" >> $GITHUB_OUTPUT
-          # Use heredoc for multiline
-          EOF=$(dd if=/dev/urandom bs=15 count=1 status=none | base64)
-          echo "changelog<<$EOF" >> $GITHUB_OUTPUT
-          echo "$CHANGELOG" >> $GITHUB_OUTPUT
-          echo "$EOF" >> $GITHUB_OUTPUT
+          
+          # Use heredoc for multiline changelog
+          {
+            echo "changelog<<EOF_CHANGELOG"
+            echo "$CHANGELOG"
+            echo "EOF_CHANGELOG"
+          } >> $GITHUB_OUTPUT
+          
+          # Use heredoc for multiline contributors
+          {
+            echo "contributors<<EOF_CONTRIBUTORS"
+            echo "$CONTRIBUTORS"
+            echo "EOF_CONTRIBUTORS"
+          } >> $GITHUB_OUTPUT
 
       - name: Create Release
         uses: softprops/action-gh-release@v2
@@ -271,6 +298,10 @@ jobs:
             ## What's Changed
 
             ${{ steps.changelog.outputs.changelog }}
+
+            ## Contributors
+
+            ${{ steps.changelog.outputs.contributors }}
 
             ## Downloads
 
@@ -296,3 +327,4 @@ jobs:
             artifacts/**/*.exe
           draft: false
           prerelease: false
+          generate_release_notes: false

@@ -363,7 +363,7 @@ dependencies = [
  "bitflags 2.10.0",
  "cexpr",
  "clang-sys",
- "itertools 0.13.0",
+ "itertools 0.12.1",
  "log",
  "prettyplease",
  "proc-macro2",
@@ -1429,7 +1429,7 @@ dependencies = [
 [[package]]
 name = "gdal"
 version = "0.18.0"
-source = "git+https://github.com/georust/gdal#1eaed3cccbfe125618305b4eb190ba49827e215c"
+source = "git+https://github.com/georust/gdal?rev=1eaed3cccbfe125618305b4eb190ba49827e215c#1eaed3cccbfe125618305b4eb190ba49827e215c"
 dependencies = [
  "bitflags 2.10.0",
  "chrono",
@@ -1442,7 +1442,7 @@ dependencies = [
 [[package]]
 name = "gdal-sys"
 version = "0.11.0"
-source = "git+https://github.com/georust/gdal#1eaed3cccbfe125618305b4eb190ba49827e215c"
+source = "git+https://github.com/georust/gdal?rev=1eaed3cccbfe125618305b4eb190ba49827e215c#1eaed3cccbfe125618305b4eb190ba49827e215c"
 dependencies = [
  "bindgen",
  "pkg-config",
@@ -1848,6 +1848,7 @@ dependencies = [
  "tauri-plugin-opener",
  "thiserror 1.0.69",
  "tokio",
+ "tracing",
  "uuid",
 ]
 
@@ -2257,9 +2258,9 @@ dependencies = [
 
 [[package]]
 name = "itertools"
-version = "0.13.0"
+version = "0.12.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "413ee7dfc52ee1a4949ceeb7dbc8a33f2d6c088194d9f922fb8318faf1f01186"
+checksum = "ba291022dbbd398a455acf126c1e341954079855bc60dfdda641363bd6922569"
 dependencies = [
  "either",
 ]

@@ -2,7 +2,7 @@
 
 ## Overview
 
-Geo Viewer is a desktop application built with Tauri, combining a Rust backend for high-performance geospatial operations with a JavaScript frontend for the user interface.
+Heimdall is a desktop application built with Tauri, combining a Rust backend for high-performance geospatial operations with a JavaScript frontend for the user interface.
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
