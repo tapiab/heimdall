@@ -1,6 +1,6 @@
 [package]
 name = "heimdall"
-version = "0.1.0"
+version = "0.3.0-dev.1"
 edition = "2021"
 
 [build-dependencies]
@@ -31,6 +31,7 @@ gdal = { version = "0.19", features = ["bindgen"] }
 gdal = "0.19"
 
 [profile.release]
-strip = true
+# Use "debuginfo" instead of true to keep symbols needed by Tauri bundler
+strip = "debuginfo"
 lto = true
 codegen-units = 1
