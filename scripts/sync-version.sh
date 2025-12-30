@@ -1,38 +1,48 @@
 #!/bin/bash
 # Sync version from git tag to all config files
-# Supports dirty builds: v0.3.0 -> 0.3.0, v0.3.0-5-gabcdef-dirty -> 0.3.0-dev.5
+# Converts git describe to valid semver:
+#   0.3.0 -> 0.3.0
+#   0.3.0-2-gabcdef -> 0.3.0-dev.2
+#   0.3.0-dirty -> 0.3.0-dirty
+#   0.3.0-2-gabcdef-dirty -> 0.3.0-dev.2.dirty
+#
+# Usage: ./sync-version.sh [--windows]
+#   --windows: Use 0.0.0 for Windows MSI/NSIS compatibility
 
 set -e
 
-# Get version from git
-GIT_DESCRIBE=$(git describe --tags --always --dirty 2>/dev/null || echo "0.0.0")
+WINDOWS_MODE=false
+if [[ "$1" == "--windows" ]]; then
+    WINDOWS_MODE=true
+fi
 
-# Remove 'v' prefix if present
-GIT_DESCRIBE="${GIT_DESCRIBE#v}"
+if [[ "$WINDOWS_MODE" == true ]]; then
+    # Windows: just use 0.0.0 (MSI/NSIS don't support pre-release tags)
+    VERSION="0.0.0"
+else
+    # Get version from git describe
+    GIT_DESCRIBE=$(git describe --tags --always --dirty 2>/dev/null || echo "0.0.0")
+    # Remove 'v' prefix if present
+    GIT_DESCRIBE="${GIT_DESCRIBE#v}"
 
-# Convert git describe format to semver-ish format
-# e.g., "0.3.0-5-gabcdef-dirty" -> "0.3.0-dev.5+gabcdef.dirty"
-if [[ "$GIT_DESCRIBE" =~ ^([0-9]+\.[0-9]+\.[0-9]+)(-([0-9]+)-g([a-f0-9]+))?(-dirty)?$ ]]; then
-    BASE_VERSION="${BASH_REMATCH[1]}"
-    COMMITS_AHEAD="${BASH_REMATCH[3]}"
-    COMMIT_HASH="${BASH_REMATCH[4]}"
-    IS_DIRTY="${BASH_REMATCH[5]}"
+    # Parse and convert to valid semver
+    if [[ "$GIT_DESCRIBE" =~ ^([0-9]+\.[0-9]+\.[0-9]+)(-([0-9]+)-g[a-f0-9]+)?(-dirty)?$ ]]; then
+        BASE="${BASH_REMATCH[1]}"
+        COMMITS="${BASH_REMATCH[3]}"
+        DIRTY="${BASH_REMATCH[4]}"
 
-    if [[ -n "$COMMITS_AHEAD" ]] || [[ -n "$IS_DIRTY" ]]; then
-        # Development version
-        VERSION="$BASE_VERSION"
-        if [[ -n "$COMMITS_AHEAD" ]]; then
-            VERSION="${VERSION}-dev.${COMMITS_AHEAD}"
-        elif [[ -n "$IS_DIRTY" ]]; then
-            VERSION="${VERSION}-dirty"
+        VERSION="$BASE"
+        if [[ -n "$COMMITS" ]] && [[ -n "$DIRTY" ]]; then
+            VERSION="${BASE}-dev${COMMITS}"
+        elif [[ -n "$COMMITS" ]]; then
+            VERSION="${BASE}-dev${COMMITS}"
+        elif [[ -n "$DIRTY" ]]; then
+            VERSION="${BASE}-dev0"
         fi
     else
-        # Clean tagged version
-        VERSION="$BASE_VERSION"
+        # No valid tag found (shallow clone or no tags) - use fallback
+        VERSION="0.0.0-dev"
     fi
-else
-    # Fallback: use as-is (might be just a commit hash)
-    VERSION="0.0.0-dev"
 fi
 
 echo "Setting version to: $VERSION"
