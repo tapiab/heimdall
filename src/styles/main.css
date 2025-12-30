@@ -13,6 +13,43 @@ body,
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   background: #1a1a1a;
   color: #e0e0e0;
+  /* Force dark color scheme for native form elements (Linux/GTK fix) */
+  color-scheme: dark;
+}
+
+/* Global select/option styling for Linux/GTK compatibility */
+select {
+  color-scheme: dark;
+  background-color: #333;
+  color: #e0e0e0;
+}
+
+select option {
+  background-color: #2a2a2a;
+  color: #e0e0e0;
+}
+
+select option:checked,
+select option:hover {
+  background-color: #4a9eff;
+  color: #fff;
+}
+
+/* Input styling for Linux/GTK compatibility */
+input,
+textarea {
+  color-scheme: dark;
+  background-color: #1a1a1a;
+  color: #e0e0e0;
+  border: 1px solid #3a3a3a;
+}
+
+input[type='date'] {
+  background-color: #1a1a1a;
+}
+
+input[type='date']::-webkit-calendar-picker-indicator {
+  filter: invert(0.8);
 }
 
 #map {

@@ -110,11 +110,47 @@ Any raster format supported by GDAL, including:
 ### Prerequisites
 
 - **Rust** (1.70+): https://rustup.rs/
-- **Node.js** (18+): https://nodejs.org/
-- **GDAL** (3.0+):
-  - macOS: `brew install gdal`
-  - Ubuntu: `sudo apt install libgdal-dev`
-  - Windows: OSGeo4W or GISInternals
+- **Node.js** (20+): https://nodejs.org/
+
+### Platform-Specific Dependencies
+
+#### macOS
+
+```bash
+brew install gdal
+```
+
+#### Ubuntu/Debian
+
+```bash
+sudo apt-get update
+sudo apt-get install -y \
+    libgdal-dev \
+    libgtk-3-dev \
+    libwebkit2gtk-4.1-dev \
+    libayatana-appindicator3-dev \
+    librsvg2-dev \
+    patchelf \
+    xdg-utils
+```
+
+#### Arch Linux
+
+```bash
+sudo pacman -S gdal gtk3 webkit2gtk-4.1 libayatana-appindicator librsvg patchelf xdg-utils
+```
+
+> **Note**: Building AppImage on Arch Linux requires Docker due to `linuxdeploy` compatibility issues. Use `make docker-build-linux` instead.
+
+#### Windows
+
+Install GDAL via [GISInternals](https://www.gisinternals.com/release.php) or [OSGeo4W](https://trac.osgeo.org/osgeo4w/).
+
+Set environment variables:
+```powershell
+$env:GDAL_HOME = "C:\path\to\gdal"
+$env:GDAL_LIB_DIR = "C:\path\to\gdal\lib"
+```
 
 ### Build from Source
 
@@ -127,11 +163,25 @@ cd heimdall
 npm install
 
 # Run in development mode
-npm run tauri dev
+make tauri-dev
 
 # Build for production
-npm run tauri build
+make tauri-build
 ```
+
+### Docker Build (Linux AppImage from any OS)
+
+Build Linux AppImage from macOS, Windows, or non-Ubuntu Linux distros:
+
+```bash
+# Build x86_64 AppImage
+make docker-build-linux
+
+# Build ARM64 AppImage
+make docker-build-linux-arm64
+```
+
+### Build Outputs
 
 The production build outputs are located in `src-tauri/target/release/bundle/`:
 - **macOS**: `.dmg` and `.app`

@@ -28,6 +28,13 @@ fn init_gdal_for_remote_access() {
 }
 
 fn main() {
+    // Fix EGL_BAD_PARAMETER error on Arch Linux and other distros with newer Mesa
+    // This must be set before WebKitGTK initializes
+    #[cfg(target_os = "linux")]
+    {
+        std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
+    }
+
     // Initialize GDAL settings for remote file access
     // This must be done before any GDAL operations
     init_gdal_for_remote_access();
