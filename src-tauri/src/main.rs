@@ -29,7 +29,10 @@ fn init_gdal_for_remote_access() {
     std::env::set_var("GDAL_HTTP_TIMEOUT", "120");
     std::env::set_var("VSI_CACHE", "TRUE");
     std::env::set_var("VSI_CACHE_SIZE", "50000000"); // 50MB cache
-    std::env::set_var("CPL_VSIL_CURL_ALLOWED_EXTENSIONS", ".tif,.tiff,.TIF,.TIFF,.vrt,.VRT");
+    std::env::set_var(
+        "CPL_VSIL_CURL_ALLOWED_EXTENSIONS",
+        ".tif,.tiff,.TIF,.TIFF,.vrt,.VRT",
+    );
 
     // Force driver registration - this triggers GDAL initialization
     let _driver_count = DriverManager::count();
@@ -41,11 +44,16 @@ fn init_gdal_for_remote_access() {
     let _ = config::set_config_option("GDAL_HTTP_TIMEOUT", "120");
     let _ = config::set_config_option("VSI_CACHE", "TRUE");
     let _ = config::set_config_option("VSI_CACHE_SIZE", "50000000");
-    let _ = config::set_config_option("CPL_VSIL_CURL_ALLOWED_EXTENSIONS", ".tif,.tiff,.TIF,.TIFF,.vrt,.VRT");
+    let _ = config::set_config_option(
+        "CPL_VSIL_CURL_ALLOWED_EXTENSIONS",
+        ".tif,.tiff,.TIF,.TIFF,.vrt,.VRT",
+    );
 
-    println!("[GDAL] Initialized for remote access with {} drivers (GDAL {})",
+    println!(
+        "[GDAL] Initialized for remote access with {} drivers (GDAL {})",
         _driver_count,
-        ::gdal::version::version_info("VERSION_NUM"));
+        ::gdal::version::version_info("VERSION_NUM")
+    );
 }
 
 fn main() {

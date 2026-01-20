@@ -713,7 +713,10 @@ pub async fn browse_static_collection(
     collection_url: String,
     limit: Option<u32>,
 ) -> Result<StacSearchResult, String> {
-    println!("[STAC] browse_static_collection called with URL: {}", collection_url);
+    println!(
+        "[STAC] browse_static_collection called with URL: {}",
+        collection_url
+    );
 
     let client = reqwest::Client::builder()
         .user_agent("Heimdall/0.3.1")
@@ -743,10 +746,18 @@ pub async fn browse_static_collection(
         .await
         .map_err(|e| format!("Failed to read collection response: {}", e))?;
 
-    println!("[STAC] Got collection response, length: {}", response_text.len());
+    println!(
+        "[STAC] Got collection response, length: {}",
+        response_text.len()
+    );
 
-    let collection: StacCollection = serde_json::from_str(&response_text)
-        .map_err(|e| format!("Failed to parse collection JSON: {} (first 500 chars: {})", e, &response_text[..response_text.len().min(500)]))?;
+    let collection: StacCollection = serde_json::from_str(&response_text).map_err(|e| {
+        format!(
+            "Failed to parse collection JSON: {} (first 500 chars: {})",
+            e,
+            &response_text[..response_text.len().min(500)]
+        )
+    })?;
 
     println!("[STAC] Parsed collection: {}", collection.id);
 
@@ -758,7 +769,10 @@ pub async fn browse_static_collection(
     let item_count = links.iter().filter(|l| l.rel == "item").count();
     let child_count = links.iter().filter(|l| l.rel == "child").count();
     let other_count = links.len() - item_count - child_count;
-    println!("[STAC] Link breakdown - items: {}, children: {}, other: {}", item_count, child_count, other_count);
+    println!(
+        "[STAC] Link breakdown - items: {}, children: {}, other: {}",
+        item_count, child_count, other_count
+    );
 
     if links.is_empty() {
         println!("[STAC] WARNING: Collection has no links!");
@@ -779,12 +793,21 @@ pub async fn browse_static_collection(
         println!("[STAC] No 'items' link found, will fetch individual item links");
         // Look for direct item links
         let item_links: Vec<&StacLink> = links.iter().filter(|l| l.rel == "item").collect();
-        println!("[STAC] Found {} item links, will fetch up to {}", item_links.len(), max_items);
+        println!(
+            "[STAC] Found {} item links, will fetch up to {}",
+            item_links.len(),
+            max_items
+        );
 
         for (i, link) in item_links.iter().take(max_items).enumerate() {
             println!("[STAC] Raw href from link: {}", &link.href);
             let item_url = resolve_url(&collection_url, &link.href);
-            println!("[STAC] Fetching item {}/{}: {}", i + 1, max_items.min(item_links.len()), &item_url);
+            println!(
+                "[STAC] Fetching item {}/{}: {}",
+                i + 1,
+                max_items.min(item_links.len()),
+                &item_url
+            );
             match fetch_single_item(&client, &item_url).await {
                 Ok(item) => {
                     println!("[STAC] Successfully fetched item: {}", item.id);
@@ -896,8 +919,13 @@ async fn fetch_single_item(client: &reqwest::Client, url: &str) -> Result<StacIt
         .await
         .map_err(|e| format!("Failed to read item response: {}", e))?;
 
-    let item: StacItem = serde_json::from_str(&text)
-        .map_err(|e| format!("Failed to parse item JSON: {} (first 200 chars: {})", e, &text[..text.len().min(200)]))?;
+    let item: StacItem = serde_json::from_str(&text).map_err(|e| {
+        format!(
+            "Failed to parse item JSON: {} (first 200 chars: {})",
+            e,
+            &text[..text.len().min(200)]
+        )
+    })?;
 
     Ok(item)
 }
@@ -1022,7 +1050,9 @@ pub async fn open_stac_asset(
     use gdal::GdalOpenFlags;
 
     let options = DatasetOptions {
-        open_flags: GdalOpenFlags::GDAL_OF_READONLY | GdalOpenFlags::GDAL_OF_RASTER | GdalOpenFlags::GDAL_OF_VERBOSE_ERROR,
+        open_flags: GdalOpenFlags::GDAL_OF_READONLY
+            | GdalOpenFlags::GDAL_OF_RASTER
+            | GdalOpenFlags::GDAL_OF_VERBOSE_ERROR,
         ..Default::default()
     };
 
