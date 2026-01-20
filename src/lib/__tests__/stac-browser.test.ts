@@ -410,10 +410,13 @@ describe('StacBrowser', () => {
   });
 
   describe('connect', () => {
-    const mockCatalog = {
+    // Updated to use StacCatalogInfo format (returned by connect_stac_api)
+    const mockCatalogInfo = {
       id: 'earth-search',
       title: 'Earth Search',
       description: 'A STAC catalog of public datasets',
+      catalog_type: 'Api',
+      base_url: 'https://earth-search.aws.element84.com/v1',
     };
 
     const mockCollections = [
@@ -430,7 +433,7 @@ describe('StacBrowser', () => {
     });
 
     it('should call connect_stac_api with URL', async () => {
-      invoke.mockResolvedValueOnce(mockCatalog).mockResolvedValueOnce(mockCollections);
+      invoke.mockResolvedValueOnce(mockCatalogInfo).mockResolvedValueOnce(mockCollections);
 
       await stacBrowser.connect();
 
@@ -440,7 +443,7 @@ describe('StacBrowser', () => {
     });
 
     it('should store catalog URL on success', async () => {
-      invoke.mockResolvedValueOnce(mockCatalog).mockResolvedValueOnce(mockCollections);
+      invoke.mockResolvedValueOnce(mockCatalogInfo).mockResolvedValueOnce(mockCollections);
 
       await stacBrowser.connect();
 
@@ -448,15 +451,17 @@ describe('StacBrowser', () => {
     });
 
     it('should store catalog on success', async () => {
-      invoke.mockResolvedValueOnce(mockCatalog).mockResolvedValueOnce(mockCollections);
+      invoke.mockResolvedValueOnce(mockCatalogInfo).mockResolvedValueOnce(mockCollections);
 
       await stacBrowser.connect();
 
-      expect(stacBrowser.currentCatalog).toEqual(mockCatalog);
+      // Catalog is now reconstructed from catalog info
+      expect(stacBrowser.currentCatalog.id).toBe('earth-search');
+      expect(stacBrowser.currentCatalog.title).toBe('Earth Search');
     });
 
     it('should fetch and store collections', async () => {
-      invoke.mockResolvedValueOnce(mockCatalog).mockResolvedValueOnce(mockCollections);
+      invoke.mockResolvedValueOnce(mockCatalogInfo).mockResolvedValueOnce(mockCollections);
 
       await stacBrowser.connect();
 
@@ -464,7 +469,7 @@ describe('StacBrowser', () => {
     });
 
     it('should show collections section on success', async () => {
-      invoke.mockResolvedValueOnce(mockCatalog).mockResolvedValueOnce(mockCollections);
+      invoke.mockResolvedValueOnce(mockCatalogInfo).mockResolvedValueOnce(mockCollections);
 
       await stacBrowser.connect();
 
@@ -472,7 +477,7 @@ describe('StacBrowser', () => {
     });
 
     it('should show toast on success', async () => {
-      invoke.mockResolvedValueOnce(mockCatalog).mockResolvedValueOnce(mockCollections);
+      invoke.mockResolvedValueOnce(mockCatalogInfo).mockResolvedValueOnce(mockCollections);
 
       await stacBrowser.connect();
 
@@ -492,7 +497,7 @@ describe('StacBrowser', () => {
         () =>
           new Promise(resolve => {
             expect(stacBrowser.connectBtn.disabled).toBe(true);
-            resolve(mockCatalog);
+            resolve(mockCatalogInfo);
           })
       );
 
@@ -500,7 +505,7 @@ describe('StacBrowser', () => {
     });
 
     it('should re-enable connect button after connection', async () => {
-      invoke.mockResolvedValueOnce(mockCatalog).mockResolvedValueOnce(mockCollections);
+      invoke.mockResolvedValueOnce(mockCatalogInfo).mockResolvedValueOnce(mockCollections);
 
       await stacBrowser.connect();
 
@@ -1142,6 +1147,761 @@ describe('StacBrowser', () => {
       stacBrowser.showResultsList();
 
       expect(stacBrowser.resultsSection.classList.contains('hidden')).toBe(false);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Static STAC Catalog Support Tests
+  // -------------------------------------------------------------------------
+
+  describe('static catalog support', () => {
+    describe('constructor with static catalog state', () => {
+      it('should initialize catalogType as Api by default', () => {
+        expect(stacBrowser.catalogType).toBe('Api');
+      });
+
+      it('should initialize staticCollections as empty array', () => {
+        expect(stacBrowser.staticCollections).toEqual([]);
+      });
+
+      it('should initialize selectedStaticCollection as null', () => {
+        expect(stacBrowser.selectedStaticCollection).toBeNull();
+      });
+    });
+
+    describe('connect to static catalog', () => {
+      const mockStaticCatalogInfo = {
+        id: 'wyvern-catalog',
+        title: 'Wyvern Open Data',
+        description: 'Hyperspectral satellite imagery',
+        catalog_type: 'Static',
+        base_url: 'https://wyvern.s3.amazonaws.com/catalog.json',
+        links: [
+          {
+            rel: 'child',
+            href: 'https://wyvern.s3.amazonaws.com/collection.json',
+            title: 'Surface Reflectance',
+          },
+        ],
+      };
+
+      const mockStaticChildren = [
+        {
+          href: 'https://wyvern.s3.amazonaws.com/year/catalog.json',
+          title: 'By Year',
+          entry_type: 'application/json',
+        },
+        {
+          href: 'https://wyvern.s3.amazonaws.com/surface-reflectance/collection.json',
+          title: 'Surface Reflectance',
+          entry_type: 'application/json',
+        },
+      ];
+
+      it('should detect static catalog type', async () => {
+        invoke
+          .mockResolvedValueOnce(mockStaticCatalogInfo)
+          .mockResolvedValueOnce(mockStaticChildren);
+
+        await stacBrowser.connect();
+
+        expect(stacBrowser.catalogType).toBe('Static');
+      });
+
+      it('should store base_url as currentCatalogUrl', async () => {
+        invoke
+          .mockResolvedValueOnce(mockStaticCatalogInfo)
+          .mockResolvedValueOnce(mockStaticChildren);
+
+        await stacBrowser.connect();
+
+        expect(stacBrowser.currentCatalogUrl).toBe('https://wyvern.s3.amazonaws.com/catalog.json');
+      });
+
+      it('should call get_static_catalog_children for static catalogs', async () => {
+        invoke
+          .mockResolvedValueOnce(mockStaticCatalogInfo)
+          .mockResolvedValueOnce(mockStaticChildren);
+
+        await stacBrowser.connect();
+
+        expect(invoke).toHaveBeenCalledWith('get_static_catalog_children', {
+          catalogUrl: 'https://earth-search.aws.element84.com/v1',
+        });
+      });
+
+      it('should populate staticCollections for static catalogs', async () => {
+        invoke
+          .mockResolvedValueOnce(mockStaticCatalogInfo)
+          .mockResolvedValueOnce(mockStaticChildren);
+
+        await stacBrowser.connect();
+
+        expect(stacBrowser.staticCollections.length).toBe(2);
+      });
+
+      it('should show toast with Static label', async () => {
+        invoke
+          .mockResolvedValueOnce(mockStaticCatalogInfo)
+          .mockResolvedValueOnce(mockStaticChildren);
+
+        await stacBrowser.connect();
+
+        expect(showToast).toHaveBeenCalledWith(
+          expect.stringContaining('Static'),
+          'success'
+        );
+      });
+    });
+
+    describe('connect to STAC API', () => {
+      const mockApiCatalogInfo = {
+        id: 'earth-search',
+        title: 'Earth Search',
+        description: 'A STAC API',
+        catalog_type: 'Api',
+        base_url: 'https://earth-search.aws.element84.com/v1',
+      };
+
+      const mockApiCollections = [
+        { id: 'sentinel-2-l2a', title: 'Sentinel-2 L2A' },
+      ];
+
+      it('should detect API catalog type', async () => {
+        invoke
+          .mockResolvedValueOnce(mockApiCatalogInfo)
+          .mockResolvedValueOnce(mockApiCollections);
+
+        await stacBrowser.connect();
+
+        expect(stacBrowser.catalogType).toBe('Api');
+      });
+
+      it('should call list_stac_collections for API catalogs', async () => {
+        invoke
+          .mockResolvedValueOnce(mockApiCatalogInfo)
+          .mockResolvedValueOnce(mockApiCollections);
+
+        await stacBrowser.connect();
+
+        expect(invoke).toHaveBeenCalledWith('list_stac_collections', {
+          url: 'https://earth-search.aws.element84.com/v1',
+        });
+      });
+
+      it('should populate collections for API catalogs', async () => {
+        invoke
+          .mockResolvedValueOnce(mockApiCatalogInfo)
+          .mockResolvedValueOnce(mockApiCollections);
+
+        await stacBrowser.connect();
+
+        expect(stacBrowser.collections.length).toBe(1);
+        expect(stacBrowser.staticCollections.length).toBe(0);
+      });
+    });
+
+    describe('showCatalogInfo with catalog type', () => {
+      it('should show Static Catalog label for static catalogs', () => {
+        stacBrowser.showCatalogInfo(
+          { id: 'test', title: 'Test Catalog', description: 'A test' },
+          'Static'
+        );
+
+        expect(stacBrowser.catalogInfo.innerHTML).toContain('(Static Catalog)');
+      });
+
+      it('should not show Static Catalog label for API catalogs', () => {
+        stacBrowser.showCatalogInfo(
+          { id: 'test', title: 'Test Catalog', description: 'A test' },
+          'Api'
+        );
+
+        expect(stacBrowser.catalogInfo.innerHTML).not.toContain('(Static Catalog)');
+      });
+    });
+
+    describe('populateStaticCollections', () => {
+      const staticEntries = [
+        { id: 'collection-1', title: 'Collection One', url: 'https://example.com/c1.json' },
+        { id: 'collection-2', title: 'Collection Two', url: 'https://example.com/c2.json', description: 'Sub-catalog' },
+      ];
+
+      it('should clear existing options', () => {
+        stacBrowser.collectionSelect.innerHTML = '<option value="old">Old</option>';
+        stacBrowser.populateStaticCollections(staticEntries);
+
+        expect(stacBrowser.collectionSelect.querySelector('option[value="old"]')).toBeNull();
+      });
+
+      it('should add default option', () => {
+        stacBrowser.populateStaticCollections(staticEntries);
+
+        const defaultOption = stacBrowser.collectionSelect.querySelector('option[value=""]');
+        expect(defaultOption).not.toBeNull();
+      });
+
+      it('should use URL as option value', () => {
+        stacBrowser.populateStaticCollections(staticEntries);
+
+        const option = stacBrowser.collectionSelect.querySelector(
+          'option[value="https://example.com/c1.json"]'
+        );
+        expect(option).not.toBeNull();
+        expect(option.textContent).toBe('Collection One');
+      });
+
+      it('should set title attribute for description', () => {
+        stacBrowser.populateStaticCollections(staticEntries);
+
+        const option = stacBrowser.collectionSelect.querySelector(
+          'option[value="https://example.com/c2.json"]'
+        );
+        expect(option.title).toBe('Sub-catalog');
+      });
+    });
+
+    describe('onCollectionChange with static catalog', () => {
+      beforeEach(() => {
+        stacBrowser.catalogType = 'Static';
+        stacBrowser.staticCollections = [
+          {
+            id: 'surface-reflectance',
+            title: 'Surface Reflectance',
+            url: 'https://example.com/collection.json',
+            description: 'Static collection',
+          },
+        ];
+        // Add option with URL value
+        const option = document.createElement('option');
+        option.value = 'https://example.com/collection.json';
+        option.textContent = 'Surface Reflectance';
+        stacBrowser.collectionSelect.appendChild(option);
+      });
+
+      it('should set selectedStaticCollection for static catalogs', () => {
+        stacBrowser.collectionSelect.value = 'https://example.com/collection.json';
+
+        stacBrowser.onCollectionChange();
+
+        expect(stacBrowser.selectedStaticCollection).not.toBeNull();
+        expect(stacBrowser.selectedStaticCollection.url).toBe('https://example.com/collection.json');
+      });
+
+      it('should clear selectedCollection for static catalogs', () => {
+        stacBrowser.selectedCollection = { id: 'previous' };
+        stacBrowser.collectionSelect.value = 'https://example.com/collection.json';
+
+        stacBrowser.onCollectionChange();
+
+        expect(stacBrowser.selectedCollection).toBeNull();
+      });
+
+      it('should show search section when static collection selected', () => {
+        stacBrowser.collectionSelect.value = 'https://example.com/collection.json';
+
+        stacBrowser.onCollectionChange();
+
+        expect(stacBrowser.searchSection.classList.contains('hidden')).toBe(false);
+      });
+    });
+
+    describe('search with static catalog', () => {
+      const mockBrowseResult = {
+        features: [
+          {
+            id: 'static-item-1',
+            geometry: { type: 'Polygon', coordinates: [] },
+            properties: { datetime: '2024-01-15T10:00:00Z' },
+            bbox: [-10, -20, 10, 20],
+          },
+        ],
+        number_returned: 1,
+      };
+
+      beforeEach(() => {
+        stacBrowser.catalogType = 'Static';
+        stacBrowser.currentCatalogUrl = 'https://example.com/catalog.json';
+        stacBrowser.selectedStaticCollection = {
+          id: 'surface-reflectance',
+          url: 'https://example.com/collection.json',
+        };
+      });
+
+      it('should call browse_static_collection for static catalogs', async () => {
+        invoke.mockResolvedValueOnce(mockBrowseResult);
+
+        await stacBrowser.search();
+
+        expect(invoke).toHaveBeenCalledWith('browse_static_collection', {
+          collectionUrl: 'https://example.com/collection.json',
+          limit: 20,
+        });
+      });
+
+      it('should not call search_stac_items for static catalogs', async () => {
+        invoke.mockResolvedValueOnce(mockBrowseResult);
+
+        await stacBrowser.search();
+
+        expect(invoke).not.toHaveBeenCalledWith(
+          'search_stac_items',
+          expect.anything()
+        );
+      });
+
+      it('should store browse results', async () => {
+        invoke.mockResolvedValueOnce(mockBrowseResult);
+
+        await stacBrowser.search();
+
+        expect(stacBrowser.searchResults).toEqual(mockBrowseResult.features);
+      });
+
+      it('should show Browsing... text on button for static catalogs', async () => {
+        invoke.mockImplementation(
+          () =>
+            new Promise(resolve => {
+              expect(stacBrowser.searchBtn.textContent).toBe('Browsing...');
+              resolve(mockBrowseResult);
+            })
+        );
+
+        await stacBrowser.search();
+      });
+    });
+
+    describe('extractIdFromUrl', () => {
+      it('should extract filename without extension', () => {
+        const id = stacBrowser.extractIdFromUrl('https://example.com/path/collection.json');
+        expect(id).toBe('collection');
+      });
+
+      it('should handle URLs without extension', () => {
+        const id = stacBrowser.extractIdFromUrl('https://example.com/path/my-catalog');
+        expect(id).toBe('my-catalog');
+      });
+
+      it('should handle nested paths', () => {
+        const id = stacBrowser.extractIdFromUrl('https://example.com/a/b/c/item.json');
+        expect(id).toBe('item');
+      });
+    });
+
+    describe('resetState with static catalog fields', () => {
+      beforeEach(() => {
+        stacBrowser.catalogType = 'Static';
+        stacBrowser.staticCollections = [{ id: 'test', url: 'https://example.com' }];
+        stacBrowser.selectedStaticCollection = { id: 'test', url: 'https://example.com' };
+        stacBrowser.catalogNavHistory = [{ url: 'https://example.com/root', title: 'Root' }];
+      });
+
+      it('should reset catalogType to Api', () => {
+        stacBrowser.resetState();
+        expect(stacBrowser.catalogType).toBe('Api');
+      });
+
+      it('should clear staticCollections', () => {
+        stacBrowser.resetState();
+        expect(stacBrowser.staticCollections).toEqual([]);
+      });
+
+      it('should clear selectedStaticCollection', () => {
+        stacBrowser.resetState();
+        expect(stacBrowser.selectedStaticCollection).toBeNull();
+      });
+
+      it('should clear catalogNavHistory', () => {
+        stacBrowser.resetState();
+        expect(stacBrowser.catalogNavHistory).toEqual([]);
+      });
+    });
+
+    describe('sub-catalog navigation', () => {
+      const mockSubCatalogChildren = [
+        {
+          href: 'https://example.com/2024/collection.json',
+          title: '2024 Imagery',
+          entry_type: 'application/json',
+        },
+        {
+          href: 'https://example.com/2025/collection.json',
+          title: '2025 Imagery',
+          entry_type: 'application/json',
+        },
+      ];
+
+      beforeEach(() => {
+        stacBrowser.catalogType = 'Static';
+        stacBrowser.currentCatalogUrl = 'https://example.com/catalog.json';
+        stacBrowser.currentCatalog = {
+          id: 'root-catalog',
+          title: 'Root Catalog',
+          description: 'Test catalog',
+        };
+        stacBrowser.staticCollections = [
+          {
+            id: 'by-year',
+            title: 'By Year',
+            url: 'https://example.com/year/catalog.json',
+            isCatalog: true,
+            description: '📁 Sub-catalog (click to explore)',
+          },
+          {
+            id: 'surface-reflectance',
+            title: 'Surface Reflectance',
+            url: 'https://example.com/surface-reflectance/collection.json',
+            isCatalog: false,
+          },
+        ];
+        stacBrowser.catalogNavHistory = [];
+      });
+
+      describe('loadStaticCatalogChildren', () => {
+        it('should identify sub-catalogs by catalog.json URL', async () => {
+          const mockChildren = [
+            {
+              href: 'https://example.com/year/catalog.json',
+              title: 'By Year',
+              entry_type: 'application/json',
+            },
+            {
+              href: 'https://example.com/collection.json',
+              title: 'Surface Reflectance',
+              entry_type: 'application/json',
+            },
+          ];
+          invoke.mockResolvedValueOnce(mockChildren);
+
+          await stacBrowser.loadStaticCatalogChildren('https://example.com/catalog.json');
+
+          expect(stacBrowser.staticCollections.length).toBe(2);
+
+          // First should be marked as a catalog
+          const yearEntry = stacBrowser.staticCollections.find(c => c.title === 'By Year');
+          expect(yearEntry?.isCatalog).toBe(true);
+          expect(yearEntry?.description).toContain('Sub-catalog');
+
+          // Second should be a collection (not a catalog)
+          const collectionEntry = stacBrowser.staticCollections.find(
+            c => c.title === 'Surface Reflectance'
+          );
+          expect(collectionEntry?.isCatalog).toBe(false);
+        });
+
+        it('should populate dropdown after loading children', async () => {
+          invoke.mockResolvedValueOnce(mockSubCatalogChildren);
+
+          await stacBrowser.loadStaticCatalogChildren('https://example.com/year/catalog.json');
+
+          const options = stacBrowser.collectionSelect.querySelectorAll('option');
+          // Default option + 2 children
+          expect(options.length).toBe(3);
+        });
+      });
+
+      describe('navigateToSubCatalog', () => {
+        it('should add current location to navigation history', async () => {
+          invoke.mockResolvedValueOnce(mockSubCatalogChildren);
+
+          const subCatalogEntry = {
+            id: 'by-year',
+            title: 'By Year',
+            url: 'https://example.com/year/catalog.json',
+            isCatalog: true,
+          };
+
+          await stacBrowser.navigateToSubCatalog(subCatalogEntry);
+
+          expect(stacBrowser.catalogNavHistory.length).toBe(1);
+          expect(stacBrowser.catalogNavHistory[0].url).toBe('https://example.com/catalog.json');
+          expect(stacBrowser.catalogNavHistory[0].title).toBe('Root Catalog');
+        });
+
+        it('should update currentCatalogUrl to sub-catalog URL', async () => {
+          invoke.mockResolvedValueOnce(mockSubCatalogChildren);
+
+          const subCatalogEntry = {
+            id: 'by-year',
+            title: 'By Year',
+            url: 'https://example.com/year/catalog.json',
+            isCatalog: true,
+          };
+
+          await stacBrowser.navigateToSubCatalog(subCatalogEntry);
+
+          expect(stacBrowser.currentCatalogUrl).toBe('https://example.com/year/catalog.json');
+        });
+
+        it('should load sub-catalog children', async () => {
+          invoke.mockResolvedValueOnce(mockSubCatalogChildren);
+
+          const subCatalogEntry = {
+            id: 'by-year',
+            title: 'By Year',
+            url: 'https://example.com/year/catalog.json',
+            isCatalog: true,
+          };
+
+          await stacBrowser.navigateToSubCatalog(subCatalogEntry);
+
+          expect(invoke).toHaveBeenCalledWith('get_static_catalog_children', {
+            catalogUrl: 'https://example.com/year/catalog.json',
+          });
+        });
+
+        it('should hide search section after navigation', async () => {
+          invoke.mockResolvedValueOnce(mockSubCatalogChildren);
+          stacBrowser.searchSection.classList.remove('hidden');
+
+          const subCatalogEntry = {
+            id: 'by-year',
+            title: 'By Year',
+            url: 'https://example.com/year/catalog.json',
+            isCatalog: true,
+          };
+
+          await stacBrowser.navigateToSubCatalog(subCatalogEntry);
+
+          expect(stacBrowser.searchSection.classList.contains('hidden')).toBe(true);
+        });
+
+        it('should clear selectedStaticCollection after navigation', async () => {
+          invoke.mockResolvedValueOnce(mockSubCatalogChildren);
+          stacBrowser.selectedStaticCollection = { id: 'test', url: 'https://example.com' };
+
+          const subCatalogEntry = {
+            id: 'by-year',
+            title: 'By Year',
+            url: 'https://example.com/year/catalog.json',
+            isCatalog: true,
+          };
+
+          await stacBrowser.navigateToSubCatalog(subCatalogEntry);
+
+          expect(stacBrowser.selectedStaticCollection).toBeNull();
+        });
+
+        it('should not navigate if entry is not a catalog', async () => {
+          const collectionEntry = {
+            id: 'surface-reflectance',
+            title: 'Surface Reflectance',
+            url: 'https://example.com/collection.json',
+            isCatalog: false,
+          };
+
+          await stacBrowser.navigateToSubCatalog(collectionEntry);
+
+          expect(invoke).not.toHaveBeenCalled();
+          expect(stacBrowser.catalogNavHistory.length).toBe(0);
+        });
+
+        it('should show toast on successful navigation', async () => {
+          invoke.mockResolvedValueOnce(mockSubCatalogChildren);
+
+          const subCatalogEntry = {
+            id: 'by-year',
+            title: 'By Year',
+            url: 'https://example.com/year/catalog.json',
+            isCatalog: true,
+          };
+
+          await stacBrowser.navigateToSubCatalog(subCatalogEntry);
+
+          expect(showToast).toHaveBeenCalledWith('Opened By Year', 'success');
+        });
+
+        it('should show error on navigation failure', async () => {
+          invoke.mockRejectedValueOnce(new Error('Network error'));
+
+          const subCatalogEntry = {
+            id: 'by-year',
+            title: 'By Year',
+            url: 'https://example.com/year/catalog.json',
+            isCatalog: true,
+          };
+
+          await stacBrowser.navigateToSubCatalog(subCatalogEntry);
+
+          expect(showError).toHaveBeenCalledWith('Navigation failed', expect.anything());
+        });
+      });
+
+      describe('navigateBack', () => {
+        beforeEach(() => {
+          stacBrowser.catalogNavHistory = [
+            { url: 'https://example.com/catalog.json', title: 'Root Catalog' },
+          ];
+          stacBrowser.currentCatalogUrl = 'https://example.com/year/catalog.json';
+        });
+
+        it('should pop from navigation history', async () => {
+          invoke.mockResolvedValueOnce(mockSubCatalogChildren);
+
+          await stacBrowser.navigateBack();
+
+          expect(stacBrowser.catalogNavHistory.length).toBe(0);
+        });
+
+        it('should restore parent catalog URL', async () => {
+          invoke.mockResolvedValueOnce(mockSubCatalogChildren);
+
+          await stacBrowser.navigateBack();
+
+          expect(stacBrowser.currentCatalogUrl).toBe('https://example.com/catalog.json');
+        });
+
+        it('should load parent catalog children', async () => {
+          invoke.mockResolvedValueOnce(mockSubCatalogChildren);
+
+          await stacBrowser.navigateBack();
+
+          expect(invoke).toHaveBeenCalledWith('get_static_catalog_children', {
+            catalogUrl: 'https://example.com/catalog.json',
+          });
+        });
+
+        it('should do nothing if history is empty', async () => {
+          stacBrowser.catalogNavHistory = [];
+
+          await stacBrowser.navigateBack();
+
+          expect(invoke).not.toHaveBeenCalled();
+        });
+
+        it('should hide search section after navigating back', async () => {
+          invoke.mockResolvedValueOnce(mockSubCatalogChildren);
+          stacBrowser.searchSection.classList.remove('hidden');
+
+          await stacBrowser.navigateBack();
+
+          expect(stacBrowser.searchSection.classList.contains('hidden')).toBe(true);
+        });
+      });
+
+      describe('onCollectionChange with sub-catalog', () => {
+        beforeEach(() => {
+          // Add options to dropdown
+          const catalogOption = document.createElement('option');
+          catalogOption.value = 'https://example.com/year/catalog.json';
+          catalogOption.textContent = 'By Year';
+          stacBrowser.collectionSelect.appendChild(catalogOption);
+
+          const collectionOption = document.createElement('option');
+          collectionOption.value = 'https://example.com/surface-reflectance/collection.json';
+          collectionOption.textContent = 'Surface Reflectance';
+          stacBrowser.collectionSelect.appendChild(collectionOption);
+        });
+
+        it('should navigate to sub-catalog when catalog entry is selected', async () => {
+          invoke.mockResolvedValueOnce(mockSubCatalogChildren);
+          stacBrowser.collectionSelect.value = 'https://example.com/year/catalog.json';
+
+          stacBrowser.onCollectionChange();
+
+          // Wait for async navigation
+          await new Promise(resolve => setTimeout(resolve, 10));
+
+          expect(invoke).toHaveBeenCalledWith('get_static_catalog_children', {
+            catalogUrl: 'https://example.com/year/catalog.json',
+          });
+        });
+
+        it('should reset dropdown selection after navigating to sub-catalog', async () => {
+          invoke.mockResolvedValueOnce(mockSubCatalogChildren);
+          stacBrowser.collectionSelect.value = 'https://example.com/year/catalog.json';
+
+          stacBrowser.onCollectionChange();
+
+          expect(stacBrowser.collectionSelect.value).toBe('');
+        });
+
+        it('should not navigate when collection entry is selected', () => {
+          stacBrowser.collectionSelect.value =
+            'https://example.com/surface-reflectance/collection.json';
+
+          stacBrowser.onCollectionChange();
+
+          expect(invoke).not.toHaveBeenCalled();
+          expect(stacBrowser.selectedStaticCollection).not.toBeNull();
+        });
+
+        it('should show search section when collection is selected', () => {
+          stacBrowser.collectionSelect.value =
+            'https://example.com/surface-reflectance/collection.json';
+
+          stacBrowser.onCollectionChange();
+
+          expect(stacBrowser.searchSection.classList.contains('hidden')).toBe(false);
+        });
+      });
+
+      describe('catalog navigation history management', () => {
+        it('should build navigation history through multiple levels', async () => {
+          // First navigation: root -> year
+          invoke.mockResolvedValueOnce([
+            {
+              href: 'https://example.com/year/2024/catalog.json',
+              title: '2024',
+              entry_type: 'application/json',
+            },
+          ]);
+
+          await stacBrowser.navigateToSubCatalog({
+            id: 'by-year',
+            title: 'By Year',
+            url: 'https://example.com/year/catalog.json',
+            isCatalog: true,
+          });
+
+          expect(stacBrowser.catalogNavHistory.length).toBe(1);
+
+          // Update current catalog for second navigation
+          stacBrowser.currentCatalog = { id: 'year', title: 'By Year', description: '' };
+
+          // Second navigation: year -> 2024
+          invoke.mockResolvedValueOnce([
+            {
+              href: 'https://example.com/year/2024/collection.json',
+              title: '2024 Collection',
+              entry_type: 'application/json',
+            },
+          ]);
+
+          await stacBrowser.navigateToSubCatalog({
+            id: '2024',
+            title: '2024',
+            url: 'https://example.com/year/2024/catalog.json',
+            isCatalog: true,
+          });
+
+          expect(stacBrowser.catalogNavHistory.length).toBe(2);
+          expect(stacBrowser.catalogNavHistory[0].title).toBe('Root Catalog');
+          expect(stacBrowser.catalogNavHistory[1].title).toBe('By Year');
+        });
+
+        it('should navigate back through multiple levels', async () => {
+          stacBrowser.catalogNavHistory = [
+            { url: 'https://example.com/catalog.json', title: 'Root' },
+            { url: 'https://example.com/year/catalog.json', title: 'By Year' },
+          ];
+          stacBrowser.currentCatalogUrl = 'https://example.com/year/2024/catalog.json';
+
+          // Navigate back once
+          invoke.mockResolvedValueOnce([]);
+          await stacBrowser.navigateBack();
+
+          expect(stacBrowser.catalogNavHistory.length).toBe(1);
+          expect(stacBrowser.currentCatalogUrl).toBe('https://example.com/year/catalog.json');
+
+          // Navigate back again
+          invoke.mockResolvedValueOnce([]);
+          await stacBrowser.navigateBack();
+
+          expect(stacBrowser.catalogNavHistory.length).toBe(0);
+          expect(stacBrowser.currentCatalogUrl).toBe('https://example.com/catalog.json');
+        });
+      });
     });
   });
 });

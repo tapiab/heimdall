@@ -215,6 +215,21 @@ MapLibre renders tile
 - `get_histogram` - Histogram data for band
 - `close_dataset` - Remove from cache
 
+#### STAC Commands (`stac.rs`)
+- `connect_stac_api` - Connect to STAC API or static catalog, returns `StacCatalogInfo` with auto-detected type
+- `list_stac_collections` - List collections from STAC API
+- `search_stac_items` - Search items using STAC API `/search` endpoint
+- `open_stac_asset` - Open COG asset via `/vsicurl/`
+- `get_static_catalog_children` - Get child links from static catalog
+- `fetch_stac_resource` - Fetch arbitrary STAC resource by URL
+- `browse_static_collection` - Browse items in static collection by following links
+
+**Static vs API Detection:**
+The backend automatically detects catalog type by:
+1. Checking `conformsTo` for STAC API conformance URIs
+2. Probing the `/search` endpoint as a fallback
+3. Defaulting to static catalog if neither succeeds
+
 ## Coordinate Systems
 
 ### Georeferenced Images

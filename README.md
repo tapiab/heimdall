@@ -305,11 +305,19 @@ Custom basemap settings are stored in a config file and persist across sessions.
 
 Heimdall includes a built-in STAC (SpatioTemporal Asset Catalog) browser for searching and loading satellite imagery directly from cloud archives.
 
-### Supported STAC APIs
+### Supported STAC Catalogs
 
+Heimdall supports both **STAC APIs** (with `/search` endpoints) and **Static STAC Catalogs** (JSON files hosted on cloud storage):
+
+#### STAC APIs
 - **Earth Search** (AWS): `https://earth-search.aws.element84.com/v1` - Sentinel-2, Landsat, NAIP, and more
 - **Microsoft Planetary Computer**: `https://planetarycomputer.microsoft.com/api/stac/v1`
 - **Any STAC API** compliant with the STAC 1.0.0 specification
+
+#### Static STAC Catalogs
+- Any static catalog following the STAC 1.0.0 specification (hosted on S3, GCS, Azure Blob, etc.)
+
+The STAC Browser automatically detects whether a catalog is an API or static catalog based on conformance classes and endpoint availability.
 
 ### Using the STAC Browser
 

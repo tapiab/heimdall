@@ -36,7 +36,7 @@ use super::raster::{BandStats, RasterMetadata};
 // STAC Data Structures
 // ============================================================================
 
-/// Represents a STAC Catalog - the root entity of a STAC API.
+/// Represents a STAC Catalog - the root entity of a STAC API or static catalog.
 ///
 /// A catalog contains metadata about the API and links to collections.
 #[derive(Clone, Serialize, Deserialize, Debug)]
@@ -56,6 +56,29 @@ pub struct StacCatalog {
     /// List of conformance URIs indicating supported capabilities
     #[serde(rename = "conformsTo")]
     pub conforms_to: Option<Vec<String>>,
+    /// Links to related resources (child catalogs, collections, items)
+    pub links: Option<Vec<StacLink>>,
+}
+
+/// Determines if a catalog is a STAC API (has search endpoint) or a static catalog
+#[derive(Clone, Serialize, Deserialize, Debug, PartialEq)]
+pub enum StacCatalogType {
+    /// STAC API with /search and /collections endpoints
+    Api,
+    /// Static catalog with only links to child resources
+    Static,
+}
+
+/// Extended catalog info returned to frontend
+#[derive(Clone, Serialize, Deserialize, Debug)]
+pub struct StacCatalogInfo {
+    /// The catalog metadata
+    #[serde(flatten)]
+    pub catalog: StacCatalog,
+    /// Whether this is an API or static catalog
+    pub catalog_type: StacCatalogType,
+    /// Base URL of the catalog
+    pub base_url: String,
 }
 
 /// Represents a STAC Collection - a group of related items (e.g., Sentinel-2 imagery).
@@ -80,6 +103,20 @@ pub struct StacCollection {
     /// STAC specification version
     #[serde(rename = "stac_version")]
     pub stac_version: Option<String>,
+    /// Links to related resources (items, parent, root)
+    pub links: Option<Vec<StacLink>>,
+}
+
+/// A child entry from a static catalog (can be a catalog or collection)
+#[derive(Clone, Serialize, Deserialize, Debug)]
+pub struct StacChildEntry {
+    /// URL to the child resource
+    pub href: String,
+    /// Human-readable title
+    pub title: Option<String>,
+    /// Resource type: "Catalog" or "Collection"
+    #[serde(rename = "type")]
+    pub entry_type: Option<String>,
 }
 
 /// Spatial and temporal extent of a STAC collection.
@@ -175,10 +212,72 @@ pub struct StacAsset {
     #[serde(rename = "type")]
     pub media_type: Option<String>,
     /// Asset roles (e.g., "data", "visual", "thumbnail", "overview")
+    /// Some providers use a string instead of array, so we handle both
+    #[serde(default, deserialize_with = "deserialize_string_or_vec")]
     pub roles: Option<Vec<String>>,
     /// Band information for multispectral assets
     #[serde(rename = "eo:bands")]
     pub eo_bands: Option<Vec<EoBand>>,
+}
+
+/// Deserialize a field that can be either a string or an array of strings
+fn deserialize_string_or_vec<'de, D>(deserializer: D) -> Result<Option<Vec<String>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    use serde::de::{self, Visitor};
+    use std::fmt;
+
+    struct StringOrVec;
+
+    impl<'de> Visitor<'de> for StringOrVec {
+        type Value = Option<Vec<String>>;
+
+        fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+            formatter.write_str("string or array of strings")
+        }
+
+        fn visit_none<E>(self) -> Result<Self::Value, E>
+        where
+            E: de::Error,
+        {
+            Ok(None)
+        }
+
+        fn visit_unit<E>(self) -> Result<Self::Value, E>
+        where
+            E: de::Error,
+        {
+            Ok(None)
+        }
+
+        fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
+        where
+            E: de::Error,
+        {
+            Ok(Some(vec![value.to_string()]))
+        }
+
+        fn visit_string<E>(self, value: String) -> Result<Self::Value, E>
+        where
+            E: de::Error,
+        {
+            Ok(Some(vec![value]))
+        }
+
+        fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
+        where
+            A: de::SeqAccess<'de>,
+        {
+            let mut vec = Vec::new();
+            while let Some(item) = seq.next_element::<String>()? {
+                vec.push(item);
+            }
+            Ok(Some(vec))
+        }
+    }
+
+    deserializer.deserialize_any(StringOrVec)
 }
 
 /// Electro-optical band metadata from the eo:bands extension.
@@ -261,18 +360,19 @@ pub struct StacSearchContext {
 // STAC API Commands
 // ============================================================================
 
-/// Connect to a STAC API and retrieve catalog metadata.
+/// Connect to a STAC API or static catalog and retrieve catalog metadata.
 ///
-/// This is typically the first step when using a STAC API. The catalog
-/// provides basic information about the API and what data is available.
+/// This is typically the first step when using a STAC catalog. The function
+/// automatically detects whether the catalog is a STAC API (with /search endpoint)
+/// or a static catalog (with only child links).
 ///
 /// # Arguments
 ///
-/// * `url` - The base URL of the STAC API (e.g., "https://earth-search.aws.element84.com/v1")
+/// * `url` - The URL of the STAC catalog (e.g., "https://earth-search.aws.element84.com/v1")
 ///
 /// # Returns
 ///
-/// Returns the catalog metadata on success, or an error message on failure.
+/// Returns extended catalog info including type detection on success.
 ///
 /// # Errors
 ///
@@ -281,22 +381,22 @@ pub struct StacSearchContext {
 /// - The response is not valid STAC catalog JSON
 /// - The server returns an error status code
 #[tauri::command]
-pub async fn connect_stac_api(url: String) -> Result<StacCatalog, String> {
+pub async fn connect_stac_api(url: String) -> Result<StacCatalogInfo, String> {
     let client = reqwest::Client::new();
 
     // Normalize URL - remove trailing slash
-    let base_url = url.trim_end_matches('/');
+    let base_url = url.trim_end_matches('/').to_string();
 
     let response = client
-        .get(base_url)
+        .get(&base_url)
         .header("Accept", "application/json")
         .send()
         .await
-        .map_err(|e| format!("Failed to connect to STAC API: {}", e))?;
+        .map_err(|e| format!("Failed to connect to STAC catalog: {}", e))?;
 
     if !response.status().is_success() {
         return Err(format!(
-            "STAC API returned error status: {}",
+            "STAC catalog returned error status: {}",
             response.status()
         ));
     }
@@ -306,7 +406,56 @@ pub async fn connect_stac_api(url: String) -> Result<StacCatalog, String> {
         .await
         .map_err(|e| format!("Failed to parse STAC catalog: {}", e))?;
 
-    Ok(catalog)
+    // Detect catalog type based on conformance classes
+    // STAC APIs typically declare conformance to the STAC API spec
+    let catalog_type = detect_catalog_type(&catalog, &base_url, &client).await;
+
+    info!(
+        catalog_id = %catalog.id,
+        catalog_type = ?catalog_type,
+        "Connected to STAC catalog"
+    );
+
+    Ok(StacCatalogInfo {
+        catalog,
+        catalog_type,
+        base_url,
+    })
+}
+
+/// Detect whether a catalog is a STAC API or static catalog
+async fn detect_catalog_type(
+    catalog: &StacCatalog,
+    base_url: &str,
+    client: &reqwest::Client,
+) -> StacCatalogType {
+    // Check conformance classes first - most reliable indicator
+    if let Some(conforms_to) = &catalog.conforms_to {
+        for uri in conforms_to {
+            if uri.contains("api.stacspec.org") || uri.contains("/core") || uri.contains("/search")
+            {
+                return StacCatalogType::Api;
+            }
+        }
+    }
+
+    // Try to probe the /search endpoint as a fallback
+    let search_url = format!("{}/search", base_url);
+    if let Ok(response) = client
+        .post(&search_url)
+        .header("Content-Type", "application/json")
+        .body("{\"limit\":1}")
+        .timeout(std::time::Duration::from_secs(5))
+        .send()
+        .await
+    {
+        if response.status().is_success() {
+            return StacCatalogType::Api;
+        }
+    }
+
+    // Default to static catalog
+    StacCatalogType::Static
 }
 
 /// List all collections available in a STAC catalog.
@@ -458,6 +607,317 @@ pub async fn search_stac_items(
     Ok(result)
 }
 
+/// Get child entries from a static STAC catalog.
+///
+/// This follows the `child` links in a catalog to discover sub-catalogs and collections.
+/// For static catalogs, this is the primary way to navigate the catalog hierarchy.
+///
+/// # Arguments
+///
+/// * `catalog_url` - The URL of the catalog JSON file
+///
+/// # Returns
+///
+/// Returns a vector of child entries with their URLs and titles.
+#[tauri::command]
+pub async fn get_static_catalog_children(
+    catalog_url: String,
+) -> Result<Vec<StacChildEntry>, String> {
+    let client = reqwest::Client::new();
+
+    let response = client
+        .get(&catalog_url)
+        .header("Accept", "application/json")
+        .send()
+        .await
+        .map_err(|e| format!("Failed to fetch catalog: {}", e))?;
+
+    if !response.status().is_success() {
+        return Err(format!(
+            "Failed to fetch catalog: HTTP {}",
+            response.status()
+        ));
+    }
+
+    let catalog: StacCatalog = response
+        .json()
+        .await
+        .map_err(|e| format!("Failed to parse catalog: {}", e))?;
+
+    // Extract child links
+    let children: Vec<StacChildEntry> = catalog
+        .links
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|link| link.rel == "child" || link.rel == "item")
+        .map(|link| {
+            // Resolve relative URLs
+            let href = resolve_url(&catalog_url, &link.href);
+            StacChildEntry {
+                href,
+                title: link.title,
+                entry_type: link.link_type,
+            }
+        })
+        .collect();
+
+    debug!(count = children.len(), "Found catalog children");
+    Ok(children)
+}
+
+/// Fetch a specific resource (catalog or collection) from a URL.
+///
+/// This is used to navigate static catalogs by fetching child resources.
+#[tauri::command]
+pub async fn fetch_stac_resource(url: String) -> Result<serde_json::Value, String> {
+    let client = reqwest::Client::new();
+
+    let response = client
+        .get(&url)
+        .header("Accept", "application/json")
+        .send()
+        .await
+        .map_err(|e| format!("Failed to fetch resource: {}", e))?;
+
+    if !response.status().is_success() {
+        return Err(format!(
+            "Failed to fetch resource: HTTP {}",
+            response.status()
+        ));
+    }
+
+    let resource: serde_json::Value = response
+        .json()
+        .await
+        .map_err(|e| format!("Failed to parse resource: {}", e))?;
+
+    Ok(resource)
+}
+
+/// Browse items in a static STAC collection.
+///
+/// For static collections, items are accessed by following links rather than
+/// using a /search endpoint. This function fetches items from the collection's
+/// item links.
+///
+/// # Arguments
+///
+/// * `collection_url` - The URL of the collection JSON file
+/// * `limit` - Maximum number of items to return
+///
+/// # Returns
+///
+/// Returns a search result compatible with the standard search format.
+#[tauri::command]
+pub async fn browse_static_collection(
+    collection_url: String,
+    limit: Option<u32>,
+) -> Result<StacSearchResult, String> {
+    println!("[STAC] browse_static_collection called with URL: {}", collection_url);
+
+    let client = reqwest::Client::builder()
+        .user_agent("Heimdall/0.3.1")
+        .build()
+        .map_err(|e| format!("Failed to create HTTP client: {}", e))?;
+    let max_items = limit.unwrap_or(20) as usize;
+
+    println!("[STAC] Fetching collection with limit: {}", max_items);
+
+    // Fetch the collection
+    let response = client
+        .get(&collection_url)
+        .header("Accept", "application/json")
+        .send()
+        .await
+        .map_err(|e| format!("Failed to fetch collection: {}", e))?;
+
+    if !response.status().is_success() {
+        return Err(format!(
+            "Failed to fetch collection: HTTP {}",
+            response.status()
+        ));
+    }
+
+    let response_text = response
+        .text()
+        .await
+        .map_err(|e| format!("Failed to read collection response: {}", e))?;
+
+    println!("[STAC] Got collection response, length: {}", response_text.len());
+
+    let collection: StacCollection = serde_json::from_str(&response_text)
+        .map_err(|e| format!("Failed to parse collection JSON: {} (first 500 chars: {})", e, &response_text[..response_text.len().min(500)]))?;
+
+    println!("[STAC] Parsed collection: {}", collection.id);
+
+    // Find item links - could be direct item links or a link to items folder
+    let links = collection.links.clone().unwrap_or_default();
+    println!("[STAC] Found {} links in collection", links.len());
+
+    // Debug: count different link types
+    let item_count = links.iter().filter(|l| l.rel == "item").count();
+    let child_count = links.iter().filter(|l| l.rel == "child").count();
+    let other_count = links.len() - item_count - child_count;
+    println!("[STAC] Link breakdown - items: {}, children: {}, other: {}", item_count, child_count, other_count);
+
+    if links.is_empty() {
+        println!("[STAC] WARNING: Collection has no links!");
+    }
+
+    // Look for 'items' link first (link to items API or folder)
+    let items_link = links.iter().find(|l| l.rel == "items");
+
+    let mut items: Vec<StacItem> = Vec::new();
+
+    if let Some(items_link) = items_link {
+        // Fetch items from the items endpoint/folder
+        let items_url = resolve_url(&collection_url, &items_link.href);
+        println!("[STAC] Found 'items' link, fetching from: {}", items_url);
+        items = fetch_items_from_url(&client, &items_url, max_items).await?;
+        println!("[STAC] fetch_items_from_url returned {} items", items.len());
+    } else {
+        println!("[STAC] No 'items' link found, will fetch individual item links");
+        // Look for direct item links
+        let item_links: Vec<&StacLink> = links.iter().filter(|l| l.rel == "item").collect();
+        println!("[STAC] Found {} item links, will fetch up to {}", item_links.len(), max_items);
+
+        for (i, link) in item_links.iter().take(max_items).enumerate() {
+            println!("[STAC] Raw href from link: {}", &link.href);
+            let item_url = resolve_url(&collection_url, &link.href);
+            println!("[STAC] Fetching item {}/{}: {}", i + 1, max_items.min(item_links.len()), &item_url);
+            match fetch_single_item(&client, &item_url).await {
+                Ok(item) => {
+                    println!("[STAC] Successfully fetched item: {}", item.id);
+                    items.push(item);
+                }
+                Err(e) => {
+                    println!("[STAC] ERROR fetching item: {}", e);
+                }
+            }
+        }
+    }
+
+    let items_count = items.len();
+    info!(count = items_count, "Fetched items from static collection");
+
+    Ok(StacSearchResult {
+        result_type: "FeatureCollection".to_string(),
+        features: items,
+        number_matched: None,
+        number_returned: Some(items_count as u64),
+        context: Some(StacSearchContext {
+            matched: None,
+            returned: Some(items_count as u64),
+            limit: Some(max_items as u32),
+        }),
+    })
+}
+
+/// Fetch items from a URL (could be an items endpoint or a catalog with item links)
+async fn fetch_items_from_url(
+    client: &reqwest::Client,
+    url: &str,
+    max_items: usize,
+) -> Result<Vec<StacItem>, String> {
+    let response = client
+        .get(url)
+        .header("Accept", "application/json")
+        .send()
+        .await
+        .map_err(|e| format!("Failed to fetch items: {}", e))?;
+
+    if !response.status().is_success() {
+        return Err(format!("Failed to fetch items: HTTP {}", response.status()));
+    }
+
+    let json: serde_json::Value = response
+        .json()
+        .await
+        .map_err(|e| format!("Failed to parse items response: {}", e))?;
+
+    // Check if it's a FeatureCollection (items endpoint) or a catalog with item links
+    if let Some(fc_type) = json.get("type").and_then(|t| t.as_str()) {
+        if fc_type == "FeatureCollection" {
+            // It's a FeatureCollection - parse items directly
+            if let Some(features) = json.get("features").and_then(|f| f.as_array()) {
+                let items: Vec<StacItem> = features
+                    .iter()
+                    .take(max_items)
+                    .filter_map(|f| serde_json::from_value(f.clone()).ok())
+                    .collect();
+                return Ok(items);
+            }
+        } else if fc_type == "Catalog" {
+            // It's a catalog - follow item links
+            if let Some(links) = json.get("links").and_then(|l| l.as_array()) {
+                let item_links: Vec<String> = links
+                    .iter()
+                    .filter_map(|l| {
+                        let rel = l.get("rel")?.as_str()?;
+                        if rel == "item" {
+                            let href = l.get("href")?.as_str()?;
+                            Some(resolve_url(url, href))
+                        } else {
+                            None
+                        }
+                    })
+                    .take(max_items)
+                    .collect();
+
+                let mut items = Vec::new();
+                for item_url in item_links {
+                    if let Ok(item) = fetch_single_item(client, &item_url).await {
+                        items.push(item);
+                    }
+                }
+                return Ok(items);
+            }
+        }
+    }
+
+    Ok(Vec::new())
+}
+
+/// Fetch a single STAC item from a URL
+async fn fetch_single_item(client: &reqwest::Client, url: &str) -> Result<StacItem, String> {
+    let response = client
+        .get(url)
+        .header("Accept", "application/json")
+        .send()
+        .await
+        .map_err(|e| format!("Failed to fetch item: {}", e))?;
+
+    if !response.status().is_success() {
+        return Err(format!("Failed to fetch item: HTTP {}", response.status()));
+    }
+
+    let text = response
+        .text()
+        .await
+        .map_err(|e| format!("Failed to read item response: {}", e))?;
+
+    let item: StacItem = serde_json::from_str(&text)
+        .map_err(|e| format!("Failed to parse item JSON: {} (first 200 chars: {})", e, &text[..text.len().min(200)]))?;
+
+    Ok(item)
+}
+
+/// Resolve a potentially relative URL against a base URL
+fn resolve_url(base: &str, href: &str) -> String {
+    // If href is already absolute, return it
+    if href.starts_with("http://") || href.starts_with("https://") {
+        return href.to_string();
+    }
+
+    // Parse base URL to get the directory
+    if let Some(pos) = base.rfind('/') {
+        let base_dir = &base[..=pos];
+        format!("{}{}", base_dir, href)
+    } else {
+        href.to_string()
+    }
+}
+
 /// Open a STAC asset (COG) via GDAL's `/vsicurl/` virtual filesystem.
 ///
 /// This command enables loading Cloud Optimized GeoTIFFs (COGs) directly from
@@ -485,13 +945,6 @@ pub async fn open_stac_asset(
     asset_href: String,
     state: State<'_, DatasetCache>,
 ) -> Result<RasterMetadata, String> {
-    // Minimal GDAL config for remote COG access
-    // Most options left at defaults to avoid conflicts
-    gdal::config::set_config_option("GDAL_HTTP_USERAGENT", "Heimdall/0.1 GDAL").ok();
-    gdal::config::set_config_option("GDAL_DISABLE_READDIR_ON_OPEN", "EMPTY_DIR").ok();
-    gdal::config::set_config_option("VSI_CACHE", "FALSE").ok();
-    gdal::config::set_config_option("GDAL_CACHEMAX", "512").ok();
-
     // Construct /vsicurl/ path - strip any existing /vsicurl/ prefix to avoid doubling
     // Also trim whitespace which might come from JSON parsing
     let asset_href = asset_href.trim();
@@ -554,29 +1007,32 @@ pub async fn open_stac_asset(
 
     let vsicurl_path = format!("/vsicurl/{}", http_href);
 
-    info!(path = %vsicurl_path, "Opening STAC asset");
+    println!("[STAC] ========================================");
+    println!("[STAC] open_stac_asset called");
+    println!("[STAC] Original asset_href: '{}'", asset_href);
+    println!("[STAC] Cleaned href: '{}'", clean_href);
+    println!("[STAC] HTTP href: '{}'", http_href);
+    println!("[STAC] Final vsicurl path: '{}'", vsicurl_path);
+    println!("[STAC] ========================================");
 
-    // Clone values for the blocking task
-    let path_clone = vsicurl_path.clone();
-    let href_clone = http_href.to_string();
+    // Open GDAL dataset directly (GDAL config is already set globally at startup)
+    println!("[GDAL] Attempting to open: {}", &vsicurl_path);
 
-    // Use tokio's spawn_blocking to run GDAL in a separate blocking thread
-    // This avoids potential issues with tokio's async runtime and GDAL's network operations
-    let dataset = tokio::task::spawn_blocking(move || {
-        // Reset all curl-related GDAL options to avoid conflicts
-        gdal::config::set_config_option("CPL_CURL_VERBOSE", "NO").ok();
-        gdal::config::set_config_option("GDAL_HTTP_UNSAFESSL", "YES").ok();
-        gdal::config::set_config_option("GDAL_HTTP_TCP_KEEPALIVE", "NO").ok();
-        gdal::config::set_config_option("GDAL_HTTP_CONNECTTIMEOUT", "30").ok();
+    use gdal::DatasetOptions;
+    use gdal::GdalOpenFlags;
 
-        Dataset::open(&path_clone)
-    })
-    .await
-    .map_err(|e| format!("Task join error: {}", e))?
-    .map_err(|e| {
+    let options = DatasetOptions {
+        open_flags: GdalOpenFlags::GDAL_OF_READONLY | GdalOpenFlags::GDAL_OF_RASTER | GdalOpenFlags::GDAL_OF_VERBOSE_ERROR,
+        ..Default::default()
+    };
+
+    let dataset = Dataset::open_ex(&vsicurl_path, options).map_err(|e| {
+        println!("[GDAL] Error opening dataset: {:?}", e);
         error!(error = %e, "GDAL error opening STAC asset");
-        format!("Cannot open remote COG '{}': {}", href_clone, e)
+        format!("Cannot open remote COG '{}': {}", http_href, e)
     })?;
+
+    println!("[GDAL] Successfully opened dataset!");
 
     let (width, height) = dataset.raster_size();
     let bands = dataset.raster_count();
@@ -835,11 +1291,18 @@ mod tests {
             catalog_type: "Catalog".to_string(),
             stac_version: Some("1.0.0".to_string()),
             conforms_to: Some(vec!["https://api.stacspec.org/v1.0.0/core".to_string()]),
+            links: Some(vec![StacLink {
+                href: "https://example.com/child/catalog.json".to_string(),
+                rel: "child".to_string(),
+                link_type: Some("application/json".to_string()),
+                title: Some("Child Catalog".to_string()),
+            }]),
         };
 
         let json = serde_json::to_string(&catalog).unwrap();
         assert!(json.contains("\"id\":\"test-catalog\""));
         assert!(json.contains("\"type\":\"Catalog\""));
+        assert!(json.contains("\"rel\":\"child\""));
     }
 
     #[test]
@@ -1459,5 +1922,213 @@ mod tests {
                 panic!("Failed to open COG via vsicurl: {}", e);
             }
         }
+    }
+
+    // -------------------------------------------------------------------------
+    // Static catalog support tests
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn test_stac_catalog_type_enum() {
+        // Test serialization
+        let api_type = StacCatalogType::Api;
+        let static_type = StacCatalogType::Static;
+
+        let api_json = serde_json::to_string(&api_type).unwrap();
+        let static_json = serde_json::to_string(&static_type).unwrap();
+
+        assert_eq!(api_json, "\"Api\"");
+        assert_eq!(static_json, "\"Static\"");
+
+        // Test deserialization
+        let api_parsed: StacCatalogType = serde_json::from_str("\"Api\"").unwrap();
+        let static_parsed: StacCatalogType = serde_json::from_str("\"Static\"").unwrap();
+
+        assert_eq!(api_parsed, StacCatalogType::Api);
+        assert_eq!(static_parsed, StacCatalogType::Static);
+    }
+
+    #[test]
+    fn test_stac_catalog_info_serialization() {
+        let catalog = StacCatalog {
+            id: "wyvern-catalog".to_string(),
+            title: Some("Wyvern Open Data".to_string()),
+            description: "Hyperspectral data".to_string(),
+            catalog_type: "Catalog".to_string(),
+            stac_version: Some("1.0.0".to_string()),
+            conforms_to: None,
+            links: Some(vec![StacLink {
+                href: "https://example.com/collection.json".to_string(),
+                rel: "child".to_string(),
+                link_type: Some("application/json".to_string()),
+                title: Some("Surface Reflectance".to_string()),
+            }]),
+        };
+
+        let info = StacCatalogInfo {
+            catalog,
+            catalog_type: StacCatalogType::Static,
+            base_url: "https://example.com/catalog.json".to_string(),
+        };
+
+        let json = serde_json::to_string(&info).unwrap();
+        assert!(json.contains("\"catalog_type\":\"Static\""));
+        assert!(json.contains("\"base_url\":\"https://example.com/catalog.json\""));
+        assert!(json.contains("\"id\":\"wyvern-catalog\""));
+    }
+
+    #[test]
+    fn test_stac_child_entry_serialization() {
+        let entry = StacChildEntry {
+            href: "https://example.com/child/catalog.json".to_string(),
+            title: Some("Child Catalog".to_string()),
+            entry_type: Some("application/json".to_string()),
+        };
+
+        let json = serde_json::to_string(&entry).unwrap();
+        assert!(json.contains("\"href\":\"https://example.com/child/catalog.json\""));
+        assert!(json.contains("\"title\":\"Child Catalog\""));
+    }
+
+    #[test]
+    fn test_stac_child_entry_deserialization() {
+        let json = r#"{
+            "href": "https://example.com/collection.json",
+            "title": "Surface Reflectance",
+            "type": "application/json"
+        }"#;
+
+        let entry: StacChildEntry = serde_json::from_str(json).unwrap();
+        assert_eq!(entry.href, "https://example.com/collection.json");
+        assert_eq!(entry.title, Some("Surface Reflectance".to_string()));
+        assert_eq!(entry.entry_type, Some("application/json".to_string()));
+    }
+
+    #[test]
+    fn test_resolve_url_absolute() {
+        // Absolute URLs should be returned unchanged
+        let base = "https://example.com/catalogs/catalog.json";
+        let href = "https://other.com/data/file.json";
+
+        let resolved = resolve_url(base, href);
+        assert_eq!(resolved, "https://other.com/data/file.json");
+    }
+
+    #[test]
+    fn test_resolve_url_relative() {
+        // Relative URLs should be resolved against the base
+        let base = "https://example.com/catalogs/catalog.json";
+        let href = "collection.json";
+
+        let resolved = resolve_url(base, href);
+        assert_eq!(resolved, "https://example.com/catalogs/collection.json");
+    }
+
+    #[test]
+    fn test_resolve_url_relative_path() {
+        // Relative URLs with path components
+        let base = "https://example.com/data/catalogs/catalog.json";
+        let href = "../collections/surface.json";
+
+        let resolved = resolve_url(base, href);
+        // Note: Our simple implementation just appends, doesn't handle ..
+        assert_eq!(
+            resolved,
+            "https://example.com/data/catalogs/../collections/surface.json"
+        );
+    }
+
+    #[test]
+    fn test_stac_catalog_with_child_links() {
+        // Test parsing a static catalog with child links (like Wyvern)
+        let json = r#"{
+            "type": "Catalog",
+            "id": "open-data-program-catalog",
+            "stac_version": "1.0.0",
+            "description": "Root catalog for open data",
+            "links": [
+                {
+                    "rel": "root",
+                    "href": "https://example.com/catalog.json",
+                    "type": "application/json",
+                    "title": "Root"
+                },
+                {
+                    "rel": "child",
+                    "href": "https://example.com/year/catalog.json",
+                    "type": "application/json",
+                    "title": "By Year"
+                },
+                {
+                    "rel": "child",
+                    "href": "https://example.com/collection.json",
+                    "type": "application/json",
+                    "title": "Surface Reflectance"
+                },
+                {
+                    "rel": "self",
+                    "href": "https://example.com/catalog.json",
+                    "type": "application/json"
+                }
+            ],
+            "title": "Open Data Catalog"
+        }"#;
+
+        let catalog: StacCatalog = serde_json::from_str(json).unwrap();
+        assert_eq!(catalog.id, "open-data-program-catalog");
+        assert!(catalog.links.is_some());
+
+        let links = catalog.links.unwrap();
+        assert_eq!(links.len(), 4);
+
+        // Count child links
+        let child_links: Vec<_> = links.iter().filter(|l| l.rel == "child").collect();
+        assert_eq!(child_links.len(), 2);
+
+        // Check first child link
+        assert_eq!(child_links[0].title, Some("By Year".to_string()));
+        assert!(child_links[0].href.contains("year/catalog.json"));
+    }
+
+    #[test]
+    fn test_stac_collection_with_links() {
+        // Test parsing a collection with item links
+        let json = r#"{
+            "id": "surface-reflectance",
+            "type": "Collection",
+            "title": "Surface Reflectance",
+            "description": "Surface reflectance data",
+            "links": [
+                {
+                    "rel": "root",
+                    "href": "../catalog.json",
+                    "type": "application/json"
+                },
+                {
+                    "rel": "items",
+                    "href": "./items.json",
+                    "type": "application/json"
+                },
+                {
+                    "rel": "item",
+                    "href": "./items/item1.json",
+                    "type": "application/json"
+                }
+            ]
+        }"#;
+
+        let collection: StacCollection = serde_json::from_str(json).unwrap();
+        assert_eq!(collection.id, "surface-reflectance");
+        assert!(collection.links.is_some());
+
+        let links = collection.links.unwrap();
+
+        // Find items link
+        let items_link = links.iter().find(|l| l.rel == "items");
+        assert!(items_link.is_some());
+
+        // Find item links
+        let item_links: Vec<_> = links.iter().filter(|l| l.rel == "item").collect();
+        assert_eq!(item_links.len(), 1);
     }
 }

@@ -5,63 +5,33 @@ use crate::gdal::tile_extractor::{
     extract_rgb_tile, extract_tile, extract_tile_with_stretch, StretchParams, TileRequest,
 };
 use gdal::spatial_ref::{CoordTransform, SpatialRef};
-use gdal::{Dataset, DatasetOptions, GdalOpenFlags};
+use gdal::Dataset;
 use serde::{Deserialize, Serialize};
 use tauri::State;
 
-/// Calculate appropriate overview level for a given zoom level
-/// Returns None for full resolution, Some(N) for overview level N
-fn calculate_overview_level(z: u8, source_resolution: f64) -> Option<usize> {
-    // Web Mercator tile resolution at different zoom levels (meters/pixel for 256px tiles)
-    // zoom 0: ~156543 m/px, zoom 10: ~153 m/px, zoom 15: ~4.8 m/px
-    let tile_resolution = 156543.03 / 2_f64.powi(z as i32);
-
-    // If tile resolution is coarser than source, use overviews
-    // Each overview level halves the resolution
-    if tile_resolution > source_resolution * 2.0 {
-        let ratio = tile_resolution / source_resolution;
-        let level = (ratio.log2().floor() as usize).saturating_sub(1);
-        if level > 0 {
-            Some(level.min(10))
-        } else {
-            None
-        }
-    } else {
-        None // Full resolution
-    }
-}
-
 /// Open dataset with appropriate overview level for the given zoom
-fn open_dataset_for_zoom(path: &str, z: u8) -> Result<Dataset, String> {
-    // For remote COGs (vsicurl), use overview level based on zoom
+fn open_dataset_for_zoom(path: &str, _z: u8) -> Result<Dataset, String> {
+    // For remote COGs (vsicurl), set GDAL config for proper access
     let is_remote = path.starts_with("/vsicurl/");
 
     if is_remote {
-        // First open to get resolution, then reopen with overview if needed
-        let ds = Dataset::open(path).map_err(|e| format!("Failed to open: {}", e))?;
+        // Ensure GDAL config is set for remote access in this thread
+        // GDAL config options are thread-local, so we need to set them here
+        gdal::config::set_config_option("GDAL_DISABLE_READDIR_ON_OPEN", "EMPTY_DIR").ok();
 
-        // Get source resolution (approximate from pixel size)
-        if let Ok(gt) = ds.geo_transform() {
-            let source_resolution = gt[1].abs();
+        // Longer timeout and retries for slow connections (e.g., Wyvern data)
+        gdal::config::set_config_option("GDAL_HTTP_TIMEOUT", "300").ok();
+        gdal::config::set_config_option("GDAL_HTTP_MAX_RETRY", "5").ok();
+        gdal::config::set_config_option("GDAL_HTTP_RETRY_DELAY", "2").ok();
 
-            if let Some(overview_level) = calculate_overview_level(z, source_resolution) {
-                // Reopen with overview level for better performance
-                let open_options = [format!("OVERVIEW_LEVEL={}", overview_level)];
-                let open_options_refs: Vec<&str> =
-                    open_options.iter().map(|s| s.as_str()).collect();
+        // Enable caching with larger buffer for pixel-interleaved COGs
+        gdal::config::set_config_option("VSI_CACHE", "TRUE").ok();
+        gdal::config::set_config_option("VSI_CACHE_SIZE", "100000000").ok(); // 100MB cache
+        gdal::config::set_config_option("CPL_VSIL_CURL_CACHE_SIZE", "100000000").ok();
 
-                let opts = DatasetOptions {
-                    open_flags: GdalOpenFlags::GDAL_OF_READONLY | GdalOpenFlags::GDAL_OF_RASTER,
-                    allowed_drivers: None,
-                    open_options: Some(&open_options_refs),
-                    sibling_files: None,
-                };
-
-                return Dataset::open_ex(path, opts)
-                    .map_err(|e| format!("Failed to open with overview: {}", e));
-            }
-        }
-        Ok(ds)
+        // For COGs, GDAL automatically uses appropriate overviews during read operations
+        // based on the requested window size. No need to explicitly select overview level.
+        Dataset::open(path).map_err(|e| format!("Failed to open remote: {}", e))
     } else {
         // Local files - just open normally
         Dataset::open(path).map_err(|e| format!("Failed to open: {}", e))
