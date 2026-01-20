@@ -501,7 +501,10 @@ export class StacBrowser {
       this.collectionsSection?.classList.remove('hidden');
 
       const typeLabel = catalogInfo.catalog_type === 'Api' ? 'API' : 'Static';
-      showToast(`Connected to ${this.currentCatalog.title || this.currentCatalog.id} (${typeLabel})`, 'success');
+      showToast(
+        `Connected to ${this.currentCatalog.title || this.currentCatalog.id} (${typeLabel})`,
+        'success'
+      );
       log.info('Connected to STAC catalog', {
         catalog: this.currentCatalog.id,
         type: catalogInfo.catalog_type,
@@ -525,7 +528,10 @@ export class StacBrowser {
    * Load children from a static STAC catalog.
    * Identifies sub-catalogs vs collections based on URL patterns.
    */
-  private async loadStaticCatalogChildren(catalogUrl: string, _catalogTitle?: string): Promise<void> {
+  private async loadStaticCatalogChildren(
+    catalogUrl: string,
+    _catalogTitle?: string
+  ): Promise<void> {
     try {
       const children = await invoke<StacChildEntry[]>('get_static_catalog_children', {
         catalogUrl,
@@ -641,7 +647,6 @@ export class StacBrowser {
       // Hide search section
       this.searchSection?.classList.add('hidden');
       this.selectedStaticCollection = null;
-
     } catch (error) {
       log.error('Failed to navigate back', { error: String(error) });
       showError('Navigation failed', error instanceof Error ? error : String(error));
@@ -1154,7 +1159,8 @@ export class StacBrowser {
 
     // Show loading state in results area
     if (this.resultsList) {
-      this.resultsList.innerHTML = '<div class="stac-empty-state">Loading items from catalog...</div>';
+      this.resultsList.innerHTML =
+        '<div class="stac-empty-state">Loading items from catalog...</div>';
     }
     this.resultsSection?.classList.remove('hidden');
 

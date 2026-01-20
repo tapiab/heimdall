@@ -1247,10 +1247,7 @@ describe('StacBrowser', () => {
 
         await stacBrowser.connect();
 
-        expect(showToast).toHaveBeenCalledWith(
-          expect.stringContaining('Static'),
-          'success'
-        );
+        expect(showToast).toHaveBeenCalledWith(expect.stringContaining('Static'), 'success');
       });
     });
 
@@ -1263,14 +1260,10 @@ describe('StacBrowser', () => {
         base_url: 'https://earth-search.aws.element84.com/v1',
       };
 
-      const mockApiCollections = [
-        { id: 'sentinel-2-l2a', title: 'Sentinel-2 L2A' },
-      ];
+      const mockApiCollections = [{ id: 'sentinel-2-l2a', title: 'Sentinel-2 L2A' }];
 
       it('should detect API catalog type', async () => {
-        invoke
-          .mockResolvedValueOnce(mockApiCatalogInfo)
-          .mockResolvedValueOnce(mockApiCollections);
+        invoke.mockResolvedValueOnce(mockApiCatalogInfo).mockResolvedValueOnce(mockApiCollections);
 
         await stacBrowser.connect();
 
@@ -1278,9 +1271,7 @@ describe('StacBrowser', () => {
       });
 
       it('should call list_stac_collections for API catalogs', async () => {
-        invoke
-          .mockResolvedValueOnce(mockApiCatalogInfo)
-          .mockResolvedValueOnce(mockApiCollections);
+        invoke.mockResolvedValueOnce(mockApiCatalogInfo).mockResolvedValueOnce(mockApiCollections);
 
         await stacBrowser.connect();
 
@@ -1290,9 +1281,7 @@ describe('StacBrowser', () => {
       });
 
       it('should populate collections for API catalogs', async () => {
-        invoke
-          .mockResolvedValueOnce(mockApiCatalogInfo)
-          .mockResolvedValueOnce(mockApiCollections);
+        invoke.mockResolvedValueOnce(mockApiCatalogInfo).mockResolvedValueOnce(mockApiCollections);
 
         await stacBrowser.connect();
 
@@ -1324,7 +1313,12 @@ describe('StacBrowser', () => {
     describe('populateStaticCollections', () => {
       const staticEntries = [
         { id: 'collection-1', title: 'Collection One', url: 'https://example.com/c1.json' },
-        { id: 'collection-2', title: 'Collection Two', url: 'https://example.com/c2.json', description: 'Sub-catalog' },
+        {
+          id: 'collection-2',
+          title: 'Collection Two',
+          url: 'https://example.com/c2.json',
+          description: 'Sub-catalog',
+        },
       ];
 
       it('should clear existing options', () => {
@@ -1385,7 +1379,9 @@ describe('StacBrowser', () => {
         stacBrowser.onCollectionChange();
 
         expect(stacBrowser.selectedStaticCollection).not.toBeNull();
-        expect(stacBrowser.selectedStaticCollection.url).toBe('https://example.com/collection.json');
+        expect(stacBrowser.selectedStaticCollection.url).toBe(
+          'https://example.com/collection.json'
+        );
       });
 
       it('should clear selectedCollection for static catalogs', () => {
@@ -1444,10 +1440,7 @@ describe('StacBrowser', () => {
 
         await stacBrowser.search();
 
-        expect(invoke).not.toHaveBeenCalledWith(
-          'search_stac_items',
-          expect.anything()
-        );
+        expect(invoke).not.toHaveBeenCalledWith('search_stac_items', expect.anything());
       });
 
       it('should store browse results', async () => {
