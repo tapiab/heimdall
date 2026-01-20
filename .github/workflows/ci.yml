@@ -166,7 +166,11 @@ jobs:
         with:
           workspaces: src-tauri
       - name: Install GDAL
-        run: brew install gdal
+        run: |
+          brew install gdal
+          GDAL_PREFIX=$(brew --prefix gdal)
+          echo "GDAL_HOME=$GDAL_PREFIX" >> $GITHUB_ENV
+          echo "PKG_CONFIG_PATH=$GDAL_PREFIX/lib/pkgconfig:$PKG_CONFIG_PATH" >> $GITHUB_ENV
       - run: make ci-install
       - run: make ci-build-target TARGET=aarch64-apple-darwin
       - uses: actions/upload-artifact@v4
@@ -196,7 +200,11 @@ jobs:
         with:
           workspaces: src-tauri
       - name: Install GDAL
-        run: brew install gdal
+        run: |
+          brew install gdal
+          GDAL_PREFIX=$(brew --prefix gdal)
+          echo "GDAL_HOME=$GDAL_PREFIX" >> $GITHUB_ENV
+          echo "PKG_CONFIG_PATH=$GDAL_PREFIX/lib/pkgconfig:$PKG_CONFIG_PATH" >> $GITHUB_ENV
       - run: make ci-install
       - run: make ci-build-target TARGET=x86_64-apple-darwin
       - uses: actions/upload-artifact@v4
@@ -229,31 +237,22 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
-      - name: Install GDAL (GISInternals SDK)
+      - name: Install GDAL (vcpkg)
         shell: pwsh
         run: |
-          # Download GDAL SDK from GISInternals (includes .lib files for MSVC)
-          $sdkUrl = "https://download.gisinternals.com/sdk/downloads/release-1930-x64-dev.zip"
-          $sdkZip = "$env:TEMP\gdal-sdk.zip"
-          $sdkDir = "C:\gdal-sdk"
-          
-          Write-Host "Downloading GDAL SDK..."
-          Invoke-WebRequest -Uri $sdkUrl -OutFile $sdkZip -UseBasicParsing
-          
-          Write-Host "Extracting GDAL SDK..."
-          Expand-Archive -Path $sdkZip -DestinationPath $sdkDir -Force
-          
-          # Find the release directory
-          $releaseDir = Get-ChildItem -Path $sdkDir -Directory -Filter "release-*" | Select-Object -First 1
-          
-          # Set environment variables
-          echo "GDAL_HOME=$($releaseDir.FullName)" >> $env:GITHUB_ENV
-          echo "GDAL_LIB_DIR=$($releaseDir.FullName)\lib" >> $env:GITHUB_ENV
-          echo "GDAL_INCLUDE_DIR=$($releaseDir.FullName)\include" >> $env:GITHUB_ENV
-          echo "GDAL_VERSION=3.9.0" >> $env:GITHUB_ENV
-          echo "$($releaseDir.FullName)\bin" >> $env:GITHUB_PATH
-          echo "GDAL_DATA=$($releaseDir.FullName)\bin\gdal-data" >> $env:GITHUB_ENV
-          echo "PROJ_LIB=$($releaseDir.FullName)\bin\proj9\share" >> $env:GITHUB_ENV
+          # Use vcpkg to install GDAL (pre-installed on GitHub runners)
+          Write-Host "Installing GDAL via vcpkg..."
+          vcpkg install gdal:x64-windows
+          vcpkg integrate install
+
+          # Set environment variables for gdal-sys crate
+          $vcpkgRoot = "$env:VCPKG_INSTALLATION_ROOT\installed\x64-windows"
+          echo "GDAL_HOME=$vcpkgRoot" >> $env:GITHUB_ENV
+          echo "GDAL_LIB_DIR=$vcpkgRoot\lib" >> $env:GITHUB_ENV
+          echo "GDAL_INCLUDE_DIR=$vcpkgRoot\include" >> $env:GITHUB_ENV
+          echo "$vcpkgRoot\bin" >> $env:GITHUB_PATH
+          echo "GDAL_DATA=$vcpkgRoot\share\gdal" >> $env:GITHUB_ENV
+          echo "PROJ_DATA=$vcpkgRoot\share\proj" >> $env:GITHUB_ENV
       - name: Install dependencies
         run: npm ci
       - name: Sync version (Windows numeric format)
