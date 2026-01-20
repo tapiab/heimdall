@@ -239,38 +239,54 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
-      - name: Install GDAL (conda)
-        uses: conda-incubator/setup-miniconda@v3
-        with:
-          miniforge-version: latest
-          channels: conda-forge
-          activate-environment: gdal-env
-      - name: Install GDAL packages
+      - name: Install GDAL (GISInternals SDK)
         shell: pwsh
         run: |
-          conda install -y gdal libgdal
+          # Download GDAL SDK from GISInternals with retry
+          $sdkUrl = "https://download.gisinternals.com/sdk/downloads/release-1930-x64-dev.zip"
+          $sdkZip = "$env:TEMP\gdal-sdk.zip"
+          $sdkDir = "C:\gdal-sdk"
 
-          # Find conda environment path
-          $condaEnv = "$env:CONDA\envs\gdal-env"
-          if (-not (Test-Path $condaEnv)) {
-            $condaEnv = "$env:CONDA"
+          $maxRetries = 3
+          $retryCount = 0
+          $success = $false
+
+          while (-not $success -and $retryCount -lt $maxRetries) {
+            try {
+              Write-Host "Downloading GDAL SDK (attempt $($retryCount + 1))..."
+              $ProgressPreference = 'SilentlyContinue'
+              Invoke-WebRequest -Uri $sdkUrl -OutFile $sdkZip -UseBasicParsing -TimeoutSec 300
+              $success = $true
+            } catch {
+              $retryCount++
+              Write-Host "Download failed: $_"
+              if ($retryCount -lt $maxRetries) {
+                Write-Host "Retrying in 10 seconds..."
+                Start-Sleep -Seconds 10
+              }
+            }
           }
 
-          Write-Host "Conda env: $condaEnv"
-          Write-Host "Library contents:"
-          Get-ChildItem "$condaEnv\Library\lib" -Filter "gdal*" | ForEach-Object { Write-Host $_.Name }
-
-          # gdal-sys expects gdal_i.lib - conda-forge provides gdal.lib
-          if (Test-Path "$condaEnv\Library\lib\gdal.lib") {
-            Copy-Item "$condaEnv\Library\lib\gdal.lib" "$condaEnv\Library\lib\gdal_i.lib"
+          if (-not $success) {
+            throw "Failed to download GDAL SDK after $maxRetries attempts"
           }
 
-          echo "GDAL_HOME=$condaEnv\Library" >> $env:GITHUB_ENV
-          echo "GDAL_LIB_DIR=$condaEnv\Library\lib" >> $env:GITHUB_ENV
-          echo "GDAL_INCLUDE_DIR=$condaEnv\Library\include" >> $env:GITHUB_ENV
-          echo "$condaEnv\Library\bin" >> $env:GITHUB_PATH
-          echo "GDAL_DATA=$condaEnv\Library\share\gdal" >> $env:GITHUB_ENV
-          echo "PROJ_DATA=$condaEnv\Library\share\proj" >> $env:GITHUB_ENV
+          Write-Host "Extracting GDAL SDK..."
+          Expand-Archive -Path $sdkZip -DestinationPath $sdkDir -Force
+
+          # Find the release directory
+          $releaseDir = Get-ChildItem -Path $sdkDir -Directory -Filter "release-*" | Select-Object -First 1
+
+          Write-Host "GDAL SDK installed at: $($releaseDir.FullName)"
+
+          # Set environment variables
+          echo "GDAL_HOME=$($releaseDir.FullName)" >> $env:GITHUB_ENV
+          echo "GDAL_LIB_DIR=$($releaseDir.FullName)\lib" >> $env:GITHUB_ENV
+          echo "GDAL_INCLUDE_DIR=$($releaseDir.FullName)\include" >> $env:GITHUB_ENV
+          echo "GDAL_VERSION=3.9.0" >> $env:GITHUB_ENV
+          echo "$($releaseDir.FullName)\bin" >> $env:GITHUB_PATH
+          echo "GDAL_DATA=$($releaseDir.FullName)\bin\gdal-data" >> $env:GITHUB_ENV
+          echo "PROJ_LIB=$($releaseDir.FullName)\bin\proj9\share" >> $env:GITHUB_ENV
       - name: Install dependencies
         run: npm ci
       - name: Sync version (Windows numeric format)
