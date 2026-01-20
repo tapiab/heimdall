@@ -21,11 +21,40 @@ import type {
 
 const log = logger.child('StacBrowser');
 
+/** Catalog type - API with search or static with links */
+type StacCatalogType = 'Api' | 'Static';
+
+/** STAC Link */
+interface StacLink {
+  href: string;
+  rel: string;
+  type?: string;
+  title?: string;
+}
+
 /** STAC Catalog metadata */
 interface StacCatalog {
   id: string;
   title?: string;
   description?: string;
+  links?: StacLink[];
+}
+
+/** Extended catalog info from backend */
+interface StacCatalogInfo {
+  id: string;
+  title?: string;
+  description: string;
+  catalog_type: StacCatalogType;
+  base_url: string;
+  links?: StacLink[];
+}
+
+/** Child entry from static catalog */
+interface StacChildEntry {
+  href: string;
+  title?: string;
+  entry_type?: string;
 }
 
 /** STAC Collection metadata */
@@ -37,6 +66,17 @@ interface StacCollection {
     spatial?: { bbox?: number[][] };
     temporal?: { interval?: Array<[string | null, string | null]> };
   };
+  links?: StacLink[];
+}
+
+/** Extended collection info for static catalogs (includes URL) */
+interface StaticCollectionEntry {
+  id: string;
+  title?: string;
+  description?: string;
+  url: string;
+  /** True if this is a sub-catalog (not a collection) */
+  isCatalog?: boolean;
 }
 
 /** STAC Item */
@@ -119,8 +159,12 @@ export class StacBrowser {
   // State
   private currentCatalogUrl: string | null = null;
   private currentCatalog: StacCatalog | null = null;
+  private catalogType: StacCatalogType = 'Api';
   private collections: StacCollection[] = [];
+  private staticCollections: StaticCollectionEntry[] = []; // For static catalogs
+  private catalogNavHistory: Array<{ url: string; title: string }> = []; // Breadcrumb navigation
   private selectedCollection: StacCollection | null = null;
+  private selectedStaticCollection: StaticCollectionEntry | null = null;
   private searchResults: StacItem[] = [];
   private selectedItem: StacItem | null = null;
   private searchBbox: number[] | null = null;
@@ -162,6 +206,7 @@ export class StacBrowser {
   private clearResultsBtn: HTMLElement | null;
   private toggleFootprintsBtn: HTMLButtonElement | null;
   private footprintsVisible = true;
+  private showAllCheckbox: HTMLInputElement | null;
   private itemDetailSection: HTMLElement | null;
   private itemTitle: HTMLElement | null;
   private itemProperties: HTMLElement | null;
@@ -205,6 +250,7 @@ export class StacBrowser {
     this.toggleFootprintsBtn = document.getElementById(
       'stac-toggle-footprints'
     ) as HTMLButtonElement | null;
+    this.showAllCheckbox = document.getElementById('stac-show-all') as HTMLInputElement | null;
     this.itemDetailSection = document.getElementById('stac-item-detail');
     this.itemTitle = document.getElementById('stac-item-title');
     this.itemProperties = document.getElementById('stac-item-properties');
@@ -285,6 +331,11 @@ export class StacBrowser {
       });
     }
 
+    // Show all checkbox - toggle filter controls visibility
+    if (this.showAllCheckbox) {
+      this.showAllCheckbox.addEventListener('change', () => this.onShowAllChange());
+    }
+
     // Search button
     if (this.searchBtn) {
       this.searchBtn.addEventListener('click', () => this.search());
@@ -303,6 +354,20 @@ export class StacBrowser {
     // Back button in item detail
     if (this.itemBackBtn) {
       this.itemBackBtn.addEventListener('click', () => this.showResultsList());
+    }
+  }
+
+  /**
+   * Handle "Show all" checkbox change - toggle filter controls.
+   */
+  private onShowAllChange(): void {
+    const showAll = this.showAllCheckbox?.checked ?? true;
+
+    // Toggle visibility/state of filter controls
+    const cloudCoverRow = this.cloudCover?.closest('.stac-filter-row');
+
+    if (cloudCoverRow) {
+      (cloudCoverRow as HTMLElement).style.opacity = showAll ? '0.5' : '1';
     }
   }
 
@@ -377,7 +442,7 @@ export class StacBrowser {
   // ============================================
 
   /**
-   * Connect to a STAC API.
+   * Connect to a STAC API or static catalog.
    */
   async connect(): Promise<void> {
     // Get URL from dropdown or custom input
@@ -385,7 +450,7 @@ export class StacBrowser {
     if (this.apiSelect?.value === 'custom') {
       url = this.urlInput?.value?.trim();
       if (!url) {
-        showError('Invalid URL', 'Please enter a STAC API URL');
+        showError('Invalid URL', 'Please enter a STAC catalog URL');
         return;
       }
     } else {
@@ -393,7 +458,7 @@ export class StacBrowser {
     }
 
     if (!url) {
-      showError('Invalid URL', 'Please select a STAC API');
+      showError('Invalid URL', 'Please select a STAC catalog');
       return;
     }
 
@@ -403,31 +468,51 @@ export class StacBrowser {
     }
 
     try {
-      log.info('Connecting to STAC API', { url });
+      log.info('Connecting to STAC catalog', { url });
 
-      // Connect to catalog
-      const catalog = await invoke<StacCatalog>('connect_stac_api', { url });
-      this.currentCatalogUrl = url;
-      this.currentCatalog = catalog;
+      // Connect to catalog - returns extended info with type detection
+      const catalogInfo = await invoke<StacCatalogInfo>('connect_stac_api', { url });
+      this.currentCatalogUrl = catalogInfo.base_url;
+      this.currentCatalog = {
+        id: catalogInfo.id,
+        title: catalogInfo.title,
+        description: catalogInfo.description,
+        links: catalogInfo.links,
+      };
+      this.catalogType = catalogInfo.catalog_type;
 
-      // Show catalog info
-      this.showCatalogInfo(catalog);
+      // Show catalog info with type indicator
+      this.showCatalogInfo(this.currentCatalog, catalogInfo.catalog_type);
 
-      // Fetch collections
-      const collections = await invoke<StacCollection[]>('list_stac_collections', { url });
-      this.collections = collections;
-
-      // Populate collection select
-      this.populateCollections(collections);
+      if (catalogInfo.catalog_type === 'Api') {
+        // STAC API - fetch collections from /collections endpoint
+        const collections = await invoke<StacCollection[]>('list_stac_collections', {
+          url: this.currentCatalogUrl,
+        });
+        this.collections = collections;
+        this.staticCollections = [];
+        this.populateCollections(collections);
+      } else {
+        // Static catalog - extract collections from child links
+        await this.loadStaticCatalogChildren(url);
+      }
 
       // Show collections section
       this.collectionsSection?.classList.remove('hidden');
 
-      showToast(`Connected to ${catalog.title || catalog.id}`, 'success');
-      log.info('Connected to STAC API', { catalog: catalog.id, collections: collections.length });
+      const typeLabel = catalogInfo.catalog_type === 'Api' ? 'API' : 'Static';
+      showToast(
+        `Connected to ${this.currentCatalog.title || this.currentCatalog.id} (${typeLabel})`,
+        'success'
+      );
+      log.info('Connected to STAC catalog', {
+        catalog: this.currentCatalog.id,
+        type: catalogInfo.catalog_type,
+        collections: this.collections.length + this.staticCollections.length,
+      });
     } catch (error) {
       log.error(
-        'Failed to connect to STAC API',
+        'Failed to connect to STAC catalog',
         error instanceof Error ? error : { error: String(error) }
       );
       showError('Connection failed', error instanceof Error ? error : String(error));
@@ -440,13 +525,190 @@ export class StacBrowser {
   }
 
   /**
+   * Load children from a static STAC catalog.
+   * Identifies sub-catalogs vs collections based on URL patterns.
+   */
+  private async loadStaticCatalogChildren(
+    catalogUrl: string,
+    _catalogTitle?: string
+  ): Promise<void> {
+    try {
+      const children = await invoke<StacChildEntry[]>('get_static_catalog_children', {
+        catalogUrl,
+      });
+
+      this.staticCollections = [];
+      this.collections = [];
+
+      for (const child of children) {
+        // Check if it's a collection (ends with collection.json)
+        // Sub-catalogs typically end with catalog.json
+        const isCollection = child.href.includes('collection.json');
+        const isCatalog = child.href.includes('catalog.json') && !isCollection;
+
+        this.staticCollections.push({
+          id: child.title || this.extractIdFromUrl(child.href),
+          title: child.title,
+          description: isCatalog ? '📁 Sub-catalog (click to explore)' : undefined,
+          url: child.href,
+          isCatalog,
+        });
+      }
+
+      // Populate the dropdown with static collection entries
+      this.populateStaticCollections(this.staticCollections);
+
+      // Update breadcrumb display
+      this.updateBreadcrumbDisplay();
+    } catch (error) {
+      log.error('Failed to load static catalog children', { error: String(error) });
+      throw error;
+    }
+  }
+
+  /**
+   * Navigate into a sub-catalog.
+   */
+  private async navigateToSubCatalog(entry: StaticCollectionEntry): Promise<void> {
+    if (!entry.isCatalog) return;
+
+    // Add current location to navigation history
+    if (this.currentCatalogUrl && this.currentCatalog) {
+      this.catalogNavHistory.push({
+        url: this.currentCatalogUrl,
+        title: this.currentCatalog.title || this.currentCatalog.id,
+      });
+    }
+
+    // Update current catalog URL
+    this.currentCatalogUrl = entry.url;
+
+    // Load the sub-catalog's children
+    try {
+      log.info('Navigating to sub-catalog', { url: entry.url });
+      await this.loadStaticCatalogChildren(entry.url, entry.title);
+
+      // Update catalog info display
+      if (this.catalogInfo) {
+        const breadcrumb = this.catalogNavHistory.map(h => h.title).join(' > ');
+        const currentTitle = entry.title || this.extractIdFromUrl(entry.url);
+        this.catalogInfo.innerHTML = `
+          <div class="stac-info-title">${currentTitle} (Static Catalog)</div>
+          ${breadcrumb ? `<div class="stac-breadcrumb">📂 ${breadcrumb} > <strong>${currentTitle}</strong></div>` : ''}
+          <button id="stac-nav-back" class="stac-nav-back-btn" ${this.catalogNavHistory.length === 0 ? 'disabled' : ''}>← Back</button>
+        `;
+
+        // Attach back button handler
+        const backBtn = document.getElementById('stac-nav-back');
+        if (backBtn) {
+          backBtn.addEventListener('click', () => this.navigateBack());
+        }
+      }
+
+      // Hide search section when navigating (no collection selected yet)
+      this.searchSection?.classList.add('hidden');
+      this.selectedStaticCollection = null;
+
+      showToast(`Opened ${entry.title || 'sub-catalog'}`, 'success');
+    } catch (error) {
+      log.error('Failed to navigate to sub-catalog', { error: String(error) });
+      showError('Navigation failed', error instanceof Error ? error : String(error));
+    }
+  }
+
+  /**
+   * Navigate back to the parent catalog.
+   */
+  private async navigateBack(): Promise<void> {
+    if (this.catalogNavHistory.length === 0) return;
+
+    const parent = this.catalogNavHistory.pop()!;
+    this.currentCatalogUrl = parent.url;
+
+    try {
+      await this.loadStaticCatalogChildren(parent.url, parent.title);
+
+      // Update catalog info display
+      if (this.catalogInfo) {
+        const breadcrumb = this.catalogNavHistory.map(h => h.title).join(' > ');
+        this.catalogInfo.innerHTML = `
+          <div class="stac-info-title">${parent.title} (Static Catalog)</div>
+          ${breadcrumb ? `<div class="stac-breadcrumb">📂 ${breadcrumb} > <strong>${parent.title}</strong></div>` : ''}
+          <button id="stac-nav-back" class="stac-nav-back-btn" ${this.catalogNavHistory.length === 0 ? 'disabled' : ''}>← Back</button>
+        `;
+
+        // Attach back button handler
+        const backBtn = document.getElementById('stac-nav-back');
+        if (backBtn) {
+          backBtn.addEventListener('click', () => this.navigateBack());
+        }
+      }
+
+      // Hide search section
+      this.searchSection?.classList.add('hidden');
+      this.selectedStaticCollection = null;
+    } catch (error) {
+      log.error('Failed to navigate back', { error: String(error) });
+      showError('Navigation failed', error instanceof Error ? error : String(error));
+    }
+  }
+
+  /**
+   * Update the breadcrumb display in catalog info.
+   */
+  private updateBreadcrumbDisplay(): void {
+    if (!this.catalogInfo || this.catalogNavHistory.length === 0) return;
+
+    // Find or create breadcrumb element
+    let breadcrumbEl = this.catalogInfo.querySelector('.stac-breadcrumb');
+    if (!breadcrumbEl) {
+      breadcrumbEl = document.createElement('div');
+      breadcrumbEl.className = 'stac-breadcrumb';
+      this.catalogInfo.appendChild(breadcrumbEl);
+    }
+
+    const breadcrumb = this.catalogNavHistory.map(h => h.title).join(' > ');
+    breadcrumbEl.innerHTML = breadcrumb ? `📂 ${breadcrumb}` : '';
+  }
+
+  /**
+   * Extract an ID from a URL (last path segment without extension).
+   */
+  private extractIdFromUrl(url: string): string {
+    const parts = url.split('/');
+    const lastPart = parts[parts.length - 1] || parts[parts.length - 2];
+    return lastPart.replace(/\.(json|geojson)$/i, '');
+  }
+
+  /**
+   * Populate dropdown with static collection entries.
+   */
+  private populateStaticCollections(entries: StaticCollectionEntry[]): void {
+    if (!this.collectionSelect) return;
+
+    this.collectionSelect.innerHTML = '<option value="">Select a collection...</option>';
+
+    entries.forEach(entry => {
+      const option = document.createElement('option');
+      option.value = entry.url; // Use URL as value for static collections
+      option.textContent = entry.title || entry.id;
+      if (entry.description) {
+        option.title = entry.description;
+      }
+      this.collectionSelect!.appendChild(option);
+    });
+  }
+
+  /**
    * Display catalog information.
    */
-  private showCatalogInfo(catalog: StacCatalog): void {
+  private showCatalogInfo(catalog: StacCatalog, catalogType?: StacCatalogType): void {
     if (!this.catalogInfo) return;
 
+    const typeLabel = catalogType === 'Static' ? ' (Static Catalog)' : '';
+
     this.catalogInfo.innerHTML = `
-      <div class="stac-info-title">${catalog.title || catalog.id}</div>
+      <div class="stac-info-title">${catalog.title || catalog.id}${typeLabel}</div>
       <div class="stac-info-desc">${catalog.description || ''}</div>
     `;
     this.catalogInfo.classList.remove('hidden');
@@ -474,30 +736,62 @@ export class StacBrowser {
    * Handle collection selection change.
    */
   private onCollectionChange(): void {
-    const collectionId = this.collectionSelect?.value;
-    if (!collectionId) {
+    const selectedValue = this.collectionSelect?.value;
+    console.log('[STAC] onCollectionChange:', selectedValue);
+    console.log('[STAC] catalogType:', this.catalogType);
+    console.log('[STAC] staticCollections:', this.staticCollections);
+
+    if (!selectedValue) {
       this.selectedCollection = null;
+      this.selectedStaticCollection = null;
       this.searchSection?.classList.add('hidden');
       if (this.collectionInfo) this.collectionInfo.innerHTML = '';
       return;
     }
 
-    // Find collection
-    this.selectedCollection = this.collections.find(c => c.id === collectionId) || null;
+    if (this.catalogType === 'Static') {
+      // For static catalogs, the value is a URL
+      const selectedEntry = this.staticCollections.find(c => c.url === selectedValue);
+      console.log('[STAC] selectedEntry:', selectedEntry);
 
-    // Show collection info
-    if (this.selectedCollection && this.collectionInfo) {
-      const extent = this.selectedCollection.extent;
-      let info = `<div class="stac-info-desc">${this.selectedCollection.description || ''}</div>`;
-
-      if (extent?.temporal?.interval?.[0]) {
-        const [start, end] = extent.temporal.interval[0];
-        info += `<div style="margin-top: 6px; font-size: 11px; color: #666;">
-          Temporal: ${start || 'ongoing'} - ${end || 'ongoing'}
-        </div>`;
+      if (selectedEntry?.isCatalog) {
+        // This is a sub-catalog - navigate into it
+        this.navigateToSubCatalog(selectedEntry);
+        // Reset the dropdown selection since we're navigating
+        if (this.collectionSelect) {
+          this.collectionSelect.value = '';
+        }
+        return;
       }
 
-      this.collectionInfo.innerHTML = info;
+      this.selectedStaticCollection = selectedEntry || null;
+      this.selectedCollection = null;
+
+      // Show collection info for static collection
+      if (this.selectedStaticCollection && this.collectionInfo) {
+        this.collectionInfo.innerHTML = `
+          <div class="stac-info-desc">${this.selectedStaticCollection.description || 'Static collection'}</div>
+        `;
+      }
+    } else {
+      // For API catalogs, the value is a collection ID
+      this.selectedCollection = this.collections.find(c => c.id === selectedValue) || null;
+      this.selectedStaticCollection = null;
+
+      // Show collection info
+      if (this.selectedCollection && this.collectionInfo) {
+        const extent = this.selectedCollection.extent;
+        let info = `<div class="stac-info-desc">${this.selectedCollection.description || ''}</div>`;
+
+        if (extent?.temporal?.interval?.[0]) {
+          const [start, end] = extent.temporal.interval[0];
+          info += `<div style="margin-top: 6px; font-size: 11px; color: #666;">
+            Temporal: ${start || 'ongoing'} - ${end || 'ongoing'}
+          </div>`;
+        }
+
+        this.collectionInfo.innerHTML = info;
+      }
     }
 
     // Show search section
@@ -835,64 +1129,109 @@ export class StacBrowser {
   // ============================================
 
   /**
-   * Search for STAC items.
+   * Search for STAC items (or browse for static catalogs).
    */
   async search(): Promise<void> {
+    console.log('[STAC] search() called');
+    console.log('[STAC] currentCatalogUrl:', this.currentCatalogUrl);
+    console.log('[STAC] catalogType:', this.catalogType);
+    console.log('[STAC] selectedStaticCollection:', this.selectedStaticCollection);
+    console.log('[STAC] selectedCollection:', this.selectedCollection);
+
     if (!this.currentCatalogUrl) {
-      showError('Not connected', 'Please connect to a STAC API first');
+      showError('Not connected', 'Please connect to a STAC catalog first');
       return;
     }
 
-    if (!this.selectedCollection) {
-      showError('No collection selected', 'Please select a collection to search');
+    // Check if we have a valid collection selected
+    const hasApiCollection = this.catalogType === 'Api' && this.selectedCollection;
+    const hasStaticCollection = this.catalogType === 'Static' && this.selectedStaticCollection;
+
+    if (!hasApiCollection && !hasStaticCollection) {
+      showError('No collection selected', 'Please select a collection to browse');
       return;
-    }
-
-    // Build search params
-    const params: StacSearchParams = {
-      collections: [this.selectedCollection.id],
-      limit: parseInt(this.limitSelect?.value || '20', 10),
-    };
-
-    // Add bbox if set
-    if (this.searchBbox) {
-      params.bbox = this.searchBbox;
-    }
-
-    // Add datetime range - only if at least one date is set
-    const startDate = this.dateStart?.value;
-    const endDate = this.dateEnd?.value;
-    if (startDate && endDate) {
-      params.datetime = `${startDate}T00:00:00Z/${endDate}T23:59:59Z`;
-    } else if (startDate) {
-      params.datetime = `${startDate}T00:00:00Z/..`;
-    } else if (endDate) {
-      params.datetime = `../${endDate}T23:59:59Z`;
     }
 
     if (this.searchBtn) {
       this.searchBtn.disabled = true;
-      this.searchBtn.textContent = 'Searching...';
+      this.searchBtn.textContent = this.catalogType === 'Static' ? 'Browsing...' : 'Searching...';
     }
 
-    try {
-      log.info('Searching STAC items', { params });
-      console.log('STAC search params:', JSON.stringify(params, null, 2));
+    // Show loading state in results area
+    if (this.resultsList) {
+      this.resultsList.innerHTML =
+        '<div class="stac-empty-state">Loading items from catalog...</div>';
+    }
+    this.resultsSection?.classList.remove('hidden');
 
-      const result = await invoke<StacSearchResult>('search_stac_items', {
-        url: this.currentCatalogUrl,
-        params,
+    try {
+      let result: StacSearchResult;
+
+      if (this.catalogType === 'Static' && this.selectedStaticCollection) {
+        // Static catalog - browse collection by following links
+        const collectionUrl = this.selectedStaticCollection.url;
+        const limit = parseInt(this.limitSelect?.value || '20', 10);
+        log.info('Browsing static collection', { url: collectionUrl, limit });
+        console.log('[STAC] Browsing static collection:', collectionUrl, 'limit:', limit);
+
+        result = await invoke<StacSearchResult>('browse_static_collection', {
+          collectionUrl,
+          limit,
+        });
+        console.log('[STAC] Browse result:', JSON.stringify(result, null, 2));
+      } else if (this.selectedCollection) {
+        // STAC API - use search endpoint
+        const params: StacSearchParams = {
+          collections: [this.selectedCollection.id],
+          limit: parseInt(this.limitSelect?.value || '20', 10),
+        };
+
+        // Add bbox if set
+        if (this.searchBbox) {
+          params.bbox = this.searchBbox;
+        }
+
+        // Add datetime range - only if at least one date is set
+        const startDate = this.dateStart?.value;
+        const endDate = this.dateEnd?.value;
+        if (startDate && endDate) {
+          params.datetime = `${startDate}T00:00:00Z/${endDate}T23:59:59Z`;
+        } else if (startDate) {
+          params.datetime = `${startDate}T00:00:00Z/..`;
+        } else if (endDate) {
+          params.datetime = `../${endDate}T23:59:59Z`;
+        }
+
+        log.info('Searching STAC items', { params });
+        console.log('STAC search params:', JSON.stringify(params, null, 2));
+
+        result = await invoke<StacSearchResult>('search_stac_items', {
+          url: this.currentCatalogUrl,
+          params,
+        });
+      } else {
+        throw new Error('No collection selected');
+      }
+
+      const rawResults = result.features || [];
+      const totalBeforeFilter = rawResults.length;
+
+      // Apply client-side filters (if not "show all")
+      this.searchResults = this.applyClientSideFilters(rawResults);
+
+      const filtered = totalBeforeFilter - this.searchResults.length;
+      log.info('Search completed', {
+        total: totalBeforeFilter,
+        filtered,
+        showing: this.searchResults.length,
       });
 
-      this.searchResults = result.features || [];
-
-      // Show results
-      this.renderResults(this.searchResults, result.number_matched || result.context?.matched);
+      // Show results (show total matched if available, otherwise total fetched)
+      const totalMatched = result.number_matched || result.context?.matched || totalBeforeFilter;
+      this.renderResults(this.searchResults, totalMatched, filtered);
 
       // Display footprints on map
       this.displayFootprints(this.searchResults);
-
-      log.info('Search completed', { count: this.searchResults.length });
     } catch (error) {
       log.error('Search failed', error instanceof Error ? error : { error: String(error) });
       console.error('STAC search error details:', error);
@@ -906,9 +1245,49 @@ export class StacBrowser {
   }
 
   /**
+   * Apply client-side filters (cloud cover, date) to search results.
+   * Skipped if "Show all" is checked.
+   */
+  private applyClientSideFilters(items: StacItem[]): StacItem[] {
+    const showAll = this.showAllCheckbox?.checked ?? true;
+
+    if (showAll) {
+      return items;
+    }
+
+    const maxCloudCover = parseInt(this.cloudCover?.value || '100', 10);
+    const startDate = this.dateStart?.value ? new Date(this.dateStart.value) : null;
+    const endDate = this.dateEnd?.value ? new Date(this.dateEnd.value + 'T23:59:59') : null;
+
+    return items.filter(item => {
+      // Cloud cover filter
+      const cloudCover = item.properties?.cloud_cover;
+      if (cloudCover !== undefined && cloudCover > maxCloudCover) {
+        return false;
+      }
+
+      // Date filter (for static catalogs that don't support server-side filtering)
+      if (this.catalogType === 'Static') {
+        const datetime = item.properties?.datetime;
+        if (datetime) {
+          const itemDate = new Date(datetime);
+          if (startDate && itemDate < startDate) {
+            return false;
+          }
+          if (endDate && itemDate > endDate) {
+            return false;
+          }
+        }
+      }
+
+      return true;
+    });
+  }
+
+  /**
    * Render search results.
    */
-  private renderResults(items: StacItem[], totalMatched?: number): void {
+  private renderResults(items: StacItem[], totalMatched?: number, filteredCount?: number): void {
     if (!this.resultsList) return;
 
     // Show results section
@@ -917,13 +1296,23 @@ export class StacBrowser {
 
     // Update count
     if (this.resultsCount) {
-      const countText = totalMatched ? `(${items.length} of ${totalMatched})` : `(${items.length})`;
+      let countText = `(${items.length})`;
+      if (totalMatched && totalMatched !== items.length) {
+        countText = `(${items.length} of ${totalMatched})`;
+      }
+      if (filteredCount && filteredCount > 0) {
+        countText += ` - ${filteredCount} filtered`;
+      }
       this.resultsCount.textContent = countText;
     }
 
     // Render items
     if (items.length === 0) {
-      this.resultsList.innerHTML = '<div class="stac-empty-state">No items found</div>';
+      const showAll = this.showAllCheckbox?.checked ?? true;
+      const hint = showAll
+        ? 'Try increasing the results limit or check if the collection has items.'
+        : 'Try checking "Show all" to see unfiltered results.';
+      this.resultsList.innerHTML = `<div class="stac-empty-state">No items found<br><small style="color:#666">${hint}</small></div>`;
       return;
     }
 
@@ -1158,14 +1547,18 @@ export class StacBrowser {
   }
 
   /**
-   * Reset all state when changing STAC API.
+   * Reset all state when changing STAC catalog.
    */
   private resetState(): void {
     // Clear catalog state
     this.currentCatalogUrl = null;
     this.currentCatalog = null;
+    this.catalogType = 'Api';
     this.collections = [];
+    this.staticCollections = [];
+    this.catalogNavHistory = [];
     this.selectedCollection = null;
+    this.selectedStaticCollection = null;
 
     // Clear search results
     this.clearResults();
@@ -1412,6 +1805,10 @@ export class StacBrowser {
 
       // Call backend to open via /vsicurl/
       const metadata = await invoke<RasterMetadata>('open_stac_asset', { assetHref });
+
+      console.log('[STAC] Got metadata:', JSON.stringify(metadata, null, 2));
+      console.log('[STAC] Bounds:', metadata.bounds);
+      console.log('[STAC] is_georeferenced:', metadata.is_georeferenced);
 
       // Add to layer manager using existing infrastructure
       await this.addAssetToMap(metadata, item, assetKey, assetTitle);

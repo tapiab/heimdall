@@ -166,9 +166,14 @@ jobs:
         with:
           workspaces: src-tauri
       - name: Install GDAL
-        run: brew install gdal
+        run: |
+          brew install gdal
+          GDAL_PREFIX=$(brew --prefix gdal)
+          echo "GDAL_HOME=$GDAL_PREFIX" >> $GITHUB_ENV
+          echo "PKG_CONFIG_PATH=$GDAL_PREFIX/lib/pkgconfig:$PKG_CONFIG_PATH" >> $GITHUB_ENV
       - run: make ci-install
-      - run: make ci-build-target TARGET=aarch64-apple-darwin
+      - name: Build
+        run: npm run tauri:build -- --target aarch64-apple-darwin --verbose
       - uses: actions/upload-artifact@v4
         with:
           name: macos-arm64
@@ -196,9 +201,14 @@ jobs:
         with:
           workspaces: src-tauri
       - name: Install GDAL
-        run: brew install gdal
+        run: |
+          brew install gdal
+          GDAL_PREFIX=$(brew --prefix gdal)
+          echo "GDAL_HOME=$GDAL_PREFIX" >> $GITHUB_ENV
+          echo "PKG_CONFIG_PATH=$GDAL_PREFIX/lib/pkgconfig:$PKG_CONFIG_PATH" >> $GITHUB_ENV
       - run: make ci-install
-      - run: make ci-build-target TARGET=x86_64-apple-darwin
+      - name: Build
+        run: npm run tauri:build -- --target x86_64-apple-darwin --verbose
       - uses: actions/upload-artifact@v4
         with:
           name: macos-x86_64
@@ -232,20 +242,43 @@ jobs:
       - name: Install GDAL (GISInternals SDK)
         shell: pwsh
         run: |
-          # Download GDAL SDK from GISInternals (includes .lib files for MSVC)
+          # Download GDAL SDK from GISInternals with retry
           $sdkUrl = "https://download.gisinternals.com/sdk/downloads/release-1930-x64-dev.zip"
           $sdkZip = "$env:TEMP\gdal-sdk.zip"
           $sdkDir = "C:\gdal-sdk"
-          
-          Write-Host "Downloading GDAL SDK..."
-          Invoke-WebRequest -Uri $sdkUrl -OutFile $sdkZip -UseBasicParsing
-          
+
+          $maxRetries = 3
+          $retryCount = 0
+          $success = $false
+
+          while (-not $success -and $retryCount -lt $maxRetries) {
+            try {
+              Write-Host "Downloading GDAL SDK (attempt $($retryCount + 1))..."
+              $ProgressPreference = 'SilentlyContinue'
+              Invoke-WebRequest -Uri $sdkUrl -OutFile $sdkZip -UseBasicParsing -TimeoutSec 300
+              $success = $true
+            } catch {
+              $retryCount++
+              Write-Host "Download failed: $_"
+              if ($retryCount -lt $maxRetries) {
+                Write-Host "Retrying in 10 seconds..."
+                Start-Sleep -Seconds 10
+              }
+            }
+          }
+
+          if (-not $success) {
+            throw "Failed to download GDAL SDK after $maxRetries attempts"
+          }
+
           Write-Host "Extracting GDAL SDK..."
           Expand-Archive -Path $sdkZip -DestinationPath $sdkDir -Force
-          
+
           # Find the release directory
           $releaseDir = Get-ChildItem -Path $sdkDir -Directory -Filter "release-*" | Select-Object -First 1
-          
+
+          Write-Host "GDAL SDK installed at: $($releaseDir.FullName)"
+
           # Set environment variables
           echo "GDAL_HOME=$($releaseDir.FullName)" >> $env:GITHUB_ENV
           echo "GDAL_LIB_DIR=$($releaseDir.FullName)\lib" >> $env:GITHUB_ENV

@@ -63,10 +63,51 @@ export interface VectorLayerData {
 }
 
 // STAC types
+
+/** Catalog type - API with search or static with links */
+export type StacCatalogType = 'Api' | 'Static';
+
+/** STAC Catalog metadata */
+export interface StacCatalog {
+  id: string;
+  title?: string;
+  description: string;
+  type: string;
+  stac_version?: string;
+  conformsTo?: string[];
+  links?: StacLink[];
+}
+
+/** Extended catalog info returned from connect */
+export interface StacCatalogInfo {
+  id: string;
+  title?: string;
+  description: string;
+  catalog_type: StacCatalogType;
+  base_url: string;
+  links?: StacLink[];
+}
+
+/** STAC Link */
+export interface StacLink {
+  href: string;
+  rel: string;
+  type?: string;
+  title?: string;
+}
+
+/** Child entry from a static catalog */
+export interface StacChildEntry {
+  href: string;
+  title?: string;
+  entry_type?: string;
+}
+
 export interface StacCollection {
   id: string;
   title?: string;
   description?: string;
+  links?: StacLink[];
 }
 
 export interface StacAsset {

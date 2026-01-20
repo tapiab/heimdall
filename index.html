@@ -197,9 +197,16 @@
             <div class="stac-filter-row">
               <label for="stac-cloud-cover">Max Cloud Cover:</label>
               <div class="stac-slider-row">
-                <input type="range" id="stac-cloud-cover" min="0" max="100" value="20">
-                <span id="stac-cloud-value">20%</span>
+                <input type="range" id="stac-cloud-cover" min="0" max="100" value="100">
+                <span id="stac-cloud-value">100%</span>
               </div>
+            </div>
+
+            <div class="stac-filter-row stac-checkbox-row">
+              <label>
+                <input type="checkbox" id="stac-show-all" checked>
+                Show all (ignore filters)
+              </label>
             </div>
 
             <div class="stac-filter-row">
