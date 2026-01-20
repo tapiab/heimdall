@@ -237,22 +237,38 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
-      - name: Install GDAL (vcpkg)
+      - name: Install GDAL (conda)
+        uses: conda-incubator/setup-miniconda@v3
+        with:
+          miniforge-version: latest
+          channels: conda-forge
+          activate-environment: gdal-env
+      - name: Install GDAL packages
         shell: pwsh
         run: |
-          # Use vcpkg to install GDAL (pre-installed on GitHub runners)
-          Write-Host "Installing GDAL via vcpkg..."
-          vcpkg install gdal:x64-windows
-          vcpkg integrate install
+          conda install -y gdal libgdal
 
-          # Set environment variables for gdal-sys crate
-          $vcpkgRoot = "$env:VCPKG_INSTALLATION_ROOT\installed\x64-windows"
-          echo "GDAL_HOME=$vcpkgRoot" >> $env:GITHUB_ENV
-          echo "GDAL_LIB_DIR=$vcpkgRoot\lib" >> $env:GITHUB_ENV
-          echo "GDAL_INCLUDE_DIR=$vcpkgRoot\include" >> $env:GITHUB_ENV
-          echo "$vcpkgRoot\bin" >> $env:GITHUB_PATH
-          echo "GDAL_DATA=$vcpkgRoot\share\gdal" >> $env:GITHUB_ENV
-          echo "PROJ_DATA=$vcpkgRoot\share\proj" >> $env:GITHUB_ENV
+          # Find conda environment path
+          $condaEnv = "$env:CONDA\envs\gdal-env"
+          if (-not (Test-Path $condaEnv)) {
+            $condaEnv = "$env:CONDA"
+          }
+
+          Write-Host "Conda env: $condaEnv"
+          Write-Host "Library contents:"
+          Get-ChildItem "$condaEnv\Library\lib" -Filter "gdal*" | ForEach-Object { Write-Host $_.Name }
+
+          # gdal-sys expects gdal_i.lib - conda-forge provides gdal.lib
+          if (Test-Path "$condaEnv\Library\lib\gdal.lib") {
+            Copy-Item "$condaEnv\Library\lib\gdal.lib" "$condaEnv\Library\lib\gdal_i.lib"
+          }
+
+          echo "GDAL_HOME=$condaEnv\Library" >> $env:GITHUB_ENV
+          echo "GDAL_LIB_DIR=$condaEnv\Library\lib" >> $env:GITHUB_ENV
+          echo "GDAL_INCLUDE_DIR=$condaEnv\Library\include" >> $env:GITHUB_ENV
+          echo "$condaEnv\Library\bin" >> $env:GITHUB_PATH
+          echo "GDAL_DATA=$condaEnv\Library\share\gdal" >> $env:GITHUB_ENV
+          echo "PROJ_DATA=$condaEnv\Library\share\proj" >> $env:GITHUB_ENV
       - name: Install dependencies
         run: npm ci
       - name: Sync version (Windows numeric format)
