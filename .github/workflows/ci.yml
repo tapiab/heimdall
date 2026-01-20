@@ -172,7 +172,8 @@ jobs:
           echo "GDAL_HOME=$GDAL_PREFIX" >> $GITHUB_ENV
           echo "PKG_CONFIG_PATH=$GDAL_PREFIX/lib/pkgconfig:$PKG_CONFIG_PATH" >> $GITHUB_ENV
       - run: make ci-install
-      - run: make ci-build-target TARGET=aarch64-apple-darwin
+      - name: Build
+        run: npm run tauri:build -- --target aarch64-apple-darwin --verbose
       - uses: actions/upload-artifact@v4
         with:
           name: macos-arm64
@@ -206,7 +207,8 @@ jobs:
           echo "GDAL_HOME=$GDAL_PREFIX" >> $GITHUB_ENV
           echo "PKG_CONFIG_PATH=$GDAL_PREFIX/lib/pkgconfig:$PKG_CONFIG_PATH" >> $GITHUB_ENV
       - run: make ci-install
-      - run: make ci-build-target TARGET=x86_64-apple-darwin
+      - name: Build
+        run: npm run tauri:build -- --target x86_64-apple-darwin --verbose
       - uses: actions/upload-artifact@v4
         with:
           name: macos-x86_64
