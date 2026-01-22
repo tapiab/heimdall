@@ -647,8 +647,8 @@ export class MapManager {
   private handleTerrainError(e: MapErrorEvent): void {
     // Check if error is related to terrain tiles
     try {
-      const sourceId = (e as unknown as { sourceId?: string }).sourceId;
-      const source = (e as unknown as { source?: { id?: string } }).source;
+      const {sourceId} = (e as unknown as { sourceId?: string });
+      const {source} = (e as unknown as { source?: { id?: string } });
 
       if (sourceId === 'terrain-dem' || source?.id === 'terrain-dem') {
         log.warn('Terrain tile loading failed', {

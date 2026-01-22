@@ -115,8 +115,20 @@ function addAllVectorLayers(
   sourceId: string,
   style: VectorStyle
 ): void {
+  const map = manager.mapManager.map;
+  if (!map) {
+    log.error('Map not available when adding vector layers');
+    return;
+  }
+
+  // Check if source was added
+  if (!map.getSource(sourceId)) {
+    log.error('Source not found', { sourceId });
+    return;
+  }
+
   // Add fill layer for polygons
-  manager.mapManager.addLayer({
+  map.addLayer({
     id: `vector-fill-${id}`,
     type: 'fill',
     source: sourceId,
@@ -126,8 +138,9 @@ function addAllVectorLayers(
       'fill-opacity': style.fillOpacity,
     },
   });
+
   // Add line layer for lines and polygon outlines
-  manager.mapManager.addLayer({
+  map.addLayer({
     id: `vector-line-${id}`,
     type: 'line',
     source: sourceId,
@@ -137,8 +150,9 @@ function addAllVectorLayers(
       'line-width': style.strokeWidth,
     },
   });
+
   // Add circle layer for points
-  manager.mapManager.addLayer({
+  map.addLayer({
     id: `vector-circle-${id}`,
     type: 'circle',
     source: sourceId,
@@ -149,6 +163,12 @@ function addAllVectorLayers(
       'circle-stroke-color': style.strokeColor,
       'circle-stroke-width': 1,
     },
+  });
+
+  log.debug('Added vector layers', {
+    fill: map.getLayer(`vector-fill-${id}`) ? 'ok' : 'missing',
+    line: map.getLayer(`vector-line-${id}`) ? 'ok' : 'missing',
+    circle: map.getLayer(`vector-circle-${id}`) ? 'ok' : 'missing',
   });
 }
 

@@ -780,7 +780,7 @@ export class StacBrowser {
 
       // Show collection info
       if (this.selectedCollection && this.collectionInfo) {
-        const extent = this.selectedCollection.extent;
+        const {extent} = this.selectedCollection;
         let info = `<div class="stac-info-desc">${this.selectedCollection.description || ''}</div>`;
 
         if (extent?.temporal?.interval?.[0]) {
@@ -1257,7 +1257,7 @@ export class StacBrowser {
 
     const maxCloudCover = parseInt(this.cloudCover?.value || '100', 10);
     const startDate = this.dateStart?.value ? new Date(this.dateStart.value) : null;
-    const endDate = this.dateEnd?.value ? new Date(this.dateEnd.value + 'T23:59:59') : null;
+    const endDate = this.dateEnd?.value ? new Date(`${this.dateEnd.value  }T23:59:59`) : null;
 
     return items.filter(item => {
       // Cloud cover filter
@@ -1339,7 +1339,7 @@ export class StacBrowser {
     // Add click handlers
     this.resultsList.querySelectorAll('.stac-result-item').forEach(el => {
       el.addEventListener('click', () => {
-        const itemId = (el as HTMLElement).dataset.itemId;
+        const {itemId} = (el as HTMLElement).dataset;
         if (itemId) this.selectItem(itemId);
       });
     });
@@ -1512,7 +1512,7 @@ export class StacBrowser {
     this.assetList.querySelectorAll('.stac-asset-load-btn').forEach(btn => {
       btn.addEventListener('click', e => {
         e.stopPropagation();
-        const assetKey = (btn as HTMLElement).dataset.assetKey;
+        const {assetKey} = (btn as HTMLElement).dataset;
         if (assetKey) this.loadAsset(item, assetKey);
       });
     });
@@ -1876,7 +1876,7 @@ export class StacBrowser {
     this.layerManager.setupTileProtocol(protocolName, metadata.id, layerData);
 
     // Add to map
-    const map = this.mapManager.map;
+    const {map} = this.mapManager;
     if (!map) {
       throw new Error('Map not initialized');
     }
