@@ -202,7 +202,7 @@ export function setupCompositionTileProtocol(
         throw new Error('Composition layer not found');
       }
 
-      const sourceLayerId = layer.sourceLayerId;
+      const { sourceLayerId } = layer;
 
       try {
         // Always use RGB mode for composition layers

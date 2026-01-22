@@ -80,23 +80,9 @@ export async function addVectorLayer(
       data: geojson,
     });
 
-    // Determine what layer types to add based on geometry
-    const geomType = metadata.geometry_type.toLowerCase();
-
-    // For unknown/mixed geometry types, add all layer types
-    if (geomType.includes('unknown') || geomType === '') {
-      addAllVectorLayers(manager, metadata.id, sourceId, layerData.style);
-    } else if (geomType.includes('polygon') || geomType.includes('multipolygon')) {
-      addPolygonLayers(manager, metadata.id, sourceId, layerData.style);
-    } else if (geomType.includes('line') || geomType.includes('multiline')) {
-      addLineLayers(manager, metadata.id, sourceId, layerData.style);
-    } else if (geomType.includes('point') || geomType.includes('multipoint')) {
-      addPointLayers(manager, metadata.id, sourceId, layerData.style);
-    } else {
-      // Unknown geometry - add both fill and line as fallback
-      addPolygonLayers(manager, metadata.id, sourceId, layerData.style);
-      addPointLayers(manager, metadata.id, sourceId, layerData.style);
-    }
+    // Always add all layer types with geometry filters
+    // This handles mixed geometry GeoJSON properly
+    addAllVectorLayers(manager, metadata.id, sourceId, layerData.style);
 
     // Select this layer for controls
     manager.selectedLayerId = metadata.id;
@@ -129,8 +115,20 @@ function addAllVectorLayers(
   sourceId: string,
   style: VectorStyle
 ): void {
+  const map = manager.mapManager.map;
+  if (!map) {
+    log.error('Map not available when adding vector layers');
+    return;
+  }
+
+  // Check if source was added
+  if (!map.getSource(sourceId)) {
+    log.error('Source not found', { sourceId });
+    return;
+  }
+
   // Add fill layer for polygons
-  manager.mapManager.addLayer({
+  map.addLayer({
     id: `vector-fill-${id}`,
     type: 'fill',
     source: sourceId,
@@ -140,8 +138,9 @@ function addAllVectorLayers(
       'fill-opacity': style.fillOpacity,
     },
   });
+
   // Add line layer for lines and polygon outlines
-  manager.mapManager.addLayer({
+  map.addLayer({
     id: `vector-line-${id}`,
     type: 'line',
     source: sourceId,
@@ -151,8 +150,9 @@ function addAllVectorLayers(
       'line-width': style.strokeWidth,
     },
   });
+
   // Add circle layer for points
-  manager.mapManager.addLayer({
+  map.addLayer({
     id: `vector-circle-${id}`,
     type: 'circle',
     source: sourceId,
@@ -164,70 +164,11 @@ function addAllVectorLayers(
       'circle-stroke-width': 1,
     },
   });
-}
 
-/** Add polygon layers */
-function addPolygonLayers(
-  manager: LayerManagerInterface,
-  id: string,
-  sourceId: string,
-  style: VectorStyle
-): void {
-  manager.mapManager.addLayer({
-    id: `vector-fill-${id}`,
-    type: 'fill',
-    source: sourceId,
-    paint: {
-      'fill-color': style.fillColor,
-      'fill-opacity': style.fillOpacity,
-    },
-  });
-  manager.mapManager.addLayer({
-    id: `vector-line-${id}`,
-    type: 'line',
-    source: sourceId,
-    paint: {
-      'line-color': style.strokeColor,
-      'line-width': style.strokeWidth,
-    },
-  });
-}
-
-/** Add line layers */
-function addLineLayers(
-  manager: LayerManagerInterface,
-  id: string,
-  sourceId: string,
-  style: VectorStyle
-): void {
-  manager.mapManager.addLayer({
-    id: `vector-line-${id}`,
-    type: 'line',
-    source: sourceId,
-    paint: {
-      'line-color': style.strokeColor,
-      'line-width': style.strokeWidth,
-    },
-  });
-}
-
-/** Add point layers */
-function addPointLayers(
-  manager: LayerManagerInterface,
-  id: string,
-  sourceId: string,
-  style: VectorStyle
-): void {
-  manager.mapManager.addLayer({
-    id: `vector-circle-${id}`,
-    type: 'circle',
-    source: sourceId,
-    paint: {
-      'circle-color': style.fillColor,
-      'circle-radius': style.pointRadius,
-      'circle-stroke-color': style.strokeColor,
-      'circle-stroke-width': 1,
-    },
+  log.debug('Added vector layers', {
+    fill: map.getLayer(`vector-fill-${id}`) ? 'ok' : 'missing',
+    line: map.getLayer(`vector-line-${id}`) ? 'ok' : 'missing',
+    circle: map.getLayer(`vector-circle-${id}`) ? 'ok' : 'missing',
   });
 }
 

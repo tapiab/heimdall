@@ -326,7 +326,7 @@ export function setupUI(
     basemapSelect.value = mapManager.getBasemap();
     basemapSelect.addEventListener('change', e => {
       const target = e.target as HTMLSelectElement;
-      const value = target.value;
+      const { value } = target;
       // Check if custom basemap is selected but not configured
       if (value === 'custom' && !mapManager.hasCustomBasemap()) {
         showToast('Configure a custom basemap URL first', 'error');

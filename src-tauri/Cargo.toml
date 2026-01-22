@@ -1,13 +1,13 @@
 [package]
 name = "heimdall"
-version = "0.3.2-dev0"
+version = "0.3.3-dev0"
 edition = "2021"
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = [] }
+tauri = { version = "2", features = ["devtools"] }
 tauri-plugin-dialog = "2"
 tauri-plugin-opener = "2"
 tauri-plugin-fs = "2"
