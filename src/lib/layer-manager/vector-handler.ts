@@ -172,7 +172,6 @@ function addAllVectorLayers(
   });
 }
 
-
 /**
  * Set a vector style property
  * @param manager - The LayerManager instance
