@@ -55,8 +55,10 @@ async function setupDragAndDrop(layerManager: LayerManager): Promise<void> {
     document.body.appendChild(dropOverlay);
   }
 
-  // Listen for drag enter
+  // Listen for drag enter - but ignore if internal layer drag is in progress
   await listen('tauri://drag-enter', () => {
+    // Skip showing overlay if we're doing internal layer reordering
+    if (layerManager.draggedItem) return;
     dropOverlay!.classList.add('visible');
   });
 

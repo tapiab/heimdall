@@ -403,6 +403,26 @@ input[type='date']::-webkit-calendar-picker-indicator {
   color: #ff5555;
 }
 
+.layer-item .layer-move-btn {
+  padding: 2px 4px;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  color: #666;
+  font-size: 10px;
+  line-height: 1;
+  flex-shrink: 0;
+}
+
+.layer-item .layer-move-btn:hover:not(:disabled) {
+  color: #4a9eff;
+}
+
+.layer-item .layer-move-btn:disabled {
+  color: #444;
+  cursor: default;
+}
+
 .layer-opacity {
   display: flex;
   align-items: center;

@@ -52,6 +52,7 @@ function createMockMap() {
     addLayer: vi.fn(),
     removeSource: vi.fn(),
     removeLayer: vi.fn(),
+    moveLayer: vi.fn(),
     setLayoutProperty: vi.fn(),
     setPaintProperty: vi.fn(),
     getCanvas: vi.fn(() => document.createElement('canvas')),
@@ -325,6 +326,73 @@ describe('LayerManager', () => {
     it('should handle same position reorder', () => {
       layerManager.reorderLayers(1, 1);
       expect(layerManager.layerOrder).toEqual(['layer-1', 'layer-2', 'layer-3']);
+    });
+
+    it('should move layer up (toward front)', () => {
+      // layer-2 is at index 1, move it to index 2 (toward front/top)
+      layerManager.reorderLayers(1, 2);
+      expect(layerManager.layerOrder).toEqual(['layer-1', 'layer-3', 'layer-2']);
+    });
+
+    it('should move layer down (toward back)', () => {
+      // layer-3 is at index 2, move it to index 1 (toward back/bottom)
+      layerManager.reorderLayers(2, 1);
+      expect(layerManager.layerOrder).toEqual(['layer-1', 'layer-3', 'layer-2']);
+    });
+
+    it('should call moveLayer on map for each layer when applying order', () => {
+      const mockMap = layerManager.mapManager.map;
+      mockMap.moveLayer.mockClear();
+
+      layerManager.applyLayerOrder();
+
+      // Should call moveLayer for each raster layer (3 layers)
+      expect(mockMap.moveLayer).toHaveBeenCalledTimes(3);
+      // Layers should be moved in order: layer-1, layer-2, layer-3
+      expect(mockMap.moveLayer).toHaveBeenNthCalledWith(1, 'raster-layer-layer-1');
+      expect(mockMap.moveLayer).toHaveBeenNthCalledWith(2, 'raster-layer-layer-2');
+      expect(mockMap.moveLayer).toHaveBeenNthCalledWith(3, 'raster-layer-layer-3');
+    });
+
+    it('should apply correct map order after reordering', () => {
+      const mockMap = layerManager.mapManager.map;
+      mockMap.moveLayer.mockClear();
+
+      // Move layer-1 from bottom to top
+      layerManager.reorderLayers(0, 2);
+
+      // Order should now be: layer-2, layer-3, layer-1
+      expect(layerManager.layerOrder).toEqual(['layer-2', 'layer-3', 'layer-1']);
+
+      // moveLayer should be called in the new order
+      expect(mockMap.moveLayer).toHaveBeenNthCalledWith(1, 'raster-layer-layer-2');
+      expect(mockMap.moveLayer).toHaveBeenNthCalledWith(2, 'raster-layer-layer-3');
+      expect(mockMap.moveLayer).toHaveBeenNthCalledWith(3, 'raster-layer-layer-1');
+    });
+
+    it('should handle vector layers in applyLayerOrder', () => {
+      // Add a vector layer
+      layerManager.layers.set('vector-1', {
+        id: 'vector-1',
+        type: 'vector',
+        path: '/v.geojson',
+        visible: true,
+      });
+      layerManager.layerOrder = ['layer-1', 'vector-1', 'layer-2'];
+
+      const mockMap = layerManager.mapManager.map;
+      mockMap.moveLayer.mockClear();
+
+      layerManager.applyLayerOrder();
+
+      // Raster layer-1 moved once
+      expect(mockMap.moveLayer).toHaveBeenCalledWith('raster-layer-layer-1');
+      // Vector layer has 3 sublayers (fill, line, circle)
+      expect(mockMap.moveLayer).toHaveBeenCalledWith('vector-fill-vector-1');
+      expect(mockMap.moveLayer).toHaveBeenCalledWith('vector-line-vector-1');
+      expect(mockMap.moveLayer).toHaveBeenCalledWith('vector-circle-vector-1');
+      // Raster layer-2 moved once
+      expect(mockMap.moveLayer).toHaveBeenCalledWith('raster-layer-layer-2');
     });
   });
 

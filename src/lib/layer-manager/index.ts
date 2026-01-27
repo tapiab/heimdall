@@ -719,43 +719,30 @@ export class LayerManager {
 
   /**
    * Apply the current layer order to the map.
+   * layerOrder[0] = bottom (rendered first), layerOrder[n-1] = top (rendered last)
    */
   applyLayerOrder(): void {
-    for (let i = 1; i < this.layerOrder.length; i++) {
-      const id = this.layerOrder[i];
-      const prevId = this.layerOrder[i - 1];
+    // Get the topmost map layer ID to use as reference for placing our layers above basemap
+    // We'll move each layer to the top in order, so the last one ends up on top
+    for (const id of this.layerOrder) {
       const layer = this.layers.get(id);
-      const prevLayer = this.layers.get(prevId);
-
-      if (!layer || !prevLayer) continue;
+      if (!layer) continue;
 
       try {
         if (layer.type === 'vector') {
-          // Move all vector sublayers
+          // Move all vector sublayers to top (in order: fill, line, circle)
           const layerIds = [`vector-fill-${id}`, `vector-line-${id}`, `vector-circle-${id}`];
-          let beforeId: string;
-          if (prevLayer.type === 'vector') {
-            beforeId = `vector-circle-${prevId}`;
-          } else {
-            beforeId = `raster-layer-${prevId}`;
-          }
           for (const layerId of layerIds) {
             try {
-              this.mapManager.map.moveLayer(layerId, beforeId);
+              this.mapManager.map.moveLayer(layerId);
             } catch (_e) {
               // Layer might not exist
             }
           }
         } else {
-          // Raster layer
-          let beforeId: string;
-          if (prevLayer.type === 'vector') {
-            beforeId = `vector-circle-${prevId}`;
-          } else {
-            beforeId = `raster-layer-${prevId}`;
-          }
+          // Raster layer - move to top
           try {
-            this.mapManager.map.moveLayer(`raster-layer-${id}`, beforeId);
+            this.mapManager.map.moveLayer(`raster-layer-${id}`);
           } catch (_e) {
             // Layer might not exist
           }
@@ -778,6 +765,8 @@ export class LayerManager {
     item.classList.add('dragging');
     if (e.dataTransfer) {
       e.dataTransfer.effectAllowed = 'move';
+      // Required for drop to work in WebKit browsers (including Tauri)
+      e.dataTransfer.setData('text/plain', item.dataset.layerId || '');
     }
   }
 

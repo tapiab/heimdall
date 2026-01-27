@@ -47,6 +47,19 @@ export function updateLayerPanel(manager: LayerManagerWithUI): void {
   const layerList = document.getElementById('layer-list');
   if (!layerList) return;
 
+  // Ensure the container allows drops (only add once)
+  if (!layerList.dataset.dropInitialized) {
+    layerList.dataset.dropInitialized = 'true';
+    layerList.addEventListener('dragover', e => {
+      e.preventDefault();
+      e.stopPropagation();
+    });
+    layerList.addEventListener('drop', e => {
+      e.preventDefault();
+      e.stopPropagation();
+    });
+  }
+
   layerList.innerHTML = '';
 
   const displayOrder = [...manager.layerOrder].reverse();
@@ -104,6 +117,33 @@ export function updateLayerPanel(manager: LayerManagerWithUI): void {
       startRenameLayer(manager, id, name, displayName);
     });
 
+    // Move up button (toward front/top visually = higher index in layerOrder)
+    const actualIndex = manager.layerOrder.length - 1 - displayIndex;
+    const moveUpBtn = document.createElement('button');
+    moveUpBtn.className = 'layer-move-btn';
+    moveUpBtn.textContent = '▲';
+    moveUpBtn.title = 'Move layer up (to front)';
+    moveUpBtn.disabled = displayIndex === 0; // Already at top
+    moveUpBtn.addEventListener('click', e => {
+      e.stopPropagation();
+      if (actualIndex < manager.layerOrder.length - 1) {
+        manager.reorderLayers(actualIndex, actualIndex + 1);
+      }
+    });
+
+    // Move down button (toward back/bottom visually = lower index in layerOrder)
+    const moveDownBtn = document.createElement('button');
+    moveDownBtn.className = 'layer-move-btn';
+    moveDownBtn.textContent = '▼';
+    moveDownBtn.title = 'Move layer down (to back)';
+    moveDownBtn.disabled = displayIndex === manager.layerOrder.length - 1; // Already at bottom
+    moveDownBtn.addEventListener('click', e => {
+      e.stopPropagation();
+      if (actualIndex > 0) {
+        manager.reorderLayers(actualIndex, actualIndex - 1);
+      }
+    });
+
     const removeBtn = document.createElement('button');
     removeBtn.className = 'layer-remove';
     removeBtn.textContent = '\u00d7';
@@ -115,6 +155,8 @@ export function updateLayerPanel(manager: LayerManagerWithUI): void {
 
     headerRow.appendChild(checkbox);
     headerRow.appendChild(name);
+    headerRow.appendChild(moveUpBtn);
+    headerRow.appendChild(moveDownBtn);
     headerRow.appendChild(removeBtn);
 
     const opacityRow = document.createElement('div');
@@ -914,10 +956,13 @@ function attachRgbListeners(manager: LayerManagerWithUI, layer: RasterLayerWithU
  * Handle drag start for layer reordering
  */
 function handleDragStart(manager: LayerManagerWithUI, e: DragEvent, item: HTMLElement): void {
+  e.stopPropagation();
   manager.draggedItem = item;
   item.classList.add('dragging');
   if (e.dataTransfer) {
     e.dataTransfer.effectAllowed = 'move';
+    // Required for drop to work in WebKit browsers (including Tauri)
+    e.dataTransfer.setData('text/plain', item.dataset.layerId || '');
   }
 }
 
@@ -926,6 +971,7 @@ function handleDragStart(manager: LayerManagerWithUI, e: DragEvent, item: HTMLEl
  */
 function handleDragOver(manager: LayerManagerWithUI, e: DragEvent, item: HTMLElement): void {
   e.preventDefault();
+  e.stopPropagation();
   if (e.dataTransfer) {
     e.dataTransfer.dropEffect = 'move';
   }
@@ -948,6 +994,7 @@ function handleDragOver(manager: LayerManagerWithUI, e: DragEvent, item: HTMLEle
  */
 function handleDrop(manager: LayerManagerWithUI, e: DragEvent, item: HTMLElement): void {
   e.preventDefault();
+  e.stopPropagation();
   if (!manager.draggedItem || item === manager.draggedItem) return;
 
   const fromIndex = parseInt(manager.draggedItem.dataset.index || '0', 10);
