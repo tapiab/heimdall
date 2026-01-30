@@ -27,6 +27,21 @@ import type {
   VectorStyle,
 } from './types';
 
+/** Value for a single band from pixel query */
+interface BandValue {
+  band: number;
+  value: number;
+  is_nodata: boolean;
+}
+
+/** Result from querying a pixel location */
+interface PixelQueryResult {
+  x: number;
+  y: number;
+  is_valid: boolean;
+  values: BandValue[];
+}
+
 // Import handlers
 import {
   addRasterLayer,
@@ -108,6 +123,12 @@ export class LayerManager {
   /** Current histogram data for redraws */
   currentHistogram: HistogramData | null;
 
+  /** Last status bar query timestamp for throttling */
+  private _lastStatusBarQuery: number;
+
+  /** Pending status bar query flag */
+  private _statusBarQueryPending: boolean;
+
   /**
    * Create a new LayerManager instance.
    * @param mapManager - The MapManager instance to use for map operations
@@ -123,8 +144,11 @@ export class LayerManager {
     this.lastZoomLevel = null;
     this._zoomEndHandler = null;
     this.currentHistogram = null;
+    this._lastStatusBarQuery = 0;
+    this._statusBarQueryPending = false;
     this.setupFeatureInteraction();
     this.setupZoomTracking();
+    this.setupStatusBarUpdates();
   }
 
   /**
@@ -149,6 +173,141 @@ export class LayerManager {
 
     // Initialize zoom level
     this.lastZoomLevel = Math.floor(map.getZoom());
+  }
+
+  /**
+   * Setup status bar updates for pixel values and altitude on mouse move.
+   * Queries the topmost visible raster layer for pixel values.
+   * Queries MapLibre terrain for altitude (when terrain is enabled).
+   */
+  setupStatusBarUpdates(): void {
+    const { map } = this.mapManager;
+    const THROTTLE_MS = 100; // Throttle queries to avoid overwhelming the backend
+
+    map.on('mousemove', async (e: { lngLat: { lng: number; lat: number } }) => {
+      const now = Date.now();
+      const { lng, lat } = e.lngLat;
+
+      // Update altitude from terrain (no throttle needed - it's synchronous)
+      this.updateStatusBarAltitude(lng, lat);
+
+      // Throttle pixel value queries
+      if (now - this._lastStatusBarQuery < THROTTLE_MS || this._statusBarQueryPending) {
+        return;
+      }
+
+      // Find topmost visible raster layer
+      const topmostRaster = this.getTopmostVisibleRasterLayer();
+      if (!topmostRaster) {
+        this.updateStatusBarPixelValue(null);
+        return;
+      }
+
+      this._lastStatusBarQuery = now;
+      this._statusBarQueryPending = true;
+
+      try {
+        let result: PixelQueryResult;
+
+        if (this.mapManager.isPixelCoordMode() && this.mapManager.pixelExtent) {
+          // Convert map coords to pixel coords for non-georeferenced images
+          const extent = this.mapManager.pixelExtent;
+          const scale = extent.scale || 0.01;
+          const offsetX = extent.offsetX || 0;
+          const offsetY = extent.offsetY || 0;
+          const pixelX = Math.floor((lng + offsetX) / scale);
+          const pixelY = Math.floor((offsetY - lat) / scale);
+
+          result = await invoke<PixelQueryResult>('query_pixel_value_at_pixel', {
+            id: topmostRaster.id,
+            pixel_x: pixelX,
+            pixel_y: pixelY,
+          });
+        } else {
+          result = await invoke<PixelQueryResult>('query_pixel_value', {
+            id: topmostRaster.id,
+            lng,
+            lat,
+          });
+        }
+
+        this.updateStatusBarPixelValue(result);
+      } catch {
+        this.updateStatusBarPixelValue(null);
+      } finally {
+        this._statusBarQueryPending = false;
+      }
+    });
+  }
+
+  /**
+   * Update the status bar altitude from MapLibre terrain.
+   */
+  private updateStatusBarAltitude(lng: number, lat: number): void {
+    const altitudeEl = document.getElementById('altitude');
+    if (!altitudeEl) return;
+
+    const { map } = this.mapManager;
+
+    // queryTerrainElevation returns elevation when terrain is enabled, null otherwise
+    try {
+      const elevation = map.queryTerrainElevation({ lng, lat });
+      if (elevation !== null && elevation !== undefined) {
+        altitudeEl.textContent = `Alt: ${elevation.toFixed(0)}m`;
+      } else {
+        altitudeEl.textContent = '--';
+      }
+    } catch {
+      altitudeEl.textContent = '--';
+    }
+  }
+
+  /**
+   * Get the topmost visible raster layer.
+   */
+  private getTopmostVisibleRasterLayer(): RasterLayer | null {
+    // Iterate from top to bottom (reverse order)
+    for (let i = this.layerOrder.length - 1; i >= 0; i--) {
+      const layer = this.layers.get(this.layerOrder[i]);
+      if (layer && layer.type === 'raster' && layer.visible) {
+        return layer as RasterLayer;
+      }
+    }
+    return null;
+  }
+
+  /**
+   * Update the status bar with pixel value information.
+   */
+  private updateStatusBarPixelValue(result: PixelQueryResult | null): void {
+    const pixelValueEl = document.getElementById('pixel-value');
+
+    if (!pixelValueEl) return;
+
+    if (!result || !result.is_valid || result.values.length === 0) {
+      pixelValueEl.textContent = '--';
+      return;
+    }
+
+    // Display pixel value(s)
+    const values = result.values
+      .filter(v => !v.is_nodata)
+      .map(v => {
+        // Format value nicely
+        if (Number.isInteger(v.value)) {
+          return v.value.toString();
+        }
+        return v.value.toFixed(2);
+      });
+
+    if (values.length === 0) {
+      pixelValueEl.textContent = 'NoData';
+    } else if (values.length === 1) {
+      pixelValueEl.textContent = `Val: ${values[0]}`;
+    } else {
+      // Multiple bands - show band values
+      pixelValueEl.textContent = `Val: ${values.slice(0, 3).join(', ')}`;
+    }
   }
 
   /**

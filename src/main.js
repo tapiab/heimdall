@@ -3,7 +3,6 @@ import { invoke } from '@tauri-apps/api/core';
 import { MapManager } from './lib/map-manager.js';
 import { LayerManager } from './lib/layer-manager/index.js';
 import { MeasureTool } from './lib/measure-tool.js';
-import { InspectTool } from './lib/inspect-tool.js';
 import { ExportTool } from './lib/export-tool.js';
 import { ProfileTool } from './lib/profile-tool.js';
 import { AnnotationTool } from './lib/annotation-tool.js';
@@ -35,14 +34,16 @@ async function init() {
   // Create measure tool
   const measureTool = new MeasureTool(mapManager);
 
-  // Create inspect tool
-  const inspectTool = new InspectTool(mapManager, layerManager);
-
   // Create export tool
   const exportTool = new ExportTool(mapManager);
 
-  // Create profile tool
+  // Create profile tool (for raster value profiles)
   const profileTool = new ProfileTool(mapManager, layerManager);
+
+  // Create elevation profile tool (for terrain elevation - uses same ProfileTool class)
+  const elevationProfileTool = new ProfileTool(mapManager, layerManager, {
+    useTerrainElevation: true,
+  });
 
   // Create annotation tool
   const annotationTool = new AnnotationTool(mapManager);
@@ -61,9 +62,9 @@ async function init() {
     mapManager,
     layerManager,
     measureTool,
-    inspectTool,
     exportTool,
     profileTool,
+    elevationProfileTool,
     annotationTool,
     zoomRectTool,
     projectManager,

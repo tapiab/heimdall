@@ -34,7 +34,7 @@
             <div class="menu-divider"></div>
             <div class="menu-item" data-action="export-png">
               <span>Export as PNG...</span>
-              <kbd>E</kbd>
+              <kbd>X</kbd>
             </div>
             <div class="menu-item" data-action="export-highres">
               <span>Export High-Res (2x)...</span>
@@ -49,8 +49,8 @@
         <button id="fit-bounds" title="Fit to layer extent (F)" disabled>Fit Bounds</button>
         <button id="zoom-rect-btn" title="Zoom to rectangle (Z)">Zoom Rect</button>
         <button id="measure-btn" title="Measure distance (M)">Measure</button>
-        <button id="inspect-btn" title="Inspect pixel values (I)">Inspect</button>
-        <button id="profile-btn" title="Elevation profile (P)">Profile</button>
+        <button id="profile-btn" title="Value profile along line (P)">Profile</button>
+        <button id="elevation-btn" title="Elevation profile - enables 3D terrain (E)">Elevation</button>
         <button id="stac-btn" title="Browse STAC Catalog (C)">STAC</button>
         <div id="annotate-container" class="menu-container">
           <button id="annotate-btn" title="Add annotations (A)">Annotate</button>
@@ -279,6 +279,8 @@
       </div>
       <div id="status-bar">
         <span id="coordinates">--</span>
+        <span id="pixel-value">--</span>
+        <span id="altitude">--</span>
         <span id="bearing-display">
           <span id="compass-arrow">N</span>
           <span id="bearing">0.0°</span>

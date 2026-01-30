@@ -9,7 +9,6 @@ import { showToast } from './notifications';
 import type { MapManager } from './map-manager';
 import type { LayerManager } from './layer-manager/index';
 import type { MeasureTool } from './measure-tool';
-import type { InspectTool } from './inspect-tool';
 import type { ExportTool } from './export-tool';
 import type { ProfileTool } from './profile-tool';
 import type { AnnotationTool } from './annotation-tool';
@@ -36,8 +35,8 @@ const VECTOR_EXTENSIONS = [
 /** Tool collection for deactivation */
 interface ToolCollection {
   measureTool?: MeasureTool | null;
-  inspectTool?: InspectTool | null;
   profileTool?: ProfileTool | null;
+  elevationProfileTool?: ProfileTool | null;
   annotationTool?: AnnotationTool | null;
   zoomRectTool?: ZoomRectTool | null;
 }
@@ -95,21 +94,21 @@ async function setupDragAndDrop(layerManager: LayerManager): Promise<void> {
  * @param tools - Collection of tool instances to deactivate
  */
 function deactivateTools(tools: ToolCollection): void {
-  const { measureTool, inspectTool, profileTool, annotationTool, zoomRectTool } = tools;
+  const { measureTool, profileTool, elevationProfileTool, annotationTool, zoomRectTool } = tools;
 
   if (measureTool && measureTool.isActive()) {
     measureTool.deactivate();
     const btn = document.getElementById('measure-btn');
     if (btn) btn.classList.remove('active');
   }
-  if (inspectTool && inspectTool.isActive()) {
-    inspectTool.deactivate();
-    const btn = document.getElementById('inspect-btn');
-    if (btn) btn.classList.remove('active');
-  }
   if (profileTool && profileTool.isActive()) {
     profileTool.deactivate();
     const btn = document.getElementById('profile-btn');
+    if (btn) btn.classList.remove('active');
+  }
+  if (elevationProfileTool && elevationProfileTool.isActive()) {
+    elevationProfileTool.deactivate();
+    const btn = document.getElementById('elevation-btn');
     if (btn) btn.classList.remove('active');
   }
   if (annotationTool && annotationTool.isActive()) {
@@ -129,9 +128,9 @@ function deactivateTools(tools: ToolCollection): void {
  * @param mapManager - MapManager instance
  * @param layerManager - LayerManager instance
  * @param measureTool - MeasureTool instance
- * @param inspectTool - InspectTool instance
  * @param exportTool - ExportTool instance
- * @param profileTool - ProfileTool instance
+ * @param profileTool - ProfileTool instance (for raster value profiles)
+ * @param elevationProfileTool - ProfileTool instance (for terrain elevation profiles)
  * @param annotationTool - AnnotationTool instance
  * @param zoomRectTool - ZoomRectTool instance
  * @param projectManager - ProjectManager instance
@@ -142,9 +141,9 @@ export function setupUI(
   mapManager: MapManager,
   layerManager: LayerManager,
   measureTool: MeasureTool | null = null,
-  inspectTool: InspectTool | null = null,
   exportTool: ExportTool | null = null,
   profileTool: ProfileTool | null = null,
+  elevationProfileTool: ProfileTool | null = null,
   annotationTool: AnnotationTool | null = null,
   zoomRectTool: ZoomRectTool | null = null,
   projectManager: ProjectManager | null = null,
@@ -211,7 +210,7 @@ export function setupUI(
   const zoomRectBtn = document.getElementById('zoom-rect-btn');
   if (zoomRectBtn && zoomRectTool) {
     zoomRectBtn.addEventListener('click', () => {
-      deactivateTools({ measureTool, inspectTool, profileTool, annotationTool });
+      deactivateTools({ measureTool, profileTool, elevationProfileTool, annotationTool });
       const active = zoomRectTool.toggle();
       zoomRectBtn.classList.toggle('active', active);
     });
@@ -221,30 +220,29 @@ export function setupUI(
   const measureBtn = document.getElementById('measure-btn');
   if (measureBtn && measureTool) {
     measureBtn.addEventListener('click', () => {
-      deactivateTools({ inspectTool, profileTool, annotationTool, zoomRectTool });
+      deactivateTools({ profileTool, elevationProfileTool, annotationTool, zoomRectTool });
       const active = measureTool.toggle();
       measureBtn.classList.toggle('active', active);
     });
   }
 
-  // Inspect button
-  const inspectBtn = document.getElementById('inspect-btn');
-  if (inspectBtn && inspectTool) {
-    inspectBtn.addEventListener('click', () => {
-      deactivateTools({ measureTool, profileTool, annotationTool, zoomRectTool });
-      const active = inspectTool.toggle();
-      inspectBtn.classList.toggle('active', active);
-    });
-  }
-
-  // Profile button
+  // Profile button (raster value profile)
   const profileBtn = document.getElementById('profile-btn');
   if (profileBtn && profileTool) {
     profileBtn.addEventListener('click', () => {
-      // Deactivate other tools
-      deactivateTools({ measureTool, inspectTool, annotationTool, zoomRectTool });
+      deactivateTools({ measureTool, elevationProfileTool, annotationTool, zoomRectTool });
       const active = profileTool.toggle();
       profileBtn.classList.toggle('active', active);
+    });
+  }
+
+  // Elevation profile button (terrain elevation)
+  const elevationBtn = document.getElementById('elevation-btn');
+  if (elevationBtn && elevationProfileTool) {
+    elevationBtn.addEventListener('click', () => {
+      deactivateTools({ measureTool, profileTool, annotationTool, zoomRectTool });
+      const active = elevationProfileTool.toggle();
+      elevationBtn.classList.toggle('active', active);
     });
   }
 
@@ -286,7 +284,7 @@ export function setupUI(
           const { mode } = optionEl.dataset;
 
           // Deactivate other tools
-          deactivateTools({ measureTool, inspectTool, profileTool, zoomRectTool });
+          deactivateTools({ measureTool, profileTool, elevationProfileTool, zoomRectTool });
 
           // Set annotation mode
           if (mode) {
@@ -513,7 +511,7 @@ export function setupUI(
     // Z to toggle zoom rectangle mode
     if (e.key === 'z' && !e.ctrlKey && !e.metaKey && !e.altKey) {
       if (zoomRectTool) {
-        deactivateTools({ measureTool, inspectTool, profileTool, annotationTool });
+        deactivateTools({ measureTool, profileTool, elevationProfileTool, annotationTool });
         const active = zoomRectTool.toggle();
         const zoomRectBtnEl = document.getElementById('zoom-rect-btn');
         if (zoomRectBtnEl) {
@@ -524,22 +522,11 @@ export function setupUI(
     // M to toggle measure mode
     if (e.key === 'm' && !e.ctrlKey && !e.metaKey && !e.altKey) {
       if (measureTool) {
-        deactivateTools({ inspectTool, profileTool, annotationTool, zoomRectTool });
+        deactivateTools({ profileTool, elevationProfileTool, annotationTool, zoomRectTool });
         const active = measureTool.toggle();
         const measureBtnEl = document.getElementById('measure-btn');
         if (measureBtnEl) {
           measureBtnEl.classList.toggle('active', active);
-        }
-      }
-    }
-    // I to toggle inspect mode
-    if (e.key === 'i' && !e.ctrlKey && !e.metaKey && !e.altKey) {
-      if (inspectTool) {
-        deactivateTools({ measureTool, profileTool, annotationTool, zoomRectTool });
-        const active = inspectTool.toggle();
-        const inspectBtnEl = document.getElementById('inspect-btn');
-        if (inspectBtnEl) {
-          inspectBtnEl.classList.toggle('active', active);
         }
       }
     }
@@ -551,17 +538,22 @@ export function setupUI(
           const annotateBtnEl = document.getElementById('annotate-btn');
           if (annotateBtnEl) annotateBtnEl.classList.remove('active');
         } else {
-          deactivateTools({ measureTool, inspectTool, profileTool, zoomRectTool });
+          deactivateTools({ measureTool, profileTool, elevationProfileTool, zoomRectTool });
           annotationTool.activate('marker');
           const annotateBtnEl = document.getElementById('annotate-btn');
           if (annotateBtnEl) annotateBtnEl.classList.add('active');
         }
       }
     }
-    // E to export view
+    // E to toggle elevation profile (auto-enables 3D terrain)
     if (e.key === 'e' && !e.ctrlKey && !e.metaKey && !e.altKey) {
-      if (exportTool) {
-        exportTool.exportView('png');
+      if (elevationProfileTool) {
+        deactivateTools({ measureTool, profileTool, annotationTool, zoomRectTool });
+        const active = elevationProfileTool.toggle();
+        const elevationBtnEl = document.getElementById('elevation-btn');
+        if (elevationBtnEl) {
+          elevationBtnEl.classList.toggle('active', active);
+        }
       }
     }
     // Ctrl+Shift+E to export high-res (2x)
@@ -578,10 +570,16 @@ export function setupUI(
         exportTool.copyToClipboard();
       }
     }
-    // P to toggle profile mode
+    // X to export view as PNG
+    if (e.key === 'x' && !e.ctrlKey && !e.metaKey && !e.altKey) {
+      if (exportTool) {
+        exportTool.exportView('png');
+      }
+    }
+    // P to toggle profile mode (raster value profile)
     if (e.key === 'p' && !e.ctrlKey && !e.metaKey && !e.altKey) {
       if (profileTool) {
-        deactivateTools({ measureTool, inspectTool, annotationTool, zoomRectTool });
+        deactivateTools({ measureTool, elevationProfileTool, annotationTool, zoomRectTool });
         const active = profileTool.toggle();
         const profileBtnEl = document.getElementById('profile-btn');
         if (profileBtnEl) {
@@ -599,7 +597,13 @@ export function setupUI(
     // Escape to close panels and cancel tools
     if (e.key === 'Escape') {
       // Cancel all active tools
-      deactivateTools({ measureTool, inspectTool, profileTool, annotationTool, zoomRectTool });
+      deactivateTools({
+        measureTool,
+        profileTool,
+        elevationProfileTool,
+        annotationTool,
+        zoomRectTool,
+      });
       // Close profile panel
       const profilePanel = document.getElementById('profile-panel');
       if (profilePanel) {
@@ -680,9 +684,9 @@ function showShortcutsHelp(): void {
         <div class="shortcut"><kbd>Ctrl+Shift+O</kbd> Load project</div>
         <div class="shortcut"><kbd>F</kbd> Fit to extent</div>
         <div class="shortcut"><kbd>M</kbd> Measure distance</div>
-        <div class="shortcut"><kbd>I</kbd> Inspect pixel values</div>
-        <div class="shortcut"><kbd>E</kbd> Export view as PNG</div>
-        <div class="shortcut"><kbd>P</kbd> Elevation profile</div>
+        <div class="shortcut"><kbd>P</kbd> Value profile (raster)</div>
+        <div class="shortcut"><kbd>E</kbd> Elevation profile (terrain)</div>
+        <div class="shortcut"><kbd>X</kbd> Export view as PNG</div>
         <div class="shortcut"><kbd>C</kbd> STAC catalog browser</div>
         <div class="shortcut"><kbd>A</kbd> Add annotation</div>
         <div class="shortcut"><kbd>R</kbd> Reset rotation</div>
