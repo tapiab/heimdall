@@ -41,6 +41,8 @@ interface MapManager {
   isPixelCoordMode: () => boolean;
   /** Current pixel extent configuration */
   pixelExtent: PixelExtent | null;
+  /** Check if 3D terrain is enabled */
+  isTerrainEnabled: () => boolean;
 }
 
 /**
@@ -99,6 +101,14 @@ interface ElevationProfileResult {
 }
 
 /**
+ * Options for ProfileTool
+ */
+interface ProfileToolOptions {
+  /** If true, use MapLibre terrain elevation instead of raster values */
+  useTerrainElevation?: boolean;
+}
+
+/**
  * ProfileTool allows users to draw a line on the map and view an elevation profile.
  *
  * Features:
@@ -124,19 +134,22 @@ export class ProfileTool {
   private active: boolean;
   private points: Coordinate[];
   private markers: Marker[];
+  private useTerrainElevation: boolean;
 
   /**
    * Create a new ProfileTool instance
    * @param mapManager - The MapManager instance for map access
    * @param layerManager - The LayerManager instance to find elevation data layers
+   * @param options - Optional configuration
    */
-  constructor(mapManager: MapManager, layerManager: LayerManager) {
+  constructor(mapManager: MapManager, layerManager: LayerManager, options?: ProfileToolOptions) {
     this.mapManager = mapManager;
     this.layerManager = layerManager;
     this.map = mapManager.map;
     this.active = false;
     this.points = [];
     this.markers = [];
+    this.useTerrainElevation = options?.useTerrainElevation ?? false;
     this.handleClick = this.handleClick.bind(this);
     this.handleMouseMove = this.handleMouseMove.bind(this);
     this.handleKeyDown = this.handleKeyDown.bind(this);
@@ -148,6 +161,24 @@ export class ProfileTool {
    */
   activate(): void {
     if (this.active) return;
+
+    // For elevation profile mode, enable terrain if not already enabled
+    if (this.useTerrainElevation && !this.mapManager.isTerrainEnabled()) {
+      const result = (
+        this.mapManager as unknown as { enableTerrain: () => { success: boolean } }
+      ).enableTerrain();
+      if (!result.success) {
+        showToast('Could not enable 3D terrain for elevation profile', 'error');
+        return;
+      }
+      // Update terrain toggle UI
+      const terrainToggle = document.getElementById('terrain-toggle') as HTMLInputElement | null;
+      if (terrainToggle) terrainToggle.checked = true;
+      const terrainExaggeration = document.getElementById('terrain-exaggeration');
+      if (terrainExaggeration) terrainExaggeration.classList.remove('hidden');
+      showToast('3D terrain enabled for elevation profile', 'success');
+    }
+
     this.active = true;
     this.points = [];
     this.clearMarkers();
@@ -155,7 +186,11 @@ export class ProfileTool {
     this.map.on('click', this.handleClick);
     this.map.on('mousemove', this.handleMouseMove);
     document.addEventListener('keydown', this.handleKeyDown);
-    this.showInstruction('Click to set profile start point');
+
+    const instruction = this.useTerrainElevation
+      ? 'Click to set elevation profile start point'
+      : 'Click to set value profile start point';
+    this.showInstruction(instruction);
   }
 
   /**
@@ -337,14 +372,24 @@ export class ProfileTool {
       return;
     }
 
-    // Find a suitable raster layer for elevation
-    const rasterLayer = this.findElevationLayer();
-    if (!rasterLayer) {
-      showToast('No raster layer found for elevation profile', 'error');
+    // Use terrain elevation if configured for this tool instance
+    if (this.useTerrainElevation) {
+      if (!this.mapManager.isTerrainEnabled()) {
+        showToast('3D terrain not available for elevation profile', 'error');
+        return;
+      }
+      this.generateTerrainProfile();
       return;
     }
 
-    showLoading('Generating elevation profile...');
+    // Find a suitable raster layer for value profile
+    const rasterLayer = this.findElevationLayer();
+    if (!rasterLayer) {
+      showToast('No raster layer found for value profile', 'error');
+      return;
+    }
+
+    showLoading('Generating value profile...');
 
     try {
       let result: ElevationProfileResult;
@@ -381,6 +426,124 @@ export class ProfileTool {
     } finally {
       hideLoading();
     }
+  }
+
+  /**
+   * Generate elevation profile using MapLibre terrain data.
+   */
+  private generateTerrainProfile(): void {
+    const { map } = this.mapManager;
+    const numSamples = 200;
+
+    // Calculate total distance and sample points along the line
+    const samplePoints: { lngLat: { lng: number; lat: number }; distance: number }[] = [];
+    let totalDistance = 0;
+
+    // Calculate distances between consecutive points
+    const segmentDistances: number[] = [];
+    for (let i = 1; i < this.points.length; i++) {
+      const [lng1, lat1] = this.points[i - 1];
+      const [lng2, lat2] = this.points[i];
+      const dist = this.haversineDistance(lat1, lng1, lat2, lng2);
+      segmentDistances.push(dist);
+      totalDistance += dist;
+    }
+
+    // Sample points evenly along the entire path
+    const sampleInterval = totalDistance / (numSamples - 1);
+    let currentDistance = 0;
+    let segmentIndex = 0;
+    let segmentProgress = 0;
+
+    for (let i = 0; i < numSamples; i++) {
+      const targetDistance = i * sampleInterval;
+
+      // Find which segment this sample falls on
+      while (
+        segmentIndex < segmentDistances.length - 1 &&
+        currentDistance + segmentDistances[segmentIndex] < targetDistance
+      ) {
+        currentDistance += segmentDistances[segmentIndex];
+        segmentIndex++;
+      }
+
+      // Interpolate within the segment
+      const segmentDist = segmentDistances[segmentIndex] || 1;
+      segmentProgress = (targetDistance - currentDistance) / segmentDist;
+      segmentProgress = Math.max(0, Math.min(1, segmentProgress));
+
+      const [lng1, lat1] = this.points[segmentIndex];
+      const [lng2, lat2] = this.points[segmentIndex + 1] || this.points[segmentIndex];
+
+      const lng = lng1 + (lng2 - lng1) * segmentProgress;
+      const lat = lat1 + (lat2 - lat1) * segmentProgress;
+
+      samplePoints.push({ lngLat: { lng, lat }, distance: targetDistance });
+    }
+
+    // Query terrain elevation for each sample point
+    const profilePoints: ProfilePoint[] = [];
+    let minElevation = Infinity;
+    let maxElevation = -Infinity;
+    let elevationGain = 0;
+    let elevationLoss = 0;
+    let lastElevation: number | null = null;
+
+    for (const sample of samplePoints) {
+      const elevation = map.queryTerrainElevation(sample.lngLat);
+      const isValid = elevation !== null && elevation !== undefined;
+      const elev = isValid ? elevation : 0;
+
+      profilePoints.push({
+        distance: sample.distance,
+        elevation: elev,
+        is_valid: isValid,
+      });
+
+      if (isValid) {
+        minElevation = Math.min(minElevation, elev);
+        maxElevation = Math.max(maxElevation, elev);
+
+        if (lastElevation !== null) {
+          const diff = elev - lastElevation;
+          if (diff > 0) elevationGain += diff;
+          else elevationLoss += Math.abs(diff);
+        }
+        lastElevation = elev;
+      }
+    }
+
+    // Handle case where no valid elevations were found
+    if (minElevation === Infinity) minElevation = 0;
+    if (maxElevation === -Infinity) maxElevation = 0;
+
+    const result: ElevationProfileResult = {
+      points: profilePoints,
+      total_distance: totalDistance,
+      min_elevation: minElevation,
+      max_elevation: maxElevation,
+      elevation_gain: elevationGain,
+      elevation_loss: elevationLoss,
+    };
+
+    this.showProfilePanel(result);
+  }
+
+  /**
+   * Calculate distance between two points using Haversine formula.
+   */
+  private haversineDistance(lat1: number, lng1: number, lat2: number, lng2: number): number {
+    const R = 6371000; // Earth's radius in meters
+    const dLat = ((lat2 - lat1) * Math.PI) / 180;
+    const dLng = ((lng2 - lng1) * Math.PI) / 180;
+    const a =
+      Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+      Math.cos((lat1 * Math.PI) / 180) *
+        Math.cos((lat2 * Math.PI) / 180) *
+        Math.sin(dLng / 2) *
+        Math.sin(dLng / 2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    return R * c;
   }
 
   private findElevationLayer(): RasterLayer | null {

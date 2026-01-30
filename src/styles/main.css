@@ -870,6 +870,20 @@ input[type='date']::-webkit-calendar-picker-indicator {
   text-align: center;
 }
 
+/* Pixel value display in status bar */
+#pixel-value {
+  color: #4a9eff;
+  font-family: monospace;
+  min-width: 100px;
+}
+
+/* Altitude display in status bar */
+#altitude {
+  color: #50c878;
+  font-family: monospace;
+  min-width: 80px;
+}
+
 /* Version display in status bar */
 #version-display {
   color: #555;
