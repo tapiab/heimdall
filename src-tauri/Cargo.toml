@@ -1,6 +1,6 @@
 [package]
 name = "heimdall"
-version = "0.3.3-dev2"
+version = "0.4.0-dev0"
 edition = "2021"
 
 [build-dependencies]

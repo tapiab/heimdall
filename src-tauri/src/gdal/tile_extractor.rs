@@ -591,20 +591,26 @@ pub fn extract_pixel_tile(
         scale
     };
 
-    // Calculate source pixel rectangle
-    let src_x_f = (tile_geo_bounds[0] + half_width) / scale;
-    let src_y_f = (clamped_half_height - tile_geo_bounds[3]) / pixel_scale_y;
-    let src_x_end_f = (tile_geo_bounds[2] + half_width) / scale;
-    let src_y_end_f = (clamped_half_height - tile_geo_bounds[1]) / pixel_scale_y;
+    // Calculate full tile extent in source pixel coordinates (unclamped)
+    let tile_src_x_start = (tile_geo_bounds[0] + half_width) / scale;
+    let tile_src_y_start = (clamped_half_height - tile_geo_bounds[3]) / pixel_scale_y;
+    let tile_src_x_end = (tile_geo_bounds[2] + half_width) / scale;
+    let tile_src_y_end = (clamped_half_height - tile_geo_bounds[1]) / pixel_scale_y;
 
-    // Clamp to image bounds
-    let src_x = src_x_f.max(0.0).floor() as isize;
-    let src_y = src_y_f.max(0.0).floor() as isize;
-    let src_x_end = src_x_end_f.min(img_width as f64).ceil() as isize;
-    let src_y_end = src_y_end_f.min(img_height as f64).ceil() as isize;
+    // Calculate the intersection with image bounds (clamped source coordinates)
+    let src_x_f = tile_src_x_start.max(0.0);
+    let src_y_f = tile_src_y_start.max(0.0);
+    let src_x_end_f = tile_src_x_end.min(img_width as f64);
+    let src_y_end_f = tile_src_y_end.min(img_height as f64);
 
-    let src_width = (src_x_end - src_x).max(1) as usize;
-    let src_height = (src_y_end - src_y).max(1) as usize;
+    // Integer source coordinates
+    let src_x = src_x_f.floor() as isize;
+    let src_y = src_y_f.floor() as isize;
+    let src_x_end = src_x_end_f.ceil() as isize;
+    let src_y_end = src_y_end_f.ceil() as isize;
+
+    let src_width = (src_x_end - src_x).max(0) as usize;
+    let src_height = (src_y_end - src_y).max(0) as usize;
 
     if src_width == 0
         || src_height == 0
@@ -614,18 +620,40 @@ pub fn extract_pixel_tile(
         return create_empty_tile(tile_size);
     }
 
+    // Calculate where in the output tile the image data should be placed
+    // This is the key fix: partial tiles should only fill the corresponding portion
+    let tile_pixel_width = tile_src_x_end - tile_src_x_start;
+    let tile_pixel_height = tile_src_y_end - tile_src_y_start;
+
+    // Destination rectangle in tile coordinates (0 to tile_size)
+    let dst_x_start =
+        ((src_x_f - tile_src_x_start) / tile_pixel_width * tile_size as f64).round() as usize;
+    let dst_y_start =
+        ((src_y_f - tile_src_y_start) / tile_pixel_height * tile_size as f64).round() as usize;
+    let dst_x_end =
+        ((src_x_end_f - tile_src_x_start) / tile_pixel_width * tile_size as f64).round() as usize;
+    let dst_y_end =
+        ((src_y_end_f - tile_src_y_start) / tile_pixel_height * tile_size as f64).round() as usize;
+
+    let dst_width = (dst_x_end - dst_x_start)
+        .max(1)
+        .min(tile_size - dst_x_start);
+    let dst_height = (dst_y_end - dst_y_start)
+        .max(1)
+        .min(tile_size - dst_y_start);
+
     let band = dataset
         .rasterband(request.band as usize)
         .map_err(|e| format!("Failed to get band: {}", e))?;
 
     let nodata = band.no_data_value();
 
-    // Read and resample to tile size
+    // Read source data and resample to the destination size (not full tile size)
     let buffer = band
         .read_as::<f64>(
             (src_x, src_y),
             (src_width, src_height),
-            (tile_size, tile_size),
+            (dst_width, dst_height),
             None,
         )
         .map_err(|e| format!("Failed to read: {}", e))?;
@@ -633,14 +661,26 @@ pub fn extract_pixel_tile(
     let data = buffer.data();
     let mut tile_data = vec![0u8; tile_size * tile_size * 4];
 
-    for (i, &val) in data.iter().enumerate() {
-        let idx = i * 4;
+    // Place the resampled data at the correct position in the output tile
+    for dy in 0..dst_height {
+        for dx in 0..dst_width {
+            let src_idx = dy * dst_width + dx;
+            let dst_tile_x = dst_x_start + dx;
+            let dst_tile_y = dst_y_start + dy;
 
-        if let Some(stretched) = apply_stretch(val, stretch, nodata) {
-            tile_data[idx] = stretched;
-            tile_data[idx + 1] = stretched;
-            tile_data[idx + 2] = stretched;
-            tile_data[idx + 3] = 255;
+            if dst_tile_x >= tile_size || dst_tile_y >= tile_size {
+                continue;
+            }
+
+            let dst_idx = (dst_tile_y * tile_size + dst_tile_x) * 4;
+            let val = data[src_idx];
+
+            if let Some(stretched) = apply_stretch(val, stretch, nodata) {
+                tile_data[dst_idx] = stretched;
+                tile_data[dst_idx + 1] = stretched;
+                tile_data[dst_idx + 2] = stretched;
+                tile_data[dst_idx + 3] = 255;
+            }
         }
     }
 
