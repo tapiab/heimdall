@@ -79,16 +79,6 @@ export interface GeoreferenceResult {
 /** State of the GCP collection workflow */
 export type GCPCollectionState = 'idle' | 'collecting_source' | 'collecting_target';
 
-/** Convert frontend GCP to backend format */
-export function gcpToBackendFormat(gcp: GCP): GCPData {
-  return {
-    pixel_x: gcp.sourceX,
-    pixel_y: gcp.sourceY,
-    geo_x: gcp.targetLng,
-    geo_y: gcp.targetLat,
-  };
-}
-
 /** Get minimum GCPs required for a transformation type */
 export function getMinGcps(transformType: TransformationType): number {
   const info = TRANSFORMATIONS.find(t => t.type === transformType);

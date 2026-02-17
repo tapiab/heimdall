@@ -73,7 +73,7 @@ async function init() {
   locationSearch.init('location-search');
 
   // Setup UI interactions
-  setupUI(
+  setupUI({
     mapManager,
     layerManager,
     measureTool,
@@ -88,8 +88,8 @@ async function init() {
     georeferenceTool,
     georeferencePanel,
     splitView,
-    locationSearch
-  );
+    locationSearch,
+  });
 
   // Fetch and display version
   try {

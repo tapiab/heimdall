@@ -15,6 +15,7 @@ import { MapManager } from './map-manager';
 import { LayerManager } from './layer-manager';
 import { showToast } from './notifications';
 import { LocationSearch } from './location-search';
+import { openFileDialog } from './ui';
 
 export interface SplitViewOptions {
   syncMovement?: boolean; // Sync pan/zoom between maps
@@ -46,7 +47,11 @@ export class SplitView {
   // Location search for secondary map
   private secondaryLocationSearch: LocationSearch | null;
 
-  constructor(mapManager: MapManager, configManager: ConfigManagerLike = null, options: SplitViewOptions = {}) {
+  constructor(
+    mapManager: MapManager,
+    configManager: ConfigManagerLike = null,
+    options: SplitViewOptions = {}
+  ) {
     this.primaryMapManager = mapManager;
     this.secondaryMapManager = null;
     this.secondaryLayerManager = null;
@@ -323,7 +328,17 @@ export class SplitView {
     `;
     basemapSelect.addEventListener('change', () => {
       if (this.secondaryMapManager) {
-        this.secondaryMapManager.setBasemap(basemapSelect.value as 'osm' | 'satellite' | 'topo' | 'carto-light' | 'carto-dark' | 'custom' | 'pixel' | 'none');
+        this.secondaryMapManager.setBasemap(
+          basemapSelect.value as
+            | 'osm'
+            | 'satellite'
+            | 'topo'
+            | 'carto-light'
+            | 'carto-dark'
+            | 'custom'
+            | 'pixel'
+            | 'none'
+        );
       }
     });
 
@@ -405,7 +420,7 @@ export class SplitView {
     addLayerBtn.id = 'split-add-layer-btn';
     addLayerBtn.className = 'add-layer-btn';
     addLayerBtn.textContent = '+ Add Layer';
-    addLayerBtn.addEventListener('click', () => this.openFileDialog());
+    addLayerBtn.addEventListener('click', () => this.openSecondaryFileDialog());
 
     // Fit bounds button
     const fitBoundsBtn = document.createElement('button');
@@ -448,54 +463,10 @@ export class SplitView {
     return leftPanel;
   }
 
-  /** Open file dialog and add layer via LayerManager */
-  private async openFileDialog(): Promise<void> {
+  /** Open file dialog and add layer via secondary LayerManager */
+  private async openSecondaryFileDialog(): Promise<void> {
     if (!this.secondaryLayerManager) return;
-
-    const { open } = await import('@tauri-apps/plugin-dialog');
-
-    // Vector file extensions
-    const vectorExtensions = [
-      'shp', 'geojson', 'json', 'gpkg', 'kml', 'kmz', 'gml', 'gpx', 'fgb', 'tab', 'mif',
-    ];
-
-    // Raster file extensions (GDAL supported)
-    const rasterExtensions = [
-      'tif', 'tiff', 'geotiff', 'img', 'vrt', 'ntf', 'nitf',
-      'dt0', 'dt1', 'dt2', 'hgt', 'ers', 'ecw',
-      'jp2', 'j2k', 'sid',
-      'png', 'jpg', 'jpeg', 'gif', 'bmp',
-      'hdr', 'bil', 'bsq', 'bip',
-      'grd', 'asc', 'dem',
-      'nc', 'hdf', 'h5',
-    ];
-
-    const allExtensions = [...rasterExtensions, ...vectorExtensions];
-
-    try {
-      const filePath = await open({
-        multiple: false,
-        filters: [
-          { name: 'Geospatial Files', extensions: allExtensions },
-          { name: 'Raster Images', extensions: rasterExtensions },
-          { name: 'Vector Files', extensions: vectorExtensions },
-          { name: 'All Files', extensions: ['*'] },
-        ],
-      });
-
-      if (!filePath) return;
-
-      const ext = filePath.split('.').pop()?.toLowerCase() || '';
-
-      if (vectorExtensions.includes(ext)) {
-        await this.secondaryLayerManager.addVectorLayer(filePath);
-      } else {
-        await this.secondaryLayerManager.addRasterLayer(filePath);
-      }
-    } catch (error) {
-      console.error('Failed to load layer:', error);
-      showToast(`Failed to load layer: ${error}`, 'error');
-    }
+    await openFileDialog(this.secondaryLayerManager);
   }
 
   /** Enable movement sync between maps */
@@ -561,12 +532,16 @@ export class SplitView {
   }
 
   /** Set basemap style on secondary map - delegates to MapManager */
-  setSecondaryBasemap(style: 'osm' | 'satellite' | 'topo' | 'carto-light' | 'carto-dark' | 'custom' | 'pixel' | 'none'): void {
+  setSecondaryBasemap(
+    style: 'osm' | 'satellite' | 'topo' | 'carto-light' | 'carto-dark' | 'custom' | 'pixel' | 'none'
+  ): void {
     if (!this.secondaryMapManager) return;
     this.secondaryMapManager.setBasemap(style);
 
     // Update basemap selector UI
-    const basemapSelect = document.getElementById('split-basemap-select') as HTMLSelectElement | null;
+    const basemapSelect = document.getElementById(
+      'split-basemap-select'
+    ) as HTMLSelectElement | null;
     if (basemapSelect) {
       basemapSelect.value = style;
     }

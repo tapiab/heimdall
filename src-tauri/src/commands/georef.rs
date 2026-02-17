@@ -13,6 +13,92 @@ use std::path::Path;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use tauri::{AppHandle, Emitter};
 
+/// Create a GTiff dataset with the correct band type matching the source data type.
+macro_rules! create_typed_dataset {
+    ($driver:expr, $path:expr, $w:expr, $h:expr, $bands:expr, $dtype:expr, $opts:expr) => {{
+        use gdal::raster::GdalDataType;
+        match $dtype {
+            GdalDataType::UInt8 => {
+                $driver.create_with_band_type_with_options::<u8, _>($path, $w, $h, $bands, $opts)
+            }
+            GdalDataType::UInt16 => {
+                $driver.create_with_band_type_with_options::<u16, _>($path, $w, $h, $bands, $opts)
+            }
+            GdalDataType::Int16 => {
+                $driver.create_with_band_type_with_options::<i16, _>($path, $w, $h, $bands, $opts)
+            }
+            GdalDataType::UInt32 => {
+                $driver.create_with_band_type_with_options::<u32, _>($path, $w, $h, $bands, $opts)
+            }
+            GdalDataType::Int32 => {
+                $driver.create_with_band_type_with_options::<i32, _>($path, $w, $h, $bands, $opts)
+            }
+            GdalDataType::Float32 => {
+                $driver.create_with_band_type_with_options::<f32, _>($path, $w, $h, $bands, $opts)
+            }
+            GdalDataType::Float64 => {
+                $driver.create_with_band_type_with_options::<f64, _>($path, $w, $h, $bands, $opts)
+            }
+            _ => $driver.create_with_band_type_with_options::<f64, _>($path, $w, $h, $bands, $opts),
+        }
+        .map_err(|e| format!("Failed to create output file: {}", e))
+    }};
+}
+
+/// Copy a raster band preserving the source data type.
+macro_rules! copy_band_typed {
+    ($src_band:expr, $dst_band:expr, $w:expr, $h:expr, $dtype:expr) => {{
+        use gdal::raster::GdalDataType;
+        match $dtype {
+            GdalDataType::UInt8 => {
+                let src_data = $src_band
+                    .read_as::<u8>((0, 0), ($w, $h), ($w, $h), None)
+                    .map_err(|e| format!("Failed to read source band: {}", e))?;
+                let mut buffer = gdal::raster::Buffer::new(($w, $h), src_data.data().to_vec());
+                $dst_band
+                    .write((0, 0), ($w, $h), &mut buffer)
+                    .map_err(|e| format!("Failed to write output band: {}", e))?;
+            }
+            GdalDataType::UInt16 => {
+                let src_data = $src_band
+                    .read_as::<u16>((0, 0), ($w, $h), ($w, $h), None)
+                    .map_err(|e| format!("Failed to read source band: {}", e))?;
+                let mut buffer = gdal::raster::Buffer::new(($w, $h), src_data.data().to_vec());
+                $dst_band
+                    .write((0, 0), ($w, $h), &mut buffer)
+                    .map_err(|e| format!("Failed to write output band: {}", e))?;
+            }
+            GdalDataType::Int16 => {
+                let src_data = $src_band
+                    .read_as::<i16>((0, 0), ($w, $h), ($w, $h), None)
+                    .map_err(|e| format!("Failed to read source band: {}", e))?;
+                let mut buffer = gdal::raster::Buffer::new(($w, $h), src_data.data().to_vec());
+                $dst_band
+                    .write((0, 0), ($w, $h), &mut buffer)
+                    .map_err(|e| format!("Failed to write output band: {}", e))?;
+            }
+            GdalDataType::Float32 => {
+                let src_data = $src_band
+                    .read_as::<f32>((0, 0), ($w, $h), ($w, $h), None)
+                    .map_err(|e| format!("Failed to read source band: {}", e))?;
+                let mut buffer = gdal::raster::Buffer::new(($w, $h), src_data.data().to_vec());
+                $dst_band
+                    .write((0, 0), ($w, $h), &mut buffer)
+                    .map_err(|e| format!("Failed to write output band: {}", e))?;
+            }
+            _ => {
+                let src_data = $src_band
+                    .read_as::<f64>((0, 0), ($w, $h), ($w, $h), None)
+                    .map_err(|e| format!("Failed to read source band: {}", e))?;
+                let mut buffer = gdal::raster::Buffer::new(($w, $h), src_data.data().to_vec());
+                $dst_band
+                    .write((0, 0), ($w, $h), &mut buffer)
+                    .map_err(|e| format!("Failed to write output band: {}", e))?;
+            }
+        }
+    }};
+}
+
 /// Ground Control Point data from frontend
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct GCPData {
@@ -615,8 +701,8 @@ pub async fn apply_georeference(
     emit_progress(&app, "init", 0.0, "Opening source image...");
 
     // Open source dataset
-    let src_ds = Dataset::open(&input_path)
-        .map_err(|e| format!("Failed to open source image: {}", e))?;
+    let src_ds =
+        Dataset::open(&input_path).map_err(|e| format!("Failed to open source image: {}", e))?;
 
     let (width, height) = src_ds.raster_size();
     let band_count = src_ds.raster_count();
@@ -687,8 +773,6 @@ fn apply_affine_georeference(
     height: usize,
     band_count: usize,
 ) -> Result<GeoreferenceResult, String> {
-    use gdal::raster::GdalDataType;
-
     emit_progress(app, "compute", 0.15, "Computing affine transformation...");
     let coeffs = solve_affine(gcps)?;
 
@@ -725,36 +809,25 @@ fn apply_affine_georeference(
 
     // Use gdal-rs create with options
     let mut options = CslStringList::new();
-    options.add_string("COMPRESS=LZW").map_err(|e| format!("Failed to set option: {}", e))?;
-    options.add_string("TILED=YES").map_err(|e| format!("Failed to set option: {}", e))?;
-    options.add_string("BIGTIFF=IF_SAFER").map_err(|e| format!("Failed to set option: {}", e))?;
+    options
+        .add_string("COMPRESS=LZW")
+        .map_err(|e| format!("Failed to set option: {}", e))?;
+    options
+        .add_string("TILED=YES")
+        .map_err(|e| format!("Failed to set option: {}", e))?;
+    options
+        .add_string("BIGTIFF=IF_SAFER")
+        .map_err(|e| format!("Failed to set option: {}", e))?;
 
-    let mut dst_ds = match data_type {
-        GdalDataType::UInt8 => driver
-            .create_with_band_type_with_options::<u8, _>(output_path_obj, width, height, band_count, &options)
-            .map_err(|e| format!("Failed to create output file: {}", e))?,
-        GdalDataType::UInt16 => driver
-            .create_with_band_type_with_options::<u16, _>(output_path_obj, width, height, band_count, &options)
-            .map_err(|e| format!("Failed to create output file: {}", e))?,
-        GdalDataType::Int16 => driver
-            .create_with_band_type_with_options::<i16, _>(output_path_obj, width, height, band_count, &options)
-            .map_err(|e| format!("Failed to create output file: {}", e))?,
-        GdalDataType::UInt32 => driver
-            .create_with_band_type_with_options::<u32, _>(output_path_obj, width, height, band_count, &options)
-            .map_err(|e| format!("Failed to create output file: {}", e))?,
-        GdalDataType::Int32 => driver
-            .create_with_band_type_with_options::<i32, _>(output_path_obj, width, height, band_count, &options)
-            .map_err(|e| format!("Failed to create output file: {}", e))?,
-        GdalDataType::Float32 => driver
-            .create_with_band_type_with_options::<f32, _>(output_path_obj, width, height, band_count, &options)
-            .map_err(|e| format!("Failed to create output file: {}", e))?,
-        GdalDataType::Float64 => driver
-            .create_with_band_type_with_options::<f64, _>(output_path_obj, width, height, band_count, &options)
-            .map_err(|e| format!("Failed to create output file: {}", e))?,
-        _ => driver
-            .create_with_band_type_with_options::<f64, _>(output_path_obj, width, height, band_count, &options)
-            .map_err(|e| format!("Failed to create output file: {}", e))?,
-    };
+    let mut dst_ds = create_typed_dataset!(
+        driver,
+        output_path_obj,
+        width,
+        height,
+        band_count,
+        data_type,
+        &options
+    )?;
 
     // Set geotransform BEFORE writing data (some drivers need this)
     dst_ds
@@ -764,7 +837,10 @@ fn apply_affine_georeference(
     // Set projection
     let crs = create_spatial_ref(target_crs)?;
     dst_ds
-        .set_projection(&crs.to_wkt().map_err(|e| format!("Failed to get WKT: {}", e))?)
+        .set_projection(
+            &crs.to_wkt()
+                .map_err(|e| format!("Failed to get WKT: {}", e))?,
+        )
         .map_err(|e| format!("Failed to set projection: {}", e))?;
 
     // Copy pixel data from source bands to destination bands
@@ -772,7 +848,12 @@ fn apply_affine_georeference(
 
     for band_idx in 1..=band_count {
         let progress = 0.3 + (band_idx as f32 / band_count as f32) * 0.5;
-        emit_progress(app, "copy", progress, &format!("Copying band {}/{}...", band_idx, band_count));
+        emit_progress(
+            app,
+            "copy",
+            progress,
+            &format!("Copying band {}/{}...", band_idx, band_count),
+        );
 
         let src_band = src_ds
             .rasterband(band_idx)
@@ -782,64 +863,20 @@ fn apply_affine_georeference(
             .rasterband(band_idx)
             .map_err(|e| format!("Failed to get output band {}: {}", band_idx, e))?;
 
-        // Copy data based on actual data type to avoid precision issues
-        match data_type {
-            GdalDataType::UInt8 => {
-                let src_data = src_band
-                    .read_as::<u8>((0, 0), (width, height), (width, height), None)
-                    .map_err(|e| format!("Failed to read source band: {}", e))?;
-                let mut buffer = gdal::raster::Buffer::new((width, height), src_data.data().to_vec());
-                dst_band
-                    .write((0, 0), (width, height), &mut buffer)
-                    .map_err(|e| format!("Failed to write output band: {}", e))?;
-            }
-            GdalDataType::UInt16 => {
-                let src_data = src_band
-                    .read_as::<u16>((0, 0), (width, height), (width, height), None)
-                    .map_err(|e| format!("Failed to read source band: {}", e))?;
-                let mut buffer = gdal::raster::Buffer::new((width, height), src_data.data().to_vec());
-                dst_band
-                    .write((0, 0), (width, height), &mut buffer)
-                    .map_err(|e| format!("Failed to write output band: {}", e))?;
-            }
-            GdalDataType::Int16 => {
-                let src_data = src_band
-                    .read_as::<i16>((0, 0), (width, height), (width, height), None)
-                    .map_err(|e| format!("Failed to read source band: {}", e))?;
-                let mut buffer = gdal::raster::Buffer::new((width, height), src_data.data().to_vec());
-                dst_band
-                    .write((0, 0), (width, height), &mut buffer)
-                    .map_err(|e| format!("Failed to write output band: {}", e))?;
-            }
-            GdalDataType::Float32 => {
-                let src_data = src_band
-                    .read_as::<f32>((0, 0), (width, height), (width, height), None)
-                    .map_err(|e| format!("Failed to read source band: {}", e))?;
-                let mut buffer = gdal::raster::Buffer::new((width, height), src_data.data().to_vec());
-                dst_band
-                    .write((0, 0), (width, height), &mut buffer)
-                    .map_err(|e| format!("Failed to write output band: {}", e))?;
-            }
-            _ => {
-                // Default to f64 for other types
-                let src_data = src_band
-                    .read_as::<f64>((0, 0), (width, height), (width, height), None)
-                    .map_err(|e| format!("Failed to read source band: {}", e))?;
-                let mut buffer = gdal::raster::Buffer::new((width, height), src_data.data().to_vec());
-                dst_band
-                    .write((0, 0), (width, height), &mut buffer)
-                    .map_err(|e| format!("Failed to write output band: {}", e))?;
-            }
-        }
+        copy_band_typed!(src_band, dst_band, width, height, data_type);
     }
 
     // Explicitly flush and close
     emit_progress(app, "finalize", 0.85, "Writing to disk...");
-    dst_ds.flush_cache().map_err(|e| format!("Failed to flush cache: {}", e))?;
+    dst_ds
+        .flush_cache()
+        .map_err(|e| format!("Failed to flush cache: {}", e))?;
     drop(dst_ds);
 
     // Verify the output file can be opened and has data
     emit_progress(app, "verify", 0.95, "Verifying output...");
+    // GDAL may not fully flush to disk before Dataset::open can read it,
+    // especially on macOS. Brief sleep ensures filesystem sync.
     std::thread::sleep(std::time::Duration::from_millis(200));
     match Dataset::open(output_path) {
         Ok(verify_ds) => {
@@ -885,7 +922,12 @@ fn apply_warped_georeference(
     // 2. Create output raster with appropriate geotransform
     // 3. Resample source pixels using inverse transform
 
-    emit_progress(app, "compute", 0.15, "Computing transformation coefficients...");
+    emit_progress(
+        app,
+        "compute",
+        0.15,
+        "Computing transformation coefficients...",
+    );
 
     // Determine transformation order or use TPS
     let (is_tps, order) = match transform_type {
@@ -931,14 +973,29 @@ fn apply_warped_georeference(
         })
         .collect();
 
-    let min_x = transformed_corners.iter().map(|(x, _)| *x).fold(f64::INFINITY, f64::min);
-    let max_x = transformed_corners.iter().map(|(x, _)| *x).fold(f64::NEG_INFINITY, f64::max);
-    let min_y = transformed_corners.iter().map(|(_, y)| *y).fold(f64::INFINITY, f64::min);
-    let max_y = transformed_corners.iter().map(|(_, y)| *y).fold(f64::NEG_INFINITY, f64::max);
+    let min_x = transformed_corners
+        .iter()
+        .map(|(x, _)| *x)
+        .fold(f64::INFINITY, f64::min);
+    let max_x = transformed_corners
+        .iter()
+        .map(|(x, _)| *x)
+        .fold(f64::NEG_INFINITY, f64::max);
+    let min_y = transformed_corners
+        .iter()
+        .map(|(_, y)| *y)
+        .fold(f64::INFINITY, f64::min);
+    let max_y = transformed_corners
+        .iter()
+        .map(|(_, y)| *y)
+        .fold(f64::NEG_INFINITY, f64::max);
 
-    // Compute output pixel size (approximate, based on input resolution)
+    // Compute output pixel size based on input resolution, then derive output
+    // dimensions from the transformed bounding box so the aspect ratio is correct.
     let pixel_width = (max_x - min_x) / width as f64;
     let pixel_height = -(max_y - min_y) / height as f64; // negative for top-down
+    let out_width = ((max_x - min_x) / pixel_width.abs()).ceil() as usize;
+    let out_height = ((max_y - min_y) / pixel_height.abs()).ceil() as usize;
 
     let geotransform = [
         min_x,        // origin_x
@@ -950,7 +1007,6 @@ fn apply_warped_georeference(
     ];
 
     // Get the data type from the first band
-    use gdal::raster::GdalDataType;
     let first_band = src_ds
         .rasterband(1)
         .map_err(|e| format!("Failed to get first band: {}", e))?;
@@ -961,36 +1017,25 @@ fn apply_warped_georeference(
     // Create output dataset with GTiff options, preserving source data type
     let output_path_obj = Path::new(output_path);
     let mut options = CslStringList::new();
-    options.add_string("COMPRESS=LZW").map_err(|e| format!("Failed to set option: {}", e))?;
-    options.add_string("TILED=YES").map_err(|e| format!("Failed to set option: {}", e))?;
-    options.add_string("BIGTIFF=IF_SAFER").map_err(|e| format!("Failed to set option: {}", e))?;
+    options
+        .add_string("COMPRESS=LZW")
+        .map_err(|e| format!("Failed to set option: {}", e))?;
+    options
+        .add_string("TILED=YES")
+        .map_err(|e| format!("Failed to set option: {}", e))?;
+    options
+        .add_string("BIGTIFF=IF_SAFER")
+        .map_err(|e| format!("Failed to set option: {}", e))?;
 
-    let mut dst_ds = match data_type {
-        GdalDataType::UInt8 => driver
-            .create_with_band_type_with_options::<u8, _>(output_path_obj, width, height, band_count, &options)
-            .map_err(|e| format!("Failed to create output file: {}", e))?,
-        GdalDataType::UInt16 => driver
-            .create_with_band_type_with_options::<u16, _>(output_path_obj, width, height, band_count, &options)
-            .map_err(|e| format!("Failed to create output file: {}", e))?,
-        GdalDataType::Int16 => driver
-            .create_with_band_type_with_options::<i16, _>(output_path_obj, width, height, band_count, &options)
-            .map_err(|e| format!("Failed to create output file: {}", e))?,
-        GdalDataType::UInt32 => driver
-            .create_with_band_type_with_options::<u32, _>(output_path_obj, width, height, band_count, &options)
-            .map_err(|e| format!("Failed to create output file: {}", e))?,
-        GdalDataType::Int32 => driver
-            .create_with_band_type_with_options::<i32, _>(output_path_obj, width, height, band_count, &options)
-            .map_err(|e| format!("Failed to create output file: {}", e))?,
-        GdalDataType::Float32 => driver
-            .create_with_band_type_with_options::<f32, _>(output_path_obj, width, height, band_count, &options)
-            .map_err(|e| format!("Failed to create output file: {}", e))?,
-        GdalDataType::Float64 => driver
-            .create_with_band_type_with_options::<f64, _>(output_path_obj, width, height, band_count, &options)
-            .map_err(|e| format!("Failed to create output file: {}", e))?,
-        _ => driver
-            .create_with_band_type_with_options::<f64, _>(output_path_obj, width, height, band_count, &options)
-            .map_err(|e| format!("Failed to create output file: {}", e))?,
-    };
+    let mut dst_ds = create_typed_dataset!(
+        driver,
+        output_path_obj,
+        out_width,
+        out_height,
+        band_count,
+        data_type,
+        &options
+    )?;
 
     // Set geotransform and projection
     dst_ds
@@ -999,16 +1044,23 @@ fn apply_warped_georeference(
 
     let crs = create_spatial_ref(target_crs)?;
     dst_ds
-        .set_projection(&crs.to_wkt().map_err(|e| format!("Failed to get WKT: {}", e))?)
+        .set_projection(
+            &crs.to_wkt()
+                .map_err(|e| format!("Failed to get WKT: {}", e))?,
+        )
         .map_err(|e| format!("Failed to set projection: {}", e))?;
 
-    // For each band, resample using inverse transform
-    // This is a simplified nearest-neighbor resampling
+    // For each band, resample using inverse transform with bilinear interpolation
     emit_progress(app, "warp", 0.25, "Warping raster data...");
 
     for band_idx in 1..=band_count {
         let band_progress_start = 0.25 + (band_idx as f32 - 1.0) / band_count as f32 * 0.6;
-        emit_progress(app, "warp", band_progress_start, &format!("Warping band {}/{}...", band_idx, band_count));
+        emit_progress(
+            app,
+            "warp",
+            band_progress_start,
+            &format!("Warping band {}/{}...", band_idx, band_count),
+        );
 
         let src_band = src_ds
             .rasterband(band_idx)
@@ -1020,28 +1072,29 @@ fn apply_warped_georeference(
             .map_err(|e| format!("Failed to read source band: {}", e))?;
         let src_data = src_buffer.data();
 
-        // Create output buffer as f64 to preserve precision
-        // Use parallel processing for the warping loop
         let rows_completed = AtomicUsize::new(0);
-        let total_rows = height;
+        let total_rows = out_height;
 
         // Process rows in parallel
-        let dst_data: Vec<f64> = (0..height)
+        let dst_data: Vec<f64> = (0..out_height)
             .into_par_iter()
             .flat_map(|out_y| {
-                // Process one row
-                let row: Vec<f64> = (0..width)
+                let row: Vec<f64> = (0..out_width)
                     .map(|out_x| {
                         // Convert output pixel to geo coordinates
                         let geo_x = geotransform[0] + (out_x as f64 + 0.5) * geotransform[1];
                         let geo_y = geotransform[3] + (out_y as f64 + 0.5) * geotransform[5];
 
+                        // Use output pixel position as initial guess for inverse transform
+                        let init_px = out_x as f64 * (width as f64 / out_width as f64);
+                        let init_py = out_y as f64 * (height as f64 / out_height as f64);
+
                         // Find source pixel using iterative inverse
                         let (src_x, src_y) = find_source_pixel(
                             geo_x,
                             geo_y,
-                            width,
-                            height,
+                            init_px,
+                            init_py,
                             &coeffs,
                             order,
                             tps.as_ref(),
@@ -1049,27 +1102,28 @@ fn apply_warped_georeference(
                         );
 
                         // Bilinear interpolation
-                        if src_x >= 0.0 && src_x < (width - 1) as f64 && src_y >= 0.0 && src_y < (height - 1) as f64 {
+                        if src_x >= 0.0
+                            && src_x < (width - 1) as f64
+                            && src_y >= 0.0
+                            && src_y < (height - 1) as f64
+                        {
                             let x0 = src_x.floor() as usize;
                             let y0 = src_y.floor() as usize;
                             let x1 = x0 + 1;
                             let y1 = y0 + 1;
 
-                            // Fractional parts
                             let dx = src_x - x0 as f64;
                             let dy = src_y - y0 as f64;
 
-                            // Get 4 surrounding pixels
                             let p00 = src_data[y0 * width + x0];
                             let p10 = src_data[y0 * width + x1];
                             let p01 = src_data[y1 * width + x0];
                             let p11 = src_data[y1 * width + x1];
 
-                            // Bilinear interpolation
                             let value = p00 * (1.0 - dx) * (1.0 - dy)
-                                      + p10 * dx * (1.0 - dy)
-                                      + p01 * (1.0 - dx) * dy
-                                      + p11 * dx * dy;
+                                + p10 * dx * (1.0 - dy)
+                                + p01 * (1.0 - dx) * dy
+                                + p11 * dx * dy;
                             return value;
                         }
                         0.0
@@ -1078,11 +1132,21 @@ fn apply_warped_georeference(
 
                 // Update progress counter
                 let completed = rows_completed.fetch_add(1, Ordering::Relaxed);
-                // Emit progress every 5% of rows (from main thread approximation)
                 if completed % (total_rows / 20).max(1) == 0 {
                     let row_progress = completed as f32 / total_rows as f32;
-                    let band_progress = band_progress_start + row_progress * (0.6 / band_count as f32);
-                    emit_progress(app, "warp", band_progress, &format!("Warping band {}/{} ({:.0}%)...", band_idx, band_count, row_progress * 100.0));
+                    let band_progress =
+                        band_progress_start + row_progress * (0.6 / band_count as f32);
+                    emit_progress(
+                        app,
+                        "warp",
+                        band_progress,
+                        &format!(
+                            "Warping band {}/{} ({:.0}%)...",
+                            band_idx,
+                            band_count,
+                            row_progress * 100.0
+                        ),
+                    );
                 }
 
                 row
@@ -1090,13 +1154,13 @@ fn apply_warped_georeference(
             .collect();
 
         // Write output band using Buffer
-        let mut dst_buffer = gdal::raster::Buffer::new((width, height), dst_data);
+        let mut dst_buffer = gdal::raster::Buffer::new((out_width, out_height), dst_data);
         let mut dst_band = dst_ds
             .rasterband(band_idx)
             .map_err(|e| format!("Failed to get output band {}: {}", band_idx, e))?;
 
         dst_band
-            .write((0, 0), (width, height), &mut dst_buffer)
+            .write((0, 0), (out_width, out_height), &mut dst_buffer)
             .map_err(|e| format!("Failed to write output band: {}", e))?;
     }
 
@@ -1107,6 +1171,8 @@ fn apply_warped_georeference(
 
     // Verify the output file can be opened
     emit_progress(app, "verify", 0.95, "Verifying output...");
+    // GDAL may not fully flush to disk before Dataset::open can read it,
+    // especially on macOS. Brief sleep ensures filesystem sync.
     std::thread::sleep(std::time::Duration::from_millis(100));
     match Dataset::open(output_path) {
         Ok(_) => {
@@ -1126,21 +1192,20 @@ fn apply_warped_georeference(
 }
 
 /// Find source pixel coordinates for a given geo coordinate
-/// Uses iterative search for inverse transform
+/// Uses Newton-Raphson iterative search for inverse transform
 fn find_source_pixel(
     target_geo_x: f64,
     target_geo_y: f64,
-    width: usize,
-    height: usize,
+    init_px: f64,
+    init_py: f64,
     coeffs: &[f64],
     order: u8,
     tps: Option<&ThinPlateSpline>,
     is_tps: bool,
 ) -> (f64, f64) {
     // Newton-Raphson iteration to find inverse transform
-    // Start from center of image (good initial guess for most cases)
-    let mut px = width as f64 / 2.0;
-    let mut py = height as f64 / 2.0;
+    let mut px = init_px;
+    let mut py = init_py;
 
     // Reduced iterations (10 is usually enough) and practical tolerance
     // 0.01 pixel accuracy is more than sufficient for nearest-neighbor sampling
@@ -1191,12 +1256,6 @@ fn find_source_pixel(
         // Update pixel coordinates
         px += inv_j11 * dx + inv_j12 * dy;
         py += inv_j21 * dx + inv_j22 * dy;
-
-        // Clamp to valid range with some margin
-        let w = width as f64;
-        let h = height as f64;
-        px = px.clamp(-w, 2.0 * w);
-        py = py.clamp(-h, 2.0 * h);
     }
 
     (px, py)
@@ -1210,10 +1269,30 @@ mod tests {
         // Simple affine transformation test GCPs
         // Maps pixel coordinates to geographic coordinates
         vec![
-            GCPData { pixel_x: 0.0, pixel_y: 0.0, geo_x: -122.5, geo_y: 37.8 },
-            GCPData { pixel_x: 100.0, pixel_y: 0.0, geo_x: -122.4, geo_y: 37.8 },
-            GCPData { pixel_x: 0.0, pixel_y: 100.0, geo_x: -122.5, geo_y: 37.7 },
-            GCPData { pixel_x: 100.0, pixel_y: 100.0, geo_x: -122.4, geo_y: 37.7 },
+            GCPData {
+                pixel_x: 0.0,
+                pixel_y: 0.0,
+                geo_x: -122.5,
+                geo_y: 37.8,
+            },
+            GCPData {
+                pixel_x: 100.0,
+                pixel_y: 0.0,
+                geo_x: -122.4,
+                geo_y: 37.8,
+            },
+            GCPData {
+                pixel_x: 0.0,
+                pixel_y: 100.0,
+                geo_x: -122.5,
+                geo_y: 37.7,
+            },
+            GCPData {
+                pixel_x: 100.0,
+                pixel_y: 100.0,
+                geo_x: -122.4,
+                geo_y: 37.7,
+            },
         ]
     }
 
@@ -1237,17 +1316,42 @@ mod tests {
         // Test forward transformation at GCP points
         for gcp in &gcps {
             let (pred_x, pred_y) = apply_polynomial(&coeffs, gcp.pixel_x, gcp.pixel_y, 1);
-            assert!((pred_x - gcp.geo_x).abs() < 1e-6, "X prediction off: {} vs {}", pred_x, gcp.geo_x);
-            assert!((pred_y - gcp.geo_y).abs() < 1e-6, "Y prediction off: {} vs {}", pred_y, gcp.geo_y);
+            assert!(
+                (pred_x - gcp.geo_x).abs() < 1e-6,
+                "X prediction off: {} vs {}",
+                pred_x,
+                gcp.geo_x
+            );
+            assert!(
+                (pred_y - gcp.geo_y).abs() < 1e-6,
+                "Y prediction off: {} vs {}",
+                pred_y,
+                gcp.geo_y
+            );
         }
     }
 
     #[test]
     fn test_solve_affine_minimum_gcps() {
         let gcps = vec![
-            GCPData { pixel_x: 0.0, pixel_y: 0.0, geo_x: 0.0, geo_y: 0.0 },
-            GCPData { pixel_x: 100.0, pixel_y: 0.0, geo_x: 1.0, geo_y: 0.0 },
-            GCPData { pixel_x: 0.0, pixel_y: 100.0, geo_x: 0.0, geo_y: 1.0 },
+            GCPData {
+                pixel_x: 0.0,
+                pixel_y: 0.0,
+                geo_x: 0.0,
+                geo_y: 0.0,
+            },
+            GCPData {
+                pixel_x: 100.0,
+                pixel_y: 0.0,
+                geo_x: 1.0,
+                geo_y: 0.0,
+            },
+            GCPData {
+                pixel_x: 0.0,
+                pixel_y: 100.0,
+                geo_x: 0.0,
+                geo_y: 1.0,
+            },
         ];
 
         let coeffs = solve_affine(&gcps).expect("Should solve with 3 GCPs");
@@ -1257,8 +1361,18 @@ mod tests {
     #[test]
     fn test_solve_affine_insufficient_gcps() {
         let gcps = vec![
-            GCPData { pixel_x: 0.0, pixel_y: 0.0, geo_x: 0.0, geo_y: 0.0 },
-            GCPData { pixel_x: 100.0, pixel_y: 0.0, geo_x: 1.0, geo_y: 0.0 },
+            GCPData {
+                pixel_x: 0.0,
+                pixel_y: 0.0,
+                geo_x: 0.0,
+                geo_y: 0.0,
+            },
+            GCPData {
+                pixel_x: 100.0,
+                pixel_y: 0.0,
+                geo_x: 1.0,
+                geo_y: 0.0,
+            },
         ];
 
         let result = solve_affine(&gcps);
@@ -1273,7 +1387,11 @@ mod tests {
         let (rms, residuals) = calculate_residuals(&gcps, &coeffs, 1);
 
         // With exact fit, RMS should be very small
-        assert!(rms < 1e-10, "RMS should be near zero for exact fit: {}", rms);
+        assert!(
+            rms < 1e-10,
+            "RMS should be near zero for exact fit: {}",
+            rms
+        );
         assert_eq!(residuals.len(), gcps.len());
 
         for r in residuals {
@@ -1319,8 +1437,18 @@ mod tests {
         // TPS should exactly interpolate at GCP points
         for gcp in &gcps {
             let (pred_x, pred_y) = tps.transform(gcp.pixel_x, gcp.pixel_y);
-            assert!((pred_x - gcp.geo_x).abs() < 1e-6, "TPS X off: {} vs {}", pred_x, gcp.geo_x);
-            assert!((pred_y - gcp.geo_y).abs() < 1e-6, "TPS Y off: {} vs {}", pred_y, gcp.geo_y);
+            assert!(
+                (pred_x - gcp.geo_x).abs() < 1e-6,
+                "TPS X off: {} vs {}",
+                pred_x,
+                gcp.geo_x
+            );
+            assert!(
+                (pred_y - gcp.geo_y).abs() < 1e-6,
+                "TPS Y off: {} vs {}",
+                pred_y,
+                gcp.geo_y
+            );
         }
     }
 
@@ -1392,29 +1520,63 @@ mod tests {
         // The GCPs must span enough variation for x^2, xy, y^2 terms
         // Need at least 3 distinct x AND 3 distinct y values to avoid singular matrix
         let gcps = vec![
-            GCPData { pixel_x: 0.0, pixel_y: 0.0, geo_x: 0.0, geo_y: 0.0 },
-            GCPData { pixel_x: 100.0, pixel_y: 0.0, geo_x: 1.0, geo_y: 0.0 },
-            GCPData { pixel_x: 0.0, pixel_y: 100.0, geo_x: 0.0, geo_y: 1.0 },
-            GCPData { pixel_x: 100.0, pixel_y: 100.0, geo_x: 1.0, geo_y: 1.0 },
-            GCPData { pixel_x: 50.0, pixel_y: 50.0, geo_x: 0.5, geo_y: 0.5 },
-            GCPData { pixel_x: 100.0, pixel_y: 50.0, geo_x: 1.0, geo_y: 0.5 },
+            GCPData {
+                pixel_x: 0.0,
+                pixel_y: 0.0,
+                geo_x: 0.0,
+                geo_y: 0.0,
+            },
+            GCPData {
+                pixel_x: 100.0,
+                pixel_y: 0.0,
+                geo_x: 1.0,
+                geo_y: 0.0,
+            },
+            GCPData {
+                pixel_x: 0.0,
+                pixel_y: 100.0,
+                geo_x: 0.0,
+                geo_y: 1.0,
+            },
+            GCPData {
+                pixel_x: 100.0,
+                pixel_y: 100.0,
+                geo_x: 1.0,
+                geo_y: 1.0,
+            },
+            GCPData {
+                pixel_x: 50.0,
+                pixel_y: 50.0,
+                geo_x: 0.5,
+                geo_y: 0.5,
+            },
+            GCPData {
+                pixel_x: 100.0,
+                pixel_y: 50.0,
+                geo_x: 1.0,
+                geo_y: 0.5,
+            },
         ];
 
         let coeffs = solve_polynomial2(&gcps);
-        assert!(coeffs.is_ok(), "solve_polynomial2 failed: {:?}", coeffs.err());
+        assert!(
+            coeffs.is_ok(),
+            "solve_polynomial2 failed: {:?}",
+            coeffs.err()
+        );
         assert_eq!(coeffs.unwrap().len(), 12); // 6 for X + 6 for Y
     }
 
     #[test]
     fn test_polynomial2_insufficient_gcps() {
-        let gcps: Vec<GCPData> = (0..5).map(|i| {
-            GCPData {
+        let gcps: Vec<GCPData> = (0..5)
+            .map(|i| GCPData {
                 pixel_x: i as f64 * 10.0,
                 pixel_y: i as f64 * 10.0,
                 geo_x: i as f64 * 0.1,
                 geo_y: i as f64 * 0.1,
-            }
-        }).collect();
+            })
+            .collect();
 
         let result = solve_polynomial2(&gcps);
         assert!(result.is_err());
@@ -1433,9 +1595,9 @@ mod tests {
         let dy = 0.5;
 
         let value = p00 * (1.0 - dx) * (1.0 - dy)
-                  + p10 * dx * (1.0 - dy)
-                  + p01 * (1.0 - dx) * dy
-                  + p11 * dx * dy;
+            + p10 * dx * (1.0 - dy)
+            + p01 * (1.0 - dx) * dy
+            + p11 * dx * dy;
 
         assert!((value - 2.5).abs() < 1e-10);
     }
