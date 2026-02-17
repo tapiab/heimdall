@@ -20,20 +20,21 @@ import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { save } from '@tauri-apps/plugin-dialog';
 import { showToast, showLoading, hideLoading } from './notifications';
 
+import {
+  getMinGcps,
+  type GCP,
+  type GCPCollectionState,
+  type TransformationType,
+  type TransformResult,
+  type GeoreferenceResult,
+} from './georeference-types';
+
 /** Progress event payload from Rust backend */
 interface GeoreferenceProgress {
   stage: string;
   progress: number;
   message: string;
 }
-import type {
-  GCP,
-  GCPCollectionState,
-  TransformationType,
-  TransformResult,
-  GeoreferenceResult,
-} from './georeference-types';
-import { getMinGcps, TRANSFORMATIONS } from './georeference-types';
 
 /** Interface for MapManager */
 interface MapManager {

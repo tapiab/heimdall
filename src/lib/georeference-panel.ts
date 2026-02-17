@@ -4,8 +4,7 @@
 
 import { showToast } from './notifications';
 import type { GeoreferenceTool } from './georeference-tool';
-import type { GCP, TransformationType, TransformResult } from './georeference-types';
-import { TRANSFORMATIONS, getMinGcps } from './georeference-types';
+import { TRANSFORMATIONS, getMinGcps, type TransformationType } from './georeference-types';
 
 export class GeoreferencePanel {
   private tool: GeoreferenceTool;

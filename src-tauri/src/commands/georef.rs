@@ -2,6 +2,8 @@
 //!
 //! Supports polynomial transformations (1st, 2nd, 3rd order) and thin plate spline (TPS).
 
+#![allow(clippy::too_many_arguments)]
+
 use gdal::cpl::CslStringList;
 use gdal::spatial_ref::SpatialRef;
 use gdal::{Dataset, Driver, DriverManager};
@@ -663,8 +665,8 @@ pub async fn apply_georeference(
 
 /// Create CRS from string (EPSG:xxxx or WKT)
 fn create_spatial_ref(target_crs: &str) -> Result<SpatialRef, String> {
-    if target_crs.starts_with("EPSG:") {
-        let epsg: u32 = target_crs[5..]
+    if let Some(code) = target_crs.strip_prefix("EPSG:") {
+        let epsg: u32 = code
             .parse()
             .map_err(|_| format!("Invalid EPSG code: {}", target_crs))?;
         SpatialRef::from_epsg(epsg).map_err(|e| format!("Failed to create SRS: {}", e))
@@ -1198,4 +1200,243 @@ fn find_source_pixel(
     }
 
     (px, py)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn create_test_gcps() -> Vec<GCPData> {
+        // Simple affine transformation test GCPs
+        // Maps pixel coordinates to geographic coordinates
+        vec![
+            GCPData { pixel_x: 0.0, pixel_y: 0.0, geo_x: -122.5, geo_y: 37.8 },
+            GCPData { pixel_x: 100.0, pixel_y: 0.0, geo_x: -122.4, geo_y: 37.8 },
+            GCPData { pixel_x: 0.0, pixel_y: 100.0, geo_x: -122.5, geo_y: 37.7 },
+            GCPData { pixel_x: 100.0, pixel_y: 100.0, geo_x: -122.4, geo_y: 37.7 },
+        ]
+    }
+
+    #[test]
+    fn test_min_gcps_for_transform() {
+        assert_eq!(min_gcps_for_transform("polynomial1"), 3);
+        assert_eq!(min_gcps_for_transform("polynomial2"), 6);
+        assert_eq!(min_gcps_for_transform("polynomial3"), 10);
+        assert_eq!(min_gcps_for_transform("tps"), 3);
+        assert_eq!(min_gcps_for_transform("unknown"), 3);
+    }
+
+    #[test]
+    fn test_solve_affine_basic() {
+        let gcps = create_test_gcps();
+        let coeffs = solve_affine(&gcps).expect("Should solve affine");
+
+        // Should have 6 coefficients
+        assert_eq!(coeffs.len(), 6);
+
+        // Test forward transformation at GCP points
+        for gcp in &gcps {
+            let (pred_x, pred_y) = apply_polynomial(&coeffs, gcp.pixel_x, gcp.pixel_y, 1);
+            assert!((pred_x - gcp.geo_x).abs() < 1e-6, "X prediction off: {} vs {}", pred_x, gcp.geo_x);
+            assert!((pred_y - gcp.geo_y).abs() < 1e-6, "Y prediction off: {} vs {}", pred_y, gcp.geo_y);
+        }
+    }
+
+    #[test]
+    fn test_solve_affine_minimum_gcps() {
+        let gcps = vec![
+            GCPData { pixel_x: 0.0, pixel_y: 0.0, geo_x: 0.0, geo_y: 0.0 },
+            GCPData { pixel_x: 100.0, pixel_y: 0.0, geo_x: 1.0, geo_y: 0.0 },
+            GCPData { pixel_x: 0.0, pixel_y: 100.0, geo_x: 0.0, geo_y: 1.0 },
+        ];
+
+        let coeffs = solve_affine(&gcps).expect("Should solve with 3 GCPs");
+        assert_eq!(coeffs.len(), 6);
+    }
+
+    #[test]
+    fn test_solve_affine_insufficient_gcps() {
+        let gcps = vec![
+            GCPData { pixel_x: 0.0, pixel_y: 0.0, geo_x: 0.0, geo_y: 0.0 },
+            GCPData { pixel_x: 100.0, pixel_y: 0.0, geo_x: 1.0, geo_y: 0.0 },
+        ];
+
+        let result = solve_affine(&gcps);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_calculate_residuals() {
+        let gcps = create_test_gcps();
+        let coeffs = solve_affine(&gcps).expect("Should solve affine");
+
+        let (rms, residuals) = calculate_residuals(&gcps, &coeffs, 1);
+
+        // With exact fit, RMS should be very small
+        assert!(rms < 1e-10, "RMS should be near zero for exact fit: {}", rms);
+        assert_eq!(residuals.len(), gcps.len());
+
+        for r in residuals {
+            assert!(r < 1e-10, "Residual should be near zero: {}", r);
+        }
+    }
+
+    #[test]
+    fn test_apply_polynomial_order1() {
+        // Simple scale transform: geo = pixel * 0.01
+        let coeffs = vec![0.0, 0.01, 0.0, 0.0, 0.0, -0.01];
+
+        let (x, y) = apply_polynomial(&coeffs, 100.0, 100.0, 1);
+        assert!((x - 1.0).abs() < 1e-10);
+        assert!((y - (-1.0)).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_solve_3x3_identity() {
+        let a = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
+        let b = [1.0, 2.0, 3.0];
+
+        let result = solve_3x3(&a, &b).expect("Should solve");
+        assert!((result[0] - 1.0).abs() < 1e-10);
+        assert!((result[1] - 2.0).abs() < 1e-10);
+        assert!((result[2] - 3.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_solve_3x3_singular() {
+        let a = [[1.0, 2.0, 3.0], [2.0, 4.0, 6.0], [1.0, 1.0, 1.0]];
+        let b = [1.0, 2.0, 3.0];
+
+        let result = solve_3x3(&a, &b);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_tps_basic() {
+        let gcps = create_test_gcps();
+        let tps = ThinPlateSpline::new(&gcps).expect("Should create TPS");
+
+        // TPS should exactly interpolate at GCP points
+        for gcp in &gcps {
+            let (pred_x, pred_y) = tps.transform(gcp.pixel_x, gcp.pixel_y);
+            assert!((pred_x - gcp.geo_x).abs() < 1e-6, "TPS X off: {} vs {}", pred_x, gcp.geo_x);
+            assert!((pred_y - gcp.geo_y).abs() < 1e-6, "TPS Y off: {} vs {}", pred_y, gcp.geo_y);
+        }
+    }
+
+    #[test]
+    fn test_tps_residuals() {
+        let gcps = create_test_gcps();
+        let tps = ThinPlateSpline::new(&gcps).expect("Should create TPS");
+
+        let (rms, residuals) = tps.calculate_residuals(&gcps);
+
+        // TPS exactly interpolates, so RMS should be near zero
+        assert!(rms < 1e-6, "TPS RMS should be near zero: {}", rms);
+        for r in residuals {
+            assert!(r < 1e-6, "TPS residual should be near zero: {}", r);
+        }
+    }
+
+    #[test]
+    fn test_create_spatial_ref_epsg() {
+        let srs = create_spatial_ref("EPSG:4326").expect("Should create WGS84");
+        assert!(srs.is_geographic());
+    }
+
+    #[test]
+    fn test_create_spatial_ref_invalid() {
+        let result = create_spatial_ref("EPSG:invalid");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_gcp_data_serialization() {
+        let gcp = GCPData {
+            pixel_x: 100.0,
+            pixel_y: 200.0,
+            geo_x: -122.5,
+            geo_y: 37.8,
+        };
+
+        let json = serde_json::to_string(&gcp).expect("Should serialize");
+        let parsed: GCPData = serde_json::from_str(&json).expect("Should deserialize");
+
+        assert!((parsed.pixel_x - gcp.pixel_x).abs() < 1e-10);
+        assert!((parsed.pixel_y - gcp.pixel_y).abs() < 1e-10);
+        assert!((parsed.geo_x - gcp.geo_x).abs() < 1e-10);
+        assert!((parsed.geo_y - gcp.geo_y).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_transform_result_serialization() {
+        let result = TransformResult {
+            success: true,
+            rms_error: Some(0.001),
+            residuals: Some(vec![0.0005, 0.0008, 0.0012]),
+            forward_transform: Some(vec![0.0, 0.01, 0.0, 0.0, 0.0, -0.01]),
+            error: None,
+        };
+
+        let json = serde_json::to_string(&result).expect("Should serialize");
+        let parsed: TransformResult = serde_json::from_str(&json).expect("Should deserialize");
+
+        assert!(parsed.success);
+        assert!(parsed.rms_error.is_some());
+        assert_eq!(parsed.residuals.unwrap().len(), 3);
+    }
+
+    #[test]
+    fn test_polynomial2_minimum_gcps() {
+        // polynomial2 requires 6 GCPs with good spatial distribution
+        // The GCPs must span enough variation for x^2, xy, y^2 terms
+        // Need at least 3 distinct x AND 3 distinct y values to avoid singular matrix
+        let gcps = vec![
+            GCPData { pixel_x: 0.0, pixel_y: 0.0, geo_x: 0.0, geo_y: 0.0 },
+            GCPData { pixel_x: 100.0, pixel_y: 0.0, geo_x: 1.0, geo_y: 0.0 },
+            GCPData { pixel_x: 0.0, pixel_y: 100.0, geo_x: 0.0, geo_y: 1.0 },
+            GCPData { pixel_x: 100.0, pixel_y: 100.0, geo_x: 1.0, geo_y: 1.0 },
+            GCPData { pixel_x: 50.0, pixel_y: 50.0, geo_x: 0.5, geo_y: 0.5 },
+            GCPData { pixel_x: 100.0, pixel_y: 50.0, geo_x: 1.0, geo_y: 0.5 },
+        ];
+
+        let coeffs = solve_polynomial2(&gcps);
+        assert!(coeffs.is_ok(), "solve_polynomial2 failed: {:?}", coeffs.err());
+        assert_eq!(coeffs.unwrap().len(), 12); // 6 for X + 6 for Y
+    }
+
+    #[test]
+    fn test_polynomial2_insufficient_gcps() {
+        let gcps: Vec<GCPData> = (0..5).map(|i| {
+            GCPData {
+                pixel_x: i as f64 * 10.0,
+                pixel_y: i as f64 * 10.0,
+                geo_x: i as f64 * 0.1,
+                geo_y: i as f64 * 0.1,
+            }
+        }).collect();
+
+        let result = solve_polynomial2(&gcps);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_bilinear_interpolation_concept() {
+        // Test the bilinear interpolation math used in warping
+        // p00=1, p10=2, p01=3, p11=4 at corners
+        // At center (0.5, 0.5): expected = 1*0.25 + 2*0.25 + 3*0.25 + 4*0.25 = 2.5
+        let p00 = 1.0f64;
+        let p10 = 2.0;
+        let p01 = 3.0;
+        let p11 = 4.0;
+        let dx = 0.5;
+        let dy = 0.5;
+
+        let value = p00 * (1.0 - dx) * (1.0 - dy)
+                  + p10 * dx * (1.0 - dy)
+                  + p01 * (1.0 - dx) * dy
+                  + p11 * dx * dy;
+
+        assert!((value - 2.5).abs() < 1e-10);
+    }
 }

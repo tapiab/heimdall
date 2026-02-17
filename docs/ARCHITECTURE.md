@@ -34,6 +34,10 @@ Heimdall is a desktop application built with Tauri, combining a Rust backend for
 │  ┌─────────────────────────────────────────────────────────┐ │
 │  │ ConfigManager - User settings persistence (basemaps)   │ │
 │  └─────────────────────────────────────────────────────────┘ │
+│                                                              │
+│  ┌─────────────────────────────────────────────────────────┐ │
+│  │ Tools: GeoreferenceTool, MeasureTool, AnnotationTool...│ │
+│  └─────────────────────────────────────────────────────────┘ │
 └─────────────────────────────────────────────────────────────┘
                         ↕ IPC (Tauri Commands)
 ┌─────────────────────────────────────────────────────────────┐
@@ -73,9 +77,13 @@ heimdall/
 │   │   ├── config-manager.js     # User configuration persistence
 │   │   ├── geo-utils.js          # Geospatial utility functions
 │   │   ├── ui.js                 # Keyboard shortcuts, file dialog
+│   │   ├── georeference-tool.ts  # GCP collection & georeferencing workflow
+│   │   ├── georeference-panel.ts # Georeferencing UI panel
+│   │   ├── georeference-types.ts # TypeScript types for georeferencing
 │   │   └── __tests__/            # JavaScript unit tests
 │   │       ├── geo-utils.test.js # Utility function tests
 │   │       ├── config-manager.test.js # Config manager tests
+│   │       ├── georeference-types.test.ts # Georeferencing type tests
 │   │       ├── fixtures.test.js  # Fixture-based tests
 │   │       └── fixtures.js       # Test data fixtures
 │   └── styles/
@@ -89,7 +97,8 @@ heimdall/
 │       ├── commands/
 │       │   ├── mod.rs            # Module exports
 │       │   ├── raster.rs         # Raster commands (open, tile, stats)
-│       │   └── vector.rs         # Vector commands (open, read features)
+│       │   ├── vector.rs         # Vector commands (open, read features)
+│       │   └── georef.rs         # Georeferencing commands (transformation, output)
 │       └── gdal/
 │           ├── mod.rs            # Module exports
 │           ├── dataset_cache.rs  # LRU cache for dataset paths
@@ -158,6 +167,47 @@ Return PNG bytes to frontend
 MapLibre renders tile
 ```
 
+### Georeferencing
+
+```
+User clicks Georeference tool (G key)
+           ↓
+Panel shows: source layer dropdown, transform type
+           ↓
+User clicks "+ Add GCP"
+           ↓
+State: COLLECTING_SOURCE
+User clicks on non-georeferenced image
+           ↓
+Source pixel recorded, red marker placed
+State: COLLECTING_TARGET
+           ↓
+User clicks on basemap (or enters coords manually)
+           ↓
+Target coordinates recorded, green marker placed
+GCP added to list, repeat for more GCPs
+           ↓
+User clicks "Calculate"
+invoke('calculate_transformation', gcps, transform_type)
+           ↓
+Rust backend:
+1. Build design matrix from GCPs
+2. Solve least-squares for transform coefficients
+3. Calculate RMS error and per-point residuals
+           ↓
+Frontend displays RMS error, updates residuals in GCP list
+           ↓
+User clicks "Apply & Save"
+invoke('apply_georeference', ...)
+           ↓
+Rust backend:
+1. For affine: set geotransform directly
+2. For polynomial2/3/TPS: warp image using inverse transform
+3. Write output GeoTIFF with CRS
+           ↓
+New georeferenced layer loaded automatically
+```
+
 ## Key Components
 
 ### Frontend
@@ -188,6 +238,14 @@ MapLibre renders tile
 - Keyboard shortcut handling
 - Help overlay
 
+#### GeoreferenceTool (`georeference-tool.ts`)
+- State machine for GCP collection (IDLE → COLLECTING_SOURCE → COLLECTING_TARGET)
+- MapLibre marker management for source (red) and target (green) GCPs
+- Click handlers on image and basemap for coordinate capture
+- Manual coordinate entry dialog for precise survey points
+- Integration with backend for transformation calculation and output generation
+- Progress event listener for warping feedback
+
 ### Backend
 
 #### DatasetCache (`dataset_cache.rs`)
@@ -214,6 +272,23 @@ MapLibre renders tile
 - `get_raster_stats` - Band statistics
 - `get_histogram` - Histogram data for band
 - `close_dataset` - Remove from cache
+
+#### Georeferencing Commands (`georef.rs`)
+- `calculate_transformation` - Compute transformation coefficients from GCPs
+- `apply_georeference` - Generate georeferenced GeoTIFF output
+
+**Transformation Types:**
+- **Polynomial 1 (Affine)** - 3+ GCPs, linear transformation
+- **Polynomial 2** - 6+ GCPs, quadratic terms for moderate distortion
+- **Polynomial 3** - 10+ GCPs, cubic terms for complex distortion
+- **Thin Plate Spline (TPS)** - 3+ GCPs, rubber-sheet transformation
+
+**Workflow:**
+1. User places Ground Control Points (GCPs) on non-georeferenced image
+2. For each GCP: click on image (source pixel) then basemap (target coordinates)
+3. Frontend sends GCPs to backend for transformation calculation
+4. Backend computes transformation coefficients and returns RMS error + per-point residuals
+5. On apply, backend warps image using computed transform and writes GeoTIFF
 
 #### STAC Commands (`stac.rs`)
 - `connect_stac_api` - Connect to STAC API or static catalog, returns `StacCatalogInfo` with auto-detected type
@@ -274,6 +349,6 @@ GitHub Actions pipeline (`.github/workflows/ci.yml`) provides:
 ## Future Enhancements
 
 - Band math (NDVI, etc.)
-- Measurement tools
-- Export/screenshot
 - Tile caching in backend
+- Advanced color ramps and styling options
+- Batch georeferencing from GCP files
