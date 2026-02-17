@@ -106,6 +106,43 @@ input[type='date']::-webkit-calendar-picker-indicator {
   flex-direction: column;
   gap: 10px;
   z-index: 1000;
+  transition: transform 0.2s ease;
+}
+
+/* Collapse button for panels */
+.panel-collapse {
+  position: absolute;
+  top: 8px;
+  right: -24px;
+  width: 24px;
+  height: 32px;
+  background: #2a2a2a;
+  border: 1px solid #3a3a3a;
+  border-left: none;
+  border-radius: 0 4px 4px 0;
+  color: #888;
+  font-size: 10px;
+  cursor: pointer;
+  z-index: 1001;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background-color 0.2s, color 0.2s, right 0.2s, width 0.2s;
+}
+
+.panel-collapse:hover {
+  background: #3a3a3a;
+  color: #e0e0e0;
+}
+
+/* Primary panel collapsed state */
+#left-panel.collapsed {
+  transform: translateX(-290px);
+}
+
+#left-panel.collapsed .panel-collapse {
+  right: -34px;
+  width: 34px;
 }
 
 #layer-panel,
@@ -131,6 +168,38 @@ input[type='date']::-webkit-calendar-picker-indicator {
   overflow: hidden;
   opacity: 0;
   pointer-events: none;
+}
+
+/* Add Layer Panel */
+#add-layer-panel {
+  background: #252525;
+  border: 1px solid #3a3a3a;
+  border-radius: 4px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
+  overflow: hidden;
+}
+
+.add-layer-buttons {
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.add-layer-btn {
+  padding: 8px 12px;
+  background: #2a5a3a;
+  border: 1px solid #3a6a4a;
+  border-radius: 4px;
+  color: #e0e0e0;
+  font-size: 12px;
+  cursor: pointer;
+  text-align: left;
+}
+
+.add-layer-btn:hover {
+  background: #3a6a4a;
+  border-color: #4a7a5a;
 }
 
 #controls-panel {
@@ -2686,4 +2755,783 @@ input[type='date']::-webkit-calendar-picker-indicator {
 
 .btn-secondary:hover {
   background: #4a4a4a;
+}
+
+/* ============================================
+   GEOREFERENCE PANEL
+   ============================================ */
+
+#georef-panel {
+  position: absolute;
+  top: 120px;
+  right: 10px;
+  width: 420px;
+  max-height: calc(100vh - 180px);
+  background: #252525;
+  border: 1px solid #3a3a3a;
+  border-radius: 4px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
+  display: none;
+  flex-direction: column;
+  z-index: 1000;
+}
+
+#georef-panel.visible {
+  display: flex;
+}
+
+#georef-panel-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 12px;
+  background: #2a2a2a;
+  border-bottom: 1px solid #3a3a3a;
+}
+
+#georef-panel-header h4 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: #4a9eff;
+}
+
+#georef-close-btn {
+  background: none;
+  border: none;
+  color: #888;
+  font-size: 18px;
+  cursor: pointer;
+  padding: 0 4px;
+}
+
+#georef-close-btn:hover {
+  color: #fff;
+}
+
+#georef-content {
+  padding: 12px;
+  overflow-y: auto;
+  flex: 1;
+}
+
+/* Georeference sections */
+.georef-section {
+  margin-bottom: 12px;
+}
+
+.georef-section label {
+  display: block;
+  font-size: 12px;
+  color: #888;
+  margin-bottom: 6px;
+}
+
+.georef-section select {
+  width: 100%;
+  padding: 6px 8px;
+  background: #1a1a1a;
+  border: 1px solid #3a3a3a;
+  border-radius: 4px;
+  color: #e0e0e0;
+  font-size: 12px;
+}
+
+.georef-section select:focus {
+  outline: none;
+  border-color: #4a9eff;
+}
+
+.georef-hint {
+  font-size: 11px;
+  color: #666;
+  margin-top: 4px;
+}
+
+/* GCP list header */
+.georef-gcp-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+  font-size: 12px;
+  font-weight: 500;
+  color: #aaa;
+}
+
+#georef-gcp-count {
+  font-size: 11px;
+  color: #888;
+}
+
+#georef-gcp-count.enough {
+  color: #4caf50;
+}
+
+#georef-gcp-count.not-enough {
+  color: #ff9800;
+}
+
+/* GCP list rows */
+.georef-gcp-row {
+  display: grid;
+  grid-template-columns: 30px 85px 130px 70px 50px;
+  gap: 4px;
+  padding: 4px 0;
+  font-size: 11px;
+  align-items: center;
+  border-bottom: 1px solid #333;
+}
+
+.georef-gcp-row.header {
+  color: #888;
+  font-weight: 500;
+  border-bottom: 1px solid #3a3a3a;
+  padding-bottom: 6px;
+  margin-bottom: 4px;
+}
+
+.georef-gcp-row.disabled {
+  opacity: 0.5;
+}
+
+.georef-gcp-num {
+  text-align: center;
+  font-weight: 600;
+  color: #4a9eff;
+}
+
+.georef-gcp-coords {
+  font-family: monospace;
+  font-size: 10px;
+  color: #ccc;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.georef-gcp-residual {
+  font-family: monospace;
+  font-size: 10px;
+  color: #888;
+  text-align: right;
+}
+
+.georef-gcp-actions {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  justify-content: flex-end;
+}
+
+.georef-gcp-actions input[type='checkbox'] {
+  width: 14px;
+  height: 14px;
+  cursor: pointer;
+}
+
+.georef-gcp-delete {
+  background: none;
+  border: none;
+  color: #888;
+  font-size: 14px;
+  cursor: pointer;
+  padding: 0 4px;
+  line-height: 1;
+}
+
+.georef-gcp-delete:hover {
+  color: #e74c3c;
+}
+
+.georef-no-gcps {
+  text-align: center;
+  padding: 20px;
+  color: #666;
+  font-size: 12px;
+  font-style: italic;
+}
+
+/* GCP list container */
+#georef-gcp-list {
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+/* Buttons */
+.georef-buttons {
+  display: flex;
+  gap: 8px;
+}
+
+.georef-buttons button,
+.georef-action-buttons button,
+.georef-collection-buttons button {
+  flex: 1;
+  padding: 6px 12px;
+  border: none;
+  border-radius: 4px;
+  font-size: 12px;
+  cursor: pointer;
+  background: #3a3a3a;
+  color: #e0e0e0;
+}
+
+.georef-buttons button:hover:not(:disabled),
+.georef-action-buttons button:hover:not(:disabled),
+.georef-collection-buttons button:hover:not(:disabled) {
+  background: #4a4a4a;
+}
+
+.georef-buttons button:disabled,
+.georef-action-buttons button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+#georef-add-gcp-btn {
+  background: #2e7d32;
+  color: white;
+}
+
+#georef-add-gcp-btn:hover:not(:disabled) {
+  background: #388e3c;
+}
+
+#georef-calculate-btn {
+  background: #1976d2;
+  color: white;
+}
+
+#georef-calculate-btn:hover:not(:disabled) {
+  background: #1e88e5;
+}
+
+#georef-apply-btn {
+  background: #4a9eff;
+  color: white;
+}
+
+#georef-apply-btn:hover:not(:disabled) {
+  background: #3a8adf;
+}
+
+.georef-action-buttons {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid #3a3a3a;
+}
+
+.georef-collection-buttons {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+/* State display */
+.georef-state {
+  font-size: 11px;
+  padding: 8px;
+  text-align: center;
+  border-radius: 4px;
+  margin-top: 8px;
+}
+
+.georef-state.idle {
+  display: none;
+}
+
+.georef-state.collecting {
+  background: #1a3a4a;
+  color: #4a9eff;
+  border: 1px solid #2a4a5a;
+}
+
+/* RMS display */
+#georef-rms-display {
+  background: #1a2a1a;
+  border: 1px solid #2a4a2a;
+  border-radius: 4px;
+  padding: 8px 12px;
+  margin-top: 8px;
+  font-size: 12px;
+  color: #4caf50;
+  text-align: center;
+}
+
+/* GCP Markers on map */
+.gcp-marker {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  font-weight: 600;
+  color: white;
+  cursor: move;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.4);
+  border: 2px solid white;
+}
+
+.gcp-marker.gcp-source {
+  background: #e74c3c;
+}
+
+.gcp-marker.gcp-target {
+  background: #27ae60;
+}
+
+/* Manual entry dialog */
+.georef-manual-dialog {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.7);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 2000;
+}
+
+.georef-manual-content {
+  background: #252525;
+  border: 1px solid #3a3a3a;
+  border-radius: 6px;
+  padding: 20px;
+  min-width: 300px;
+}
+
+.georef-manual-content h4 {
+  margin: 0 0 16px 0;
+  color: #4a9eff;
+  font-size: 14px;
+}
+
+.georef-input-row {
+  margin-bottom: 12px;
+}
+
+.georef-input-row label {
+  display: block;
+  font-size: 12px;
+  color: #888;
+  margin-bottom: 4px;
+}
+
+.georef-input-row input {
+  width: 100%;
+  padding: 8px;
+  background: #1a1a1a;
+  border: 1px solid #3a3a3a;
+  border-radius: 4px;
+  color: #e0e0e0;
+  font-size: 13px;
+}
+
+.georef-input-row input:focus {
+  outline: none;
+  border-color: #4a9eff;
+}
+
+.georef-dialog-buttons {
+  display: flex;
+  gap: 8px;
+  margin-top: 16px;
+  justify-content: flex-end;
+}
+
+.georef-dialog-buttons button {
+  padding: 8px 16px;
+  border: none;
+  border-radius: 4px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+#manual-ok {
+  background: #4a9eff;
+  color: white;
+}
+
+#manual-ok:hover {
+  background: #3a8adf;
+}
+
+#manual-cancel {
+  background: #3a3a3a;
+  color: #e0e0e0;
+}
+
+#manual-cancel:hover {
+  background: #4a4a4a;
+}
+
+/* ============================================
+   SPLIT VIEW
+   ============================================ */
+
+.map-container {
+  position: absolute;
+  top: 45px;
+  left: 0;
+  right: 0;
+  bottom: 30px;
+  display: flex;
+  flex-direction: row;
+}
+
+.map-container #map {
+  position: relative;
+  flex: 1;
+  height: 100%;
+}
+
+.map-container.split-active {
+  gap: 0;
+}
+
+.map-container.split-active #map {
+  width: 50%;
+  flex: none;
+  position: relative;
+}
+
+/* When split view is active, constrain primary location search to left half */
+.map-container.split-active ~ #location-search {
+  max-width: calc(50vw - 320px);
+}
+
+/* Secondary panel wrapper (contains map + floating layer panel) */
+.split-secondary-panel {
+  width: 50%;
+  height: 100%;
+  position: relative;
+  border-left: 2px solid #3a3a3a;
+  background: #1a1a1a;
+}
+
+.map-container .split-secondary {
+  width: 100%;
+  height: 100%;
+  background: #1a1a1a;
+}
+
+#split-view-btn.active {
+  background: #9b59b6 !important;
+  border-color: #a569bd !important;
+  color: #fff !important;
+}
+
+/* Floating layer panel for secondary map (matches #left-panel) */
+.split-left-panel {
+  position: absolute;
+  top: 15px;
+  left: 10px;  /* Match primary #left-panel */
+  width: 280px;
+  max-height: calc(100% - 20px);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  z-index: 100;
+  transition: width 0.2s ease, opacity 0.2s ease;
+}
+
+/* Secondary panel collapsed state */
+.split-left-panel.collapsed {
+  width: 0;
+  opacity: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+/* Secondary panel collapse button (separate from panel) */
+.split-panel-collapse {
+  position: absolute;
+  top: 23px;
+  left: 300px;
+  width: 24px;
+  height: 32px;
+  background: #2a2a2a;
+  border: 1px solid #3a3a3a;
+  border-radius: 4px;
+  color: #888;
+  font-size: 10px;
+  cursor: pointer;
+  z-index: 101;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background-color 0.2s, color 0.2s, left 0.2s;
+}
+
+.split-panel-collapse:hover {
+  background: #3a3a3a;
+  color: #e0e0e0;
+}
+
+.split-panel-collapse.panel-collapsed {
+  left: 10px;
+}
+
+/* Layer panel inner (matches #layer-panel) */
+.split-layer-panel-inner {
+  background: #252525;
+  border: 1px solid #3a3a3a;
+  border-radius: 4px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  max-height: 60%;
+}
+
+.split-layer-panel-inner h3 {
+  padding: 10px 12px;
+  margin: 0;
+  background: #2a2a2a;
+  border-bottom: 1px solid #3a3a3a;
+  font-size: 13px;
+  font-weight: 600;
+  color: #e0e0e0;
+}
+
+/* Sync item in secondary panel (like terrain-item) */
+.split-layer-panel-inner .sync-item {
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  cursor: default;
+  border-bottom: 1px solid #3a3a3a;
+  border-radius: 0;
+  margin: -4px -8px 8px -8px;
+  padding: 10px 16px;
+  background: #2a2a2a;
+}
+
+.sync-toggle-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.sync-toggle-label input[type='checkbox'] {
+  cursor: pointer;
+  accent-color: #4a9eff;
+}
+
+/* Layer list in secondary panel */
+.split-layer-list {
+  padding: 8px;
+  overflow-y: auto;
+  flex: 1;
+}
+
+.split-layer-list:empty::after {
+  content: 'No layers loaded';
+  display: block;
+  padding: 12px;
+  text-align: center;
+  color: #666;
+  font-size: 13px;
+}
+
+/* Controls panel for secondary map (matches #controls-panel) */
+.split-controls-panel {
+  background: #252525;
+  border: 1px solid #3a3a3a;
+  border-radius: 4px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
+  overflow: hidden;
+}
+
+.split-controls-panel .panel-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: #2a2a2a;
+  border-bottom: 1px solid #3a3a3a;
+  padding-right: 8px;
+}
+
+.split-controls-panel .panel-header h3 {
+  padding: 10px 12px;
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: #e0e0e0;
+  border-bottom: none;
+  background: none;
+}
+
+/* Add layer buttons */
+.split-add-buttons {
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.split-add-btn {
+  padding: 8px 12px;
+  background: #2a5a3a;
+  border: 1px solid #3a6a4a;
+  border-radius: 4px;
+  color: #e0e0e0;
+  font-size: 12px;
+  cursor: pointer;
+  text-align: left;
+}
+
+.split-add-btn:hover {
+  background: #3a6a4a;
+  border-color: #4a7a5a;
+}
+
+/* ============================================
+   LOCATION SEARCH (inline in layer panel)
+   ============================================ */
+
+.location-search-inline {
+  position: relative;
+  padding: 8px 12px;
+  border-bottom: 1px solid #3a3a3a;
+}
+
+.location-search-inline .search-input {
+  width: 100%;
+  padding: 6px 28px 6px 8px;
+  background: #1a1a1a;
+  border: 1px solid #3a3a3a;
+  border-radius: 4px;
+  color: #e0e0e0;
+  font-size: 12px;
+  outline: none;
+}
+
+.location-search-inline .search-input:focus {
+  border-color: #4a9eff;
+  background: #222;
+}
+
+.location-search-inline .search-input::placeholder {
+  color: #666;
+}
+
+.location-search-inline .search-close {
+  position: absolute;
+  top: 50%;
+  right: 16px;
+  transform: translateY(-50%);
+  background: none;
+  border: none;
+  color: #666;
+  font-size: 14px;
+  cursor: pointer;
+  padding: 0 4px;
+  line-height: 1;
+}
+
+.location-search-inline .search-close:hover {
+  color: #e0e0e0;
+}
+
+.location-search-inline .search-results {
+  display: none;
+  position: absolute;
+  top: 100%;
+  left: 12px;
+  right: 12px;
+  background: #252525;
+  border: 1px solid #3a3a3a;
+  border-top: none;
+  border-radius: 0 0 4px 4px;
+  max-height: 250px;
+  overflow-y: auto;
+  z-index: 1000;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+}
+
+.location-search-inline .search-results.visible {
+  display: block;
+}
+
+.location-search .search-results {
+  display: none;
+  background: rgba(30, 30, 30, 0.98);
+  border: 1px solid #3a3a3a;
+  border-top: none;
+  border-radius: 0 0 6px 6px;
+  max-height: 300px;
+  overflow-y: auto;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+}
+
+.location-search .search-results.visible {
+  display: block;
+}
+
+.search-result-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 12px;
+  cursor: pointer;
+  border-bottom: 1px solid #333;
+}
+
+.search-result-item:last-child {
+  border-bottom: none;
+}
+
+.search-result-item:hover {
+  background: #3a3a3a;
+}
+
+.search-result-item.selected {
+  background: #2a4a5a;
+}
+
+.result-icon {
+  font-size: 16px;
+  width: 24px;
+  text-align: center;
+  flex-shrink: 0;
+}
+
+.result-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.result-name {
+  font-size: 13px;
+  font-weight: 500;
+  color: #e0e0e0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.result-detail {
+  font-size: 11px;
+  color: #888;
+  margin-top: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.search-no-results {
+  padding: 16px;
+  text-align: center;
+  color: #666;
+  font-size: 12px;
 }

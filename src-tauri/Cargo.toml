@@ -1,6 +1,6 @@
 [package]
 name = "heimdall"
-version = "0.4.0-dev0"
+version = "0.4.1-dev0"
 edition = "2021"
 
 [build-dependencies]
@@ -21,6 +21,7 @@ chrono = "0.4"
 reqwest = { version = "0.12", features = ["json", "rustls-tls"] }
 tokio = { version = "1", features = ["rt"] }
 tracing = "0.1"
+rayon = "1.10"
 
 # GDAL: use bindgen on non-Windows (supports newer GDAL like 3.12),
 # but use pre-built bindings on Windows (avoids i32/u32 type mismatches)

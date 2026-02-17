@@ -3,10 +3,11 @@
  * @module layer-manager/layer-ui
  */
 
-import type { LayerManagerInterface, RasterLayer, VectorLayer, CrossLayerRgbConfig } from './types';
+import type { LayerManagerInterface, RasterLayer, VectorLayer, CrossLayerRgbConfig, LayerManagerOptions } from './types';
 
 /** Extended LayerManager interface with UI-specific properties */
 interface LayerManagerWithUI extends LayerManagerInterface {
+  options: Required<LayerManagerOptions>;
   draggedItem: HTMLElement | null;
   selectLayer: (id: string) => void;
   toggleLayerVisibility: (id: string) => void;
@@ -44,7 +45,7 @@ interface RasterLayerWithUI extends RasterLayer {
  * @param manager - The LayerManager instance
  */
 export function updateLayerPanel(manager: LayerManagerWithUI): void {
-  const layerList = document.getElementById('layer-list');
+  const layerList = document.getElementById(manager.options.layerListId);
   if (!layerList) return;
 
   // Ensure the container allows drops (only add once)
@@ -240,7 +241,7 @@ export function updateLayerPanel(manager: LayerManagerWithUI): void {
     layerList.appendChild(item);
   });
 
-  const fitBoundsBtn = document.getElementById('fit-bounds') as HTMLButtonElement | null;
+  const fitBoundsBtn = document.getElementById(manager.options.fitBoundsButtonId) as HTMLButtonElement | null;
   if (fitBoundsBtn) {
     fitBoundsBtn.disabled = manager.layers.size === 0;
   }
@@ -291,7 +292,7 @@ function startRenameLayer(
  * @param manager - The LayerManager instance
  */
 export function updateDynamicControls(manager: LayerManagerWithUI): void {
-  const controlsPanel = document.getElementById('dynamic-controls');
+  const controlsPanel = document.getElementById(manager.options.dynamicControlsId);
   if (!controlsPanel) return;
 
   const layer = manager.selectedLayerId ? manager.layers.get(manager.selectedLayerId) : null;

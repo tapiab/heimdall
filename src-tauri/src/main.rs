@@ -5,6 +5,7 @@ mod commands;
 mod gdal;
 
 use commands::app::get_version;
+use commands::georef::{apply_georeference, calculate_transformation};
 use commands::raster::{
     close_dataset, get_cross_layer_pixel_rgb_tile, get_cross_layer_rgb_tile, get_elevation_profile,
     get_elevation_profile_pixels, get_histogram, get_pixel_tile, get_raster_stats, get_rgb_tile,
@@ -98,7 +99,10 @@ fn main() {
             // Static STAC catalog commands
             get_static_catalog_children,
             fetch_stac_resource,
-            browse_static_collection
+            browse_static_collection,
+            // Georeferencing commands
+            calculate_transformation,
+            apply_georeference
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

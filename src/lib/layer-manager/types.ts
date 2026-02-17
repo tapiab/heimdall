@@ -179,6 +179,20 @@ export interface MapManagerInterface {
   setLayerVisibility: (layerId: string, visible: boolean) => void;
 }
 
+/** Options for LayerManager configuration */
+export interface LayerManagerOptions {
+  /** ID of the layer list container element. Default: 'layer-list' */
+  layerListId?: string;
+  /** ID of the dynamic controls container element. Default: 'dynamic-controls' */
+  dynamicControlsId?: string;
+  /** ID of the fit bounds button. Default: 'fit-bounds' */
+  fitBoundsButtonId?: string;
+  /** Enable feature popups on click. Default: true */
+  enablePopups?: boolean;
+  /** Enable status bar pixel value updates. Default: true */
+  enableStatusBarUpdates?: boolean;
+}
+
 /** LayerManager interface for use by handlers */
 export interface LayerManagerInterface {
   mapManager: MapManagerInterface;
@@ -187,6 +201,7 @@ export interface LayerManagerInterface {
   selectedLayerId: string | null;
   popup: maplibregl.Popup | null;
   currentHistogram?: HistogramData | null;
+  options: LayerManagerOptions;
   updateLayerPanel: () => void;
   updateDynamicControls: () => void;
   refreshLayerTiles: (id: string) => void;

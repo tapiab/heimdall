@@ -8,7 +8,9 @@
   </head>
   <body>
     <div id="app">
-      <div id="map"></div>
+      <div id="map-container" class="map-container">
+        <div id="map"></div>
+      </div>
       <div id="loading-indicator">
         <div class="spinner"></div>
         <span>Loading...</span>
@@ -60,18 +62,30 @@
             <div class="menu-item" data-mode="polygon">Polygon</div>
           </div>
         </div>
+        <button id="georef-btn" title="Georeference image (G)">Georef</button>
+        <button id="split-view-btn" title="Toggle split view (S)">Split View</button>
         <button id="reset-rotation" title="Reset rotation (R)">Reset North</button>
         <button id="reset-view" title="Reset view (pitch & rotation)">Reset View</button>
         <button id="help-btn" title="Keyboard shortcuts (?)" onclick="document.dispatchEvent(new KeyboardEvent('keydown', {key: '?', shiftKey: true}))">?</button>
       </div>
       <div id="left-panel">
+        <button id="left-panel-collapse" class="panel-collapse" title="Toggle layer panel">◀</button>
         <div id="layer-panel">
           <h3>Layers</h3>
+          <!-- Location Search integrated into panel -->
+          <div id="location-search" class="location-search-inline">
+            <input type="text" class="search-input" placeholder="Search location... (/)">
+            <button class="search-close" title="Clear">&times;</button>
+            <div class="search-results"></div>
+          </div>
           <div id="basemap-row" class="layer-item basemap-item">
             <span class="layer-name">Basemap</span>
             <select id="basemap-select">
               <option value="osm">OSM</option>
               <option value="satellite">Satellite</option>
+              <option value="topo">OpenTopoMap</option>
+              <option value="carto-light">CartoDB Light</option>
+              <option value="carto-dark">CartoDB Dark</option>
               <option value="custom">Custom</option>
               <option value="pixel">Pixel Grid</option>
               <option value="none">None</option>
@@ -91,6 +105,14 @@
             </div>
           </div>
           <div id="layer-list"></div>
+        </div>
+        <div id="add-layer-panel">
+          <div class="panel-header">
+            <h3>Add Layer</h3>
+          </div>
+          <div class="add-layer-buttons">
+            <button id="add-layer-btn" class="add-layer-btn">+ Add Layer</button>
+          </div>
         </div>
         <div id="controls-panel">
           <div class="panel-header">
@@ -245,6 +267,53 @@
               <h6>Available Assets</h6>
               <div id="stac-asset-list"></div>
             </div>
+          </div>
+        </div>
+      </div>
+      <div id="georef-panel">
+        <div id="georef-panel-header">
+          <h4>Georeference</h4>
+          <button id="georef-close-btn">&times;</button>
+        </div>
+        <div id="georef-content">
+          <div class="georef-section">
+            <label for="georef-layer-select">Source Layer:</label>
+            <select id="georef-layer-select">
+              <option value="">-- Select layer --</option>
+            </select>
+          </div>
+          <div class="georef-section">
+            <label for="georef-transform-select">Transform:</label>
+            <select id="georef-transform-select"></select>
+            <div id="georef-min-gcps-label" class="georef-hint">Minimum 3 GCPs required</div>
+          </div>
+          <div class="georef-section">
+            <div class="georef-gcp-header">
+              <span>Ground Control Points</span>
+              <span id="georef-gcp-count">0 / 3 GCPs</span>
+            </div>
+            <div id="georef-gcp-list-header" class="georef-gcp-row header">
+              <span class="georef-gcp-num">#</span>
+              <span class="georef-gcp-coords">Source (px)</span>
+              <span class="georef-gcp-coords">Target (geo)</span>
+              <span class="georef-gcp-residual">Residual</span>
+              <span class="georef-gcp-actions"></span>
+            </div>
+            <div id="georef-gcp-list"></div>
+          </div>
+          <div class="georef-section georef-buttons">
+            <button id="georef-add-gcp-btn" disabled>+ Add GCP</button>
+            <button id="georef-clear-all-btn" disabled>Clear All</button>
+          </div>
+          <div id="georef-state-display" class="georef-state idle"></div>
+          <div class="georef-section georef-collection-buttons">
+            <button id="georef-cancel-btn" style="display:none;">Cancel</button>
+            <button id="georef-manual-entry-btn" style="display:none;">Enter Manually</button>
+          </div>
+          <div id="georef-rms-display" style="display:none;"></div>
+          <div class="georef-section georef-action-buttons">
+            <button id="georef-calculate-btn" disabled>Calculate</button>
+            <button id="georef-apply-btn" disabled>Apply & Save</button>
           </div>
         </div>
       </div>

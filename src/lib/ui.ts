@@ -16,6 +16,10 @@ import type { ZoomRectTool } from './zoom-rect-tool';
 import type { ProjectManager } from './project-manager';
 import type { StacBrowser } from './stac-browser';
 import type { ConfigManager } from './config-manager';
+import type { GeoreferenceTool } from './georeference-tool';
+import type { GeoreferencePanel } from './georeference-panel';
+import type { SplitView } from './split-view';
+import type { LocationSearch } from './location-search';
 
 /** Supported vector file extensions */
 const VECTOR_EXTENSIONS = [
@@ -39,6 +43,7 @@ interface ToolCollection {
   elevationProfileTool?: ProfileTool | null;
   annotationTool?: AnnotationTool | null;
   zoomRectTool?: ZoomRectTool | null;
+  georeferenceTool?: GeoreferenceTool | null;
 }
 
 /**
@@ -94,7 +99,7 @@ async function setupDragAndDrop(layerManager: LayerManager): Promise<void> {
  * @param tools - Collection of tool instances to deactivate
  */
 function deactivateTools(tools: ToolCollection): void {
-  const { measureTool, profileTool, elevationProfileTool, annotationTool, zoomRectTool } = tools;
+  const { measureTool, profileTool, elevationProfileTool, annotationTool, zoomRectTool, georeferenceTool } = tools;
 
   if (measureTool && measureTool.isActive()) {
     measureTool.deactivate();
@@ -121,6 +126,11 @@ function deactivateTools(tools: ToolCollection): void {
     const btn = document.getElementById('zoom-rect-btn');
     if (btn) btn.classList.remove('active');
   }
+  if (georeferenceTool && georeferenceTool.isActive()) {
+    georeferenceTool.deactivate();
+    const btn = document.getElementById('georef-btn');
+    if (btn) btn.classList.remove('active');
+  }
 }
 
 /**
@@ -136,6 +146,8 @@ function deactivateTools(tools: ToolCollection): void {
  * @param projectManager - ProjectManager instance
  * @param stacBrowser - StacBrowser instance
  * @param configManager - ConfigManager instance
+ * @param georeferenceTool - GeoreferenceTool instance
+ * @param georeferencePanel - GeoreferencePanel instance
  */
 export function setupUI(
   mapManager: MapManager,
@@ -148,7 +160,11 @@ export function setupUI(
   zoomRectTool: ZoomRectTool | null = null,
   projectManager: ProjectManager | null = null,
   stacBrowser: StacBrowser | null = null,
-  configManager: ConfigManager | null = null
+  configManager: ConfigManager | null = null,
+  georeferenceTool: GeoreferenceTool | null = null,
+  georeferencePanel: GeoreferencePanel | null = null,
+  splitView: SplitView | null = null,
+  locationSearch: LocationSearch | null = null
 ): void {
   // File menu
   const fileMenuBtn = document.getElementById('file-menu-btn');
@@ -198,6 +214,12 @@ export function setupUI(
         }
       });
     });
+  }
+
+  // Add Layer button
+  const addLayerBtn = document.getElementById('add-layer-btn');
+  if (addLayerBtn) {
+    addLayerBtn.addEventListener('click', () => openFileDialog(layerManager));
   }
 
   // Fit bounds button
@@ -311,6 +333,70 @@ export function setupUI(
     if (annotationDropdownEl) annotationDropdownEl.classList.remove('visible');
   });
 
+  // Georeference button
+  const georefBtn = document.getElementById('georef-btn');
+  if (georefBtn && georeferenceTool) {
+    georefBtn.addEventListener('click', () => {
+      deactivateTools({ measureTool, profileTool, elevationProfileTool, annotationTool, zoomRectTool });
+      const active = georeferenceTool.toggle();
+      georefBtn.classList.toggle('active', active);
+      // Initialize panel when activating
+      if (active && georeferencePanel) {
+        // Set up secondary layer manager and map if split view is active
+        if (splitView && splitView.isActive()) {
+          georeferenceTool.setSecondaryLayerManager(
+            splitView.getSecondaryLayerManager(),
+            splitView.getSecondaryMap()
+          );
+        }
+        georeferencePanel.init();
+      }
+      // Set up split view integration for georeferencing
+      if (splitView && splitView.isActive()) {
+        if (active) {
+          splitView.setSecondaryMapClickHandler((lng, lat) => {
+            if (georeferenceTool.getState() === 'collecting_target') {
+              georeferenceTool.setTargetManually(lng, lat);
+            }
+          });
+        } else {
+          splitView.setSecondaryMapClickHandler(null);
+        }
+      }
+    });
+  }
+
+  // Split view button
+  const splitViewBtn = document.getElementById('split-view-btn');
+  if (splitViewBtn && splitView) {
+    splitViewBtn.addEventListener('click', () => {
+      const active = splitView.toggle();
+      splitViewBtn.classList.toggle('active', active);
+      // Primary location search always controls primary map - secondary has its own
+      // Set up click handler for georeferencing when split view is active
+      if (active && georeferenceTool) {
+        // Pass secondary LayerManager and Map to georeference tool
+        georeferenceTool.setSecondaryLayerManager(
+          splitView.getSecondaryLayerManager(),
+          splitView.getSecondaryMap()
+        );
+        // Update georef panel dropdown if open
+        if (georeferencePanel && georeferenceTool.isActive()) {
+          georeferencePanel.updateLayerDropdown();
+        }
+      } else {
+        // Clear secondary LayerManager and Map references
+        if (georeferenceTool) {
+          georeferenceTool.setSecondaryLayerManager(null, null);
+          // Update georef panel dropdown if open
+          if (georeferencePanel && georeferenceTool.isActive()) {
+            georeferencePanel.updateLayerDropdown();
+          }
+        }
+      }
+    });
+  }
+
   // Setup drag and drop
   setupDragAndDrop(layerManager);
 
@@ -341,7 +427,7 @@ export function setupUI(
   }
 
   // Basemap settings dialog
-  setupBasemapSettingsDialog(mapManager, configManager);
+  setupBasemapSettingsDialog(mapManager, configManager, splitView);
 
   // Reset view button
   const resetViewBtn = document.getElementById('reset-view');
@@ -396,6 +482,16 @@ export function setupUI(
   const controlsPanelToggle = document.getElementById('controls-panel-toggle');
   if (controlsPanelToggle) {
     controlsPanelToggle.addEventListener('click', () => toggleControlsPanel());
+  }
+
+  // Left panel collapse toggle
+  const leftPanelCollapse = document.getElementById('left-panel-collapse');
+  const leftPanel = document.getElementById('left-panel');
+  if (leftPanelCollapse && leftPanel) {
+    leftPanelCollapse.addEventListener('click', () => {
+      const isCollapsed = leftPanel.classList.toggle('collapsed');
+      leftPanelCollapse.innerHTML = isCollapsed ? '▶' : '◀';
+    });
   }
 
   // Keyboard shortcuts
@@ -593,6 +689,49 @@ export function setupUI(
         stacBrowser.toggle();
       }
     }
+    // G to toggle georeference tool
+    if (e.key === 'g' && !e.ctrlKey && !e.metaKey && !e.altKey) {
+      if (georeferenceTool) {
+        deactivateTools({ measureTool, profileTool, elevationProfileTool, annotationTool, zoomRectTool });
+        const active = georeferenceTool.toggle();
+        const georefBtnEl = document.getElementById('georef-btn');
+        if (georefBtnEl) {
+          georefBtnEl.classList.toggle('active', active);
+        }
+        if (active && georeferencePanel) {
+          georeferencePanel.init();
+        }
+        // Set up split view integration
+        if (splitView && splitView.isActive()) {
+          if (active) {
+            splitView.setSecondaryMapClickHandler((lng, lat) => {
+              if (georeferenceTool.getState() === 'collecting_target') {
+                georeferenceTool.setTargetManually(lng, lat);
+              }
+            });
+          } else {
+            splitView.setSecondaryMapClickHandler(null);
+          }
+        }
+      }
+    }
+    // S to toggle split view
+    if (e.key === 's' && !e.ctrlKey && !e.metaKey && !e.altKey) {
+      if (splitView) {
+        const active = splitView.toggle();
+        const splitViewBtnEl = document.getElementById('split-view-btn');
+        if (splitViewBtnEl) {
+          splitViewBtnEl.classList.toggle('active', active);
+        }
+      }
+    }
+    // / to focus location search
+    if (e.key === '/' && !e.ctrlKey && !e.metaKey && !e.altKey) {
+      e.preventDefault();
+      if (locationSearch) {
+        locationSearch.focus();
+      }
+    }
     // Note: Enter key for profile generation is handled by ProfileTool internally
     // Escape to close panels and cancel tools
     if (e.key === 'Escape') {
@@ -603,6 +742,7 @@ export function setupUI(
         elevationProfileTool,
         annotationTool,
         zoomRectTool,
+        georeferenceTool,
       });
       // Close profile panel
       const profilePanel = document.getElementById('profile-panel');
@@ -692,6 +832,8 @@ function showShortcutsHelp(): void {
         <div class="shortcut"><kbd>R</kbd> Reset rotation</div>
         <div class="shortcut"><kbd>B</kbd> Cycle basemap</div>
         <div class="shortcut"><kbd>T</kbd> Toggle 3D terrain</div>
+        <div class="shortcut"><kbd>S</kbd> Toggle split view</div>
+        <div class="shortcut"><kbd>/</kbd> Focus location search</div>
         <div class="shortcut"><kbd>L</kbd> Toggle layer panel</div>
         <div class="shortcut"><kbd>D</kbd> Toggle display panel</div>
         <div class="shortcut"><kbd>V</kbd> Toggle layer visibility</div>
@@ -728,7 +870,8 @@ function showShortcutsHelp(): void {
  */
 function setupBasemapSettingsDialog(
   mapManager: MapManager,
-  configManager: ConfigManager | null
+  configManager: ConfigManager | null,
+  splitView: SplitView | null
 ): void {
   const dialog = document.getElementById('basemap-settings-dialog');
   const settingsBtn = document.getElementById('basemap-settings-btn');
@@ -800,6 +943,11 @@ function setupBasemapSettingsDialog(
       // Update map source
       mapManager.setCustomBasemapSource(url, attribution);
 
+      // Update split view custom basemap
+      if (splitView) {
+        splitView.setCustomBasemap(url, attribution);
+      }
+
       showToast('Custom basemap saved', 'success');
       closeDialog();
 
@@ -815,11 +963,58 @@ function setupBasemapSettingsDialog(
  * Open the file dialog and load selected files.
  * @param layerManager - LayerManager instance for adding layers
  */
-async function openFileDialog(layerManager: LayerManager): Promise<void> {
+async function openFileDialog(
+  layerManager: LayerManager,
+  filterType?: 'geojson' | 'raster' | 'shapefile'
+): Promise<void> {
   try {
-    const selected = await open({
-      multiple: true,
-      filters: [
+    let filters;
+
+    if (filterType === 'geojson') {
+      filters = [{ name: 'GeoJSON', extensions: ['geojson', 'json'] }];
+    } else if (filterType === 'raster') {
+      filters = [
+        {
+          name: 'Raster Images',
+          extensions: [
+            'tif',
+            'tiff',
+            'geotiff',
+            'img',
+            'vrt',
+            'ntf',
+            'nitf',
+            'dt0',
+            'dt1',
+            'dt2',
+            'hgt',
+            'ers',
+            'ecw',
+            'jp2',
+            'j2k',
+            'sid',
+            'png',
+            'jpg',
+            'jpeg',
+            'gif',
+            'bmp',
+            'hdr',
+            'bil',
+            'bsq',
+            'bip',
+            'grd',
+            'asc',
+            'dem',
+            'nc',
+            'hdf',
+            'h5',
+          ],
+        },
+      ];
+    } else if (filterType === 'shapefile') {
+      filters = [{ name: 'Shapefile', extensions: ['shp'] }];
+    } else {
+      filters = [
         {
           name: 'Geospatial Files',
           extensions: [
@@ -923,7 +1118,12 @@ async function openFileDialog(layerManager: LayerManager): Promise<void> {
           name: 'All Files',
           extensions: ['*'],
         },
-      ],
+      ];
+    }
+
+    const selected = await open({
+      multiple: filterType ? false : true,
+      filters,
     });
 
     if (selected) {
