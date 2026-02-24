@@ -216,9 +216,50 @@ export function setupUI(options: SetupUIOptions): void {
     });
   }
 
-  // Add Layer button
+  // Add Layer button with dropdown
   const addLayerBtn = document.getElementById('add-layer-btn');
-  if (addLayerBtn) {
+  const addLayerDropdown = document.getElementById('add-layer-dropdown');
+  if (addLayerBtn && addLayerDropdown) {
+    addLayerBtn.addEventListener('click', e => {
+      e.stopPropagation();
+      // Close other dropdowns first
+      const fileMenuDropdownEl = document.getElementById('file-menu-dropdown');
+      const annotationDropdownEl = document.getElementById('annotation-dropdown');
+      if (fileMenuDropdownEl) fileMenuDropdownEl.classList.remove('visible');
+      if (annotationDropdownEl) annotationDropdownEl.classList.remove('visible');
+
+      const isVisible = addLayerDropdown.classList.toggle('visible');
+      if (isVisible) {
+        // Position dropdown above button (since it's at the bottom of the panel)
+        const rect = addLayerBtn.getBoundingClientRect();
+        // Calculate position above the button
+        const dropdownHeight = addLayerDropdown.offsetHeight || 100;
+        addLayerDropdown.style.top = `${rect.top - dropdownHeight - 4}px`;
+        addLayerDropdown.style.left = `${rect.left}px`;
+        addLayerDropdown.style.minWidth = `${rect.width}px`;
+      }
+    });
+
+    // Handle add layer menu actions
+    addLayerDropdown.querySelectorAll('.menu-item').forEach(item => {
+      item.addEventListener('click', e => {
+        e.stopPropagation();
+        const menuItem = item as HTMLElement;
+        const { action } = menuItem.dataset;
+        addLayerDropdown.classList.remove('visible');
+
+        switch (action) {
+          case 'open-file':
+            openFileDialog(layerManager);
+            break;
+          case 'create-rgb-layer':
+            showCreateRgbDialog(layerManager);
+            break;
+        }
+      });
+    });
+  } else if (addLayerBtn) {
+    // Fallback if dropdown not found
     addLayerBtn.addEventListener('click', () => openFileDialog(layerManager));
   }
 
@@ -329,8 +370,10 @@ export function setupUI(options: SetupUIOptions): void {
   document.addEventListener('click', () => {
     const fileMenuDropdownEl = document.getElementById('file-menu-dropdown');
     const annotationDropdownEl = document.getElementById('annotation-dropdown');
+    const addLayerDropdownEl = document.getElementById('add-layer-dropdown');
     if (fileMenuDropdownEl) fileMenuDropdownEl.classList.remove('visible');
     if (annotationDropdownEl) annotationDropdownEl.classList.remove('visible');
+    if (addLayerDropdownEl) addLayerDropdownEl.classList.remove('visible');
   });
 
   // Helper: toggle georeference tool (shared by button and keyboard shortcut)
@@ -346,6 +389,14 @@ export function setupUI(options: SetupUIOptions): void {
     const active = georeferenceTool.toggle();
     const btn = document.getElementById('georef-btn');
     if (btn) btn.classList.toggle('active', active);
+
+    // Auto-enable split view when activating georeference (if not already active)
+    if (active && splitView && !splitView.isActive()) {
+      splitView.toggle();
+      const splitBtn = document.getElementById('split-view-btn');
+      if (splitBtn) splitBtn.classList.add('active');
+    }
+
     if (active && georeferencePanel) {
       if (splitView && splitView.isActive()) {
         georeferenceTool.setSecondaryLayerManager(
@@ -483,10 +534,13 @@ export function setupUI(options: SetupUIOptions): void {
     });
   }
 
-  // Controls panel toggle button
-  const controlsPanelToggle = document.getElementById('controls-panel-toggle');
-  if (controlsPanelToggle) {
-    controlsPanelToggle.addEventListener('click', () => toggleControlsPanel());
+  // Display panel close button
+  const displayPanelClose = document.getElementById('display-panel-close');
+  if (displayPanelClose) {
+    displayPanelClose.addEventListener('click', () => {
+      const displayPanel = document.getElementById('display-panel');
+      if (displayPanel) displayPanel.classList.remove('visible');
+    });
   }
 
   // Left panel collapse toggle
@@ -574,9 +628,12 @@ export function setupUI(options: SetupUIOptions): void {
     if (e.key === 'l' && !e.ctrlKey && !e.metaKey && !e.altKey) {
       toggleLayerPanel();
     }
-    // D to toggle display/controls panel
+    // D to toggle display panel
     if (e.key === 'd' && !e.ctrlKey && !e.metaKey && !e.altKey) {
-      toggleControlsPanel();
+      const displayPanel = document.getElementById('display-panel');
+      if (displayPanel) {
+        displayPanel.classList.toggle('visible');
+      }
     }
     // Delete/Backspace to remove selected layer
     if ((e.key === 'Delete' || e.key === 'Backspace') && !e.ctrlKey && !e.metaKey) {
@@ -736,6 +793,11 @@ export function setupUI(options: SetupUIOptions): void {
       if (histPanel && histPanel.classList.contains('visible')) {
         histPanel.classList.remove('visible');
       }
+      // Close display panel
+      const displayPanel = document.getElementById('display-panel');
+      if (displayPanel && displayPanel.classList.contains('visible')) {
+        displayPanel.classList.remove('visible');
+      }
       // Close STAC panel
       if (stacBrowser && typeof stacBrowser.isVisible === 'function' && stacBrowser.isVisible()) {
         stacBrowser.hide();
@@ -760,20 +822,6 @@ function toggleLayerPanel(): void {
   const panel = document.getElementById('layer-panel');
   if (panel) {
     panel.classList.toggle('collapsed');
-  }
-}
-
-/**
- * Toggle the controls panel visibility.
- */
-function toggleControlsPanel(): void {
-  const panel = document.getElementById('controls-panel');
-  const toggleBtn = document.getElementById('controls-panel-toggle');
-  if (panel) {
-    panel.classList.toggle('collapsed');
-    if (toggleBtn) {
-      toggleBtn.textContent = panel.classList.contains('collapsed') ? '+' : '−';
-    }
   }
 }
 
@@ -967,5 +1015,67 @@ export async function openFileDialog(layerManager: LayerManager): Promise<void> 
   } catch (error) {
     console.error('Failed to open file:', error);
     alert(`Failed to open file: ${error}`);
+  }
+}
+
+/**
+ * Show dialog to create RGB composite from existing layers.
+ * @param layerManager - LayerManager instance
+ */
+function showCreateRgbDialog(layerManager: LayerManager): void {
+  // Get all raster layers that could be used for RGB composition
+  const rasterLayers = Array.from(layerManager.layers.entries())
+    .filter(([, layer]) => layer.type === 'raster')
+    .map(([id, layer]) => ({
+      id,
+      name: layer.displayName || layer.path.split('/').pop() || 'Unknown',
+    }));
+
+  if (rasterLayers.length < 1) {
+    showToast('Add at least one raster layer first', 'info');
+    return;
+  }
+
+  // Check if selected layer is a multi-band raster
+  const selectedLayer = layerManager.selectedLayerId
+    ? layerManager.layers.get(layerManager.selectedLayerId)
+    : null;
+
+  if (selectedLayer && selectedLayer.type === 'raster') {
+    const rasterLayer = selectedLayer as { bands: number; isComposition?: boolean };
+    if (rasterLayer.bands >= 3 && !rasterLayer.isComposition) {
+      // Use the selected layer for RGB composition
+      layerManager.createRgbCompositionLayer(layerManager.selectedLayerId!);
+      return;
+    }
+  }
+
+  // If no suitable selected layer, check for cross-layer RGB (3+ single-band layers)
+  const singleBandLayers = Array.from(layerManager.layers.values()).filter(
+    l => l.type === 'raster' && (l as { bands: number }).bands === 1
+  );
+
+  if (singleBandLayers.length >= 3) {
+    // Use the first raster layer to trigger cross-layer RGB mode
+    const firstRaster = rasterLayers[0];
+    if (firstRaster) {
+      layerManager.selectLayer(firstRaster.id);
+      layerManager.setLayerDisplayMode(firstRaster.id, 'crossLayerRgb');
+      showToast('Select layers for R, G, B channels in the Display panel', 'info');
+    }
+  } else if (rasterLayers.length > 0) {
+    // Select first multi-band raster if available
+    for (const { id } of rasterLayers) {
+      const layer = layerManager.layers.get(id);
+      if (layer && layer.type === 'raster') {
+        const rasterLayer = layer as { bands: number; isComposition?: boolean };
+        if (rasterLayer.bands >= 3 && !rasterLayer.isComposition) {
+          layerManager.selectLayer(id);
+          layerManager.createRgbCompositionLayer(id);
+          return;
+        }
+      }
+    }
+    showToast('Need a layer with 3+ bands or 3+ single-band layers for RGB', 'info');
   }
 }

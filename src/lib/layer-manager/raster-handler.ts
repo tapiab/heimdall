@@ -39,6 +39,7 @@ export async function addRasterLayer(
     // Open the raster in the backend
     const metadata = await invoke<RasterMetadata>('open_raster', { path: filePath });
     log.debug('Opened raster', { id: metadata.id, fileName, bands: metadata.bands });
+    log.debug('Band stats', { band_stats: metadata.band_stats });
 
     // Get stats for first band (default)
     const defaultBandStats = metadata.band_stats[0] || { min: 0, max: 255 };

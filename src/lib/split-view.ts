@@ -238,10 +238,11 @@ export class SplitView {
     await this.secondaryMapManager.init();
 
     // Create secondary LayerManager with secondary-specific element IDs
+    // Uses main dynamic-controls for the floating Display panel
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     this.secondaryLayerManager = new LayerManager(this.secondaryMapManager as any, {
       layerListId: 'split-layer-list',
-      dynamicControlsId: 'split-dynamic-controls',
+      dynamicControlsId: 'dynamic-controls',
       fitBoundsButtonId: 'split-fit-bounds',
       enablePopups: true,
       enableStatusBarUpdates: false, // Share primary's status bar
@@ -399,66 +400,33 @@ export class SplitView {
     layerList.className = 'split-layer-list';
     layerPanelOuter.appendChild(layerList);
 
-    leftPanel.appendChild(layerPanelOuter);
-
-    // Add Layer panel
-    const addLayerPanel = document.createElement('div');
-    addLayerPanel.id = 'split-add-layer-panel';
-    addLayerPanel.className = 'split-add-layer-panel';
-
-    const addLayerHeader = document.createElement('div');
-    addLayerHeader.className = 'panel-header';
-    const addLayerTitle = document.createElement('h3');
-    addLayerTitle.textContent = 'Add Layer';
-    addLayerHeader.appendChild(addLayerTitle);
-    addLayerPanel.appendChild(addLayerHeader);
-
-    const addLayerButtons = document.createElement('div');
-    addLayerButtons.className = 'add-layer-buttons';
+    // Add Layer section (inside layer panel, like main panel)
+    const addLayerSection = document.createElement('div');
+    addLayerSection.id = 'split-add-layer-section';
+    addLayerSection.className = 'add-layer-section';
 
     const addLayerBtn = document.createElement('button');
     addLayerBtn.id = 'split-add-layer-btn';
     addLayerBtn.className = 'add-layer-btn';
-    addLayerBtn.textContent = '+ Add Layer';
+    addLayerBtn.innerHTML = `
+      <svg class="icon" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" style="width:16px;height:16px">
+        <path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+      </svg>
+      Add Layer
+    `;
     addLayerBtn.addEventListener('click', () => this.openSecondaryFileDialog());
 
-    // Fit bounds button
+    // Hidden fit bounds button (used by LayerManager)
     const fitBoundsBtn = document.createElement('button');
     fitBoundsBtn.id = 'split-fit-bounds';
-    fitBoundsBtn.className = 'add-layer-btn';
-    fitBoundsBtn.textContent = 'Fit Bounds';
+    fitBoundsBtn.style.display = 'none';
     fitBoundsBtn.disabled = true;
-    fitBoundsBtn.addEventListener('click', () => {
-      if (this.secondaryLayerManager) {
-        this.secondaryLayerManager.fitToAllLayers();
-      }
-    });
 
-    addLayerButtons.appendChild(addLayerBtn);
-    addLayerButtons.appendChild(fitBoundsBtn);
-    addLayerPanel.appendChild(addLayerButtons);
+    addLayerSection.appendChild(addLayerBtn);
+    addLayerSection.appendChild(fitBoundsBtn);
+    layerPanelOuter.appendChild(addLayerSection);
 
-    leftPanel.appendChild(addLayerPanel);
-
-    // Controls panel (matches #controls-panel) - dynamic controls for selected layer
-    const controlsPanel = document.createElement('div');
-    controlsPanel.id = 'split-controls-panel';
-    controlsPanel.className = 'split-controls-panel';
-
-    const controlsHeader = document.createElement('div');
-    controlsHeader.className = 'panel-header';
-    const controlsTitle = document.createElement('h3');
-    controlsTitle.textContent = 'Display';
-    controlsHeader.appendChild(controlsTitle);
-    controlsPanel.appendChild(controlsHeader);
-
-    // Dynamic controls container - LayerManager will render controls here
-    const dynamicControls = document.createElement('div');
-    dynamicControls.id = 'split-dynamic-controls';
-    dynamicControls.innerHTML = '<div class="no-layer-selected">Select a layer to adjust</div>';
-    controlsPanel.appendChild(dynamicControls);
-
-    leftPanel.appendChild(controlsPanel);
+    leftPanel.appendChild(layerPanelOuter);
 
     return leftPanel;
   }

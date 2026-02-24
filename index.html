@@ -17,8 +17,13 @@
       </div>
       <div id="toast-container"></div>
       <div id="toolbar">
+        <!-- File Menu -->
         <div id="file-menu-container" class="menu-container">
-          <button id="file-menu-btn" class="menu-btn">File</button>
+          <button id="file-menu-btn" class="menu-btn" title="File menu">
+            <svg class="icon" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+              <path d="M4 6h16M4 12h16M4 18h16" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+            </svg>
+          </button>
           <div id="file-menu-dropdown" class="menu-dropdown">
             <div class="menu-item" data-action="open-file">
               <span>Open File...</span>
@@ -48,30 +53,144 @@
             </div>
           </div>
         </div>
-        <button id="fit-bounds" title="Fit to layer extent (F)" disabled>Fit Bounds</button>
-        <button id="zoom-rect-btn" title="Zoom to rectangle (Z)">Zoom Rect</button>
-        <button id="measure-btn" title="Measure distance (M)">Measure</button>
-        <button id="profile-btn" title="Value profile along line (P)">Profile</button>
-        <button id="elevation-btn" title="Elevation profile - enables 3D terrain (E)">Elevation</button>
-        <button id="stac-btn" title="Browse STAC Catalog (C)">STAC</button>
+
+        <div class="toolbar-divider"></div>
+
+        <!-- Navigation Tools -->
+        <button id="fit-bounds" title="Fit to layer extent (F)" disabled>
+          <svg class="icon" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+            <path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </button>
+        <button id="zoom-rect-btn" title="Zoom to rectangle (Z)">
+          <svg class="icon" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+            <rect x="3" y="3" width="18" height="18" rx="2" stroke="currentColor" stroke-width="1.5" fill="none"/>
+            <path d="M9 9h6v6H9z" stroke="currentColor" stroke-width="1.5" fill="none"/>
+          </svg>
+        </button>
+
+        <div class="toolbar-divider"></div>
+
+        <!-- Analysis Tools -->
+        <button id="measure-btn" title="Measure distance (M)">
+          <svg class="icon" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+            <path d="M2 12h4m12 0h4M6 12v-2m0 4v-2m4-4v8m4-8v8m4-6v-2m0 4v-2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+            <path d="M6 4v4m12-4v4M6 16v4m12-4v4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+          </svg>
+        </button>
+        <button id="profile-btn" title="Value profile along line (P)">
+          <svg class="icon" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+            <path d="M3 20h18" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+            <path d="M3 17l4-5 4 3 5-8 5 6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+          </svg>
+        </button>
+        <button id="elevation-btn" title="Elevation profile - enables 3D terrain (E)">
+          <svg class="icon" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+            <path d="M3 20l5-10 4 5 5-12 4 8v9H3z" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+          </svg>
+        </button>
+
+        <div class="toolbar-divider"></div>
+
+        <!-- Data Tools -->
+        <button id="stac-btn" title="Browse STAC Catalog (C)">
+          <svg class="icon" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+            <circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.5" fill="none"/>
+            <path d="M12 3v18M3 12h18M5.6 5.6l12.8 12.8M18.4 5.6L5.6 18.4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+          </svg>
+        </button>
         <div id="annotate-container" class="menu-container">
-          <button id="annotate-btn" title="Add annotations (A)">Annotate</button>
+          <button id="annotate-btn" title="Add annotations (A)">
+            <svg class="icon" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+              <path d="M12 19l7-7 3 3-7 7-3-3z" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+              <path d="M18 13l-1.5-7.5L2 2l3.5 14.5L13 18l5-5z" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+              <path d="M2 2l7.586 7.586" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+              <circle cx="11" cy="11" r="2" stroke="currentColor" stroke-width="1.5" fill="none"/>
+            </svg>
+          </button>
           <div id="annotation-dropdown" class="menu-dropdown annotation-dropdown">
-            <div class="menu-item" data-mode="marker">Marker</div>
-            <div class="menu-item" data-mode="line">Line</div>
-            <div class="menu-item" data-mode="polygon">Polygon</div>
+            <div class="menu-item" data-mode="marker">
+              <svg class="icon" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" style="width:16px;height:16px">
+                <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7z" stroke="currentColor" stroke-width="1.5" fill="none"/>
+                <circle cx="12" cy="9" r="2" stroke="currentColor" stroke-width="1.5" fill="none"/>
+              </svg>
+              Marker
+            </div>
+            <div class="menu-item" data-mode="line">
+              <svg class="icon" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" style="width:16px;height:16px">
+                <path d="M5 19L19 5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+                <circle cx="5" cy="19" r="2" stroke="currentColor" stroke-width="1.5" fill="none"/>
+                <circle cx="19" cy="5" r="2" stroke="currentColor" stroke-width="1.5" fill="none"/>
+              </svg>
+              Line
+            </div>
+            <div class="menu-item" data-mode="polygon">
+              <svg class="icon" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" style="width:16px;height:16px">
+                <path d="M12 3l8 5v8l-8 5-8-5V8l8-5z" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+              </svg>
+              Polygon
+            </div>
           </div>
         </div>
-        <button id="georef-btn" title="Georeference image (G)">Georef</button>
-        <button id="split-view-btn" title="Toggle split view (S)">Split View</button>
-        <button id="reset-rotation" title="Reset rotation (R)">Reset North</button>
-        <button id="reset-view" title="Reset view (pitch & rotation)">Reset View</button>
-        <button id="help-btn" title="Keyboard shortcuts (?)" onclick="document.dispatchEvent(new KeyboardEvent('keydown', {key: '?', shiftKey: true}))">?</button>
+
+        <div class="toolbar-divider"></div>
+
+        <!-- Georeferencing & View -->
+        <button id="georef-btn" title="Georeference image (G)">
+          <svg class="icon" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+            <circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.5" fill="none"/>
+            <path d="M12 2v4m0 12v4M2 12h4m12 0h4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+            <circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="1.5" fill="none"/>
+          </svg>
+        </button>
+        <button id="split-view-btn" title="Toggle split view (V)">
+          <svg class="icon" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+            <rect x="3" y="3" width="18" height="18" rx="2" stroke="currentColor" stroke-width="1.5" fill="none"/>
+            <path d="M12 3v18" stroke="currentColor" stroke-width="1.5"/>
+          </svg>
+        </button>
+
+        <div class="toolbar-divider"></div>
+
+        <!-- View Controls -->
+        <button id="reset-rotation" title="Reset rotation (R)">
+          <svg class="icon" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+            <path d="M12 2l4 4-4 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+            <path d="M16 6H9a7 7 0 1 0 0 14h7" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" fill="none"/>
+          </svg>
+        </button>
+        <button id="reset-view" title="Reset view (pitch & rotation)">
+          <svg class="icon" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+            <circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.5" fill="none"/>
+            <path d="M12 8v4l2.5 2.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+            <path d="M12 3v2M12 19v2M3 12h2M19 12h2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+          </svg>
+        </button>
+
+        <div class="toolbar-divider"></div>
+
+        <!-- Help -->
+        <button id="help-btn" title="Keyboard shortcuts (?)" onclick="document.dispatchEvent(new KeyboardEvent('keydown', {key: '?', shiftKey: true}))">
+          <svg class="icon" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+            <circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.5" fill="none"/>
+            <path d="M9 9a3 3 0 1 1 3 3v2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+            <circle cx="12" cy="17" r="0.5" fill="currentColor"/>
+          </svg>
+        </button>
       </div>
       <div id="left-panel">
-        <button id="left-panel-collapse" class="panel-collapse" title="Toggle layer panel">◀</button>
+        <button id="left-panel-collapse" class="panel-collapse" title="Toggle layer panel">
+          <svg class="icon" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" style="width:12px;height:12px">
+            <path d="M15 18l-6-6 6-6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+          </svg>
+        </button>
         <div id="layer-panel">
-          <h3>Layers</h3>
+          <h3>
+            <svg class="icon" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" style="width:16px;height:16px">
+              <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+            </svg>
+            Layers
+          </h3>
           <!-- Location Search integrated into panel -->
           <div id="location-search" class="location-search-inline">
             <input type="text" class="search-input" placeholder="Search location... (/)">
@@ -105,23 +224,47 @@
             </div>
           </div>
           <div id="layer-list"></div>
+          <div id="add-layer-section">
+            <div id="add-layer-menu-container" class="menu-container">
+              <button id="add-layer-btn" class="add-layer-btn">
+                <svg class="icon" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" style="width:16px;height:16px">
+                  <path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                </svg>
+                Add Layer
+                <svg class="dropdown-arrow" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" style="width:12px;height:12px;margin-left:4px">
+                  <path d="M6 9l6 6 6-6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+                </svg>
+              </button>
+              <div id="add-layer-dropdown" class="menu-dropdown add-layer-dropdown">
+                <div class="menu-item" data-action="open-file">
+                  <svg class="icon" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" style="width:16px;height:16px">
+                    <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" stroke="currentColor" stroke-width="1.5" fill="none"/>
+                    <path d="M14 2v6h6M12 18v-6M9 15l3 3 3-3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                  </svg>
+                  Open File...
+                  <kbd>Ctrl+O</kbd>
+                </div>
+                <div class="menu-divider"></div>
+                <div class="menu-item" data-action="create-rgb-layer">
+                  <svg class="icon" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" style="width:16px;height:16px">
+                    <circle cx="8" cy="8" r="5" stroke="#e74c3c" stroke-width="1.5" fill="none"/>
+                    <circle cx="16" cy="8" r="5" stroke="#27ae60" stroke-width="1.5" fill="none"/>
+                    <circle cx="12" cy="14" r="5" stroke="#3498db" stroke-width="1.5" fill="none"/>
+                  </svg>
+                  Create RGB Composite...
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
-        <div id="add-layer-panel">
-          <div class="panel-header">
-            <h3>Add Layer</h3>
-          </div>
-          <div class="add-layer-buttons">
-            <button id="add-layer-btn" class="add-layer-btn">+ Add Layer</button>
-          </div>
+      </div>
+      <div id="display-panel">
+        <div id="display-panel-header">
+          <h4 id="display-panel-title">Display</h4>
+          <button id="display-panel-close">&times;</button>
         </div>
-        <div id="controls-panel">
-          <div class="panel-header">
-            <h3>Display</h3>
-            <button id="controls-panel-toggle" class="panel-toggle" title="Toggle panel (D)">−</button>
-          </div>
-          <div id="dynamic-controls">
-            <div class="no-layer-selected">Select a layer to adjust</div>
-          </div>
+        <div id="dynamic-controls">
+          <div class="no-layer-selected">Select a layer to adjust</div>
         </div>
       </div>
       <div id="attribute-panel">

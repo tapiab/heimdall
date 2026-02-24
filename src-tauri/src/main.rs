@@ -8,8 +8,9 @@ use commands::app::get_version;
 use commands::georef::{apply_georeference, calculate_transformation};
 use commands::raster::{
     close_dataset, get_cross_layer_pixel_rgb_tile, get_cross_layer_rgb_tile, get_elevation_profile,
-    get_elevation_profile_pixels, get_histogram, get_pixel_tile, get_raster_stats, get_rgb_tile,
-    get_tile, get_tile_stretched, open_raster, query_pixel_value, query_pixel_value_at_pixel,
+    get_elevation_profile_pixels, get_histogram, get_pixel_rgb_tile, get_pixel_tile,
+    get_raster_stats, get_rgb_tile, get_tile, get_tile_stretched, open_raster, query_pixel_value,
+    query_pixel_value_at_pixel,
 };
 use commands::stac::{
     browse_static_collection, connect_stac_api, fetch_stac_resource, get_static_catalog_children,
@@ -83,6 +84,7 @@ fn main() {
             get_cross_layer_rgb_tile,
             get_cross_layer_pixel_rgb_tile,
             get_pixel_tile,
+            get_pixel_rgb_tile,
             get_raster_stats,
             get_histogram,
             close_dataset,

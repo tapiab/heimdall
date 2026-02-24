@@ -114,10 +114,86 @@ export class LocationSearch {
       return;
     }
 
+    // Check if input is coordinates
+    const coords = this.parseCoordinates(query);
+    if (coords) {
+      this.showCoordinateResult(coords.lat, coords.lng);
+      return;
+    }
+
     // Debounce search
     this.debounceTimer = window.setTimeout(() => {
       this.search(query);
     }, 300);
+  }
+
+  /** Parse coordinate input in various formats */
+  private parseCoordinates(input: string): { lat: number; lng: number } | null {
+    // Normalize input: replace common separators
+    const normalized = input
+      .replace(/[;|/]/g, ',')  // Replace ; | / with comma
+      .replace(/\s+/g, ' ')     // Normalize whitespace
+      .trim();
+
+    // Try various coordinate formats:
+    // 1. "lat, lng" or "lat lng" (most common user input)
+    // 2. "lng, lat" with explicit markers like "lon:" or negative western longitude
+    // 3. DMS format: 37°46'30"N 122°25'10"W
+
+    // Pattern for decimal degrees: optional minus, digits, optional decimal
+    const decimalPattern = /-?\d+\.?\d*/g;
+    const matches = normalized.match(decimalPattern);
+
+    if (matches && matches.length >= 2) {
+      const num1 = parseFloat(matches[0]);
+      const num2 = parseFloat(matches[1]);
+
+      // Validate ranges
+      if (isNaN(num1) || isNaN(num2)) return null;
+
+      // Determine which is lat and which is lng
+      // Latitude: -90 to 90, Longitude: -180 to 180
+      let lat: number, lng: number;
+
+      // If first number could only be longitude (|val| > 90), swap
+      if (Math.abs(num1) > 90 && Math.abs(num2) <= 90) {
+        lng = num1;
+        lat = num2;
+      } else if (Math.abs(num2) > 90 && Math.abs(num1) <= 90) {
+        // Second is longitude
+        lat = num1;
+        lng = num2;
+      } else {
+        // Both could be either - assume lat, lng order (Google Maps style)
+        lat = num1;
+        lng = num2;
+      }
+
+      // Final validation
+      if (lat < -90 || lat > 90 || lng < -180 || lng > 180) {
+        return null;
+      }
+
+      return { lat, lng };
+    }
+
+    return null;
+  }
+
+  /** Show a coordinate result for direct navigation */
+  private showCoordinateResult(lat: number, lng: number): void {
+    const result: SearchResult = {
+      name: `${lat.toFixed(6)}, ${lng.toFixed(6)}`,
+      displayName: `Coordinates: ${lat.toFixed(6)}°, ${lng.toFixed(6)}°`,
+      lat,
+      lng,
+      type: 'coordinate',
+    };
+
+    this.results = [result];
+    this.selectedIndex = 0;
+    this.renderResults();
+    this.showResults();
   }
 
   /** Handle keyboard navigation */
@@ -260,6 +336,7 @@ export class LocationSearch {
       water: '\u{1F30A}', // 🌊
       forest: '\u{1F332}', // 🌲
       park: '\u{1F333}', // 🌳
+      coordinate: '\u{1F4CD}', // 📍 (crosshairs would be ideal but this works)
     };
     return icons[type] || '\u{1F4CD}'; // 📍 default
   }
@@ -302,6 +379,10 @@ export class LocationSearch {
       zoom = 16;
     } else if (['address'].includes(result.type)) {
       zoom = 18;
+    } else if (['coordinate'].includes(result.type)) {
+      // For direct coordinate input, use a moderate zoom or keep current if already zoomed in
+      const currentZoom = this.map.getZoom();
+      zoom = Math.max(currentZoom, 12);
     }
 
     // Fly to location

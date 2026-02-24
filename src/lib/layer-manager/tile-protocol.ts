@@ -106,8 +106,15 @@ export function setupTileProtocol(
             return { data: new Uint8Array(0) };
           }
         } else if (layer.displayMode === 'rgb' && layer.bands >= 3) {
-          // RGB mode
-          tileData = await invoke<number[]>('get_rgb_tile', {
+          // RGB mode - use pixel version for non-georeferenced images
+          log.debug('RGB tile request', {
+            id: datasetId,
+            rgbBands: layer.rgbBands,
+            rgbStretch: layer.rgbStretch,
+            isGeoreferenced: layer.is_georeferenced,
+          });
+          const command = layer.is_georeferenced ? 'get_rgb_tile' : 'get_pixel_rgb_tile';
+          tileData = await invoke<number[]>(command, {
             id: datasetId,
             x: parseInt(x, 10),
             y: parseInt(y, 10),

@@ -175,6 +175,7 @@ fn extract_raw_tile(dataset: &Dataset, request: &TileRequest) -> Result<Vec<f64>
 /// Apply stretch and gamma to a value
 fn apply_stretch(val: f64, stretch: &StretchParams, nodata: Option<f64>) -> Option<u8> {
     // Check for nodata or invalid values
+    // Many rasters use 0 as nodata for areas outside the image extent
     if val == 0.0 || nodata.is_some_and(|nd| (val - nd).abs() < 1e-10) || !val.is_finite() {
         return None;
     }
@@ -543,6 +544,188 @@ pub fn extract_cross_layer_rgb_tile(
             tile_data[idx + 1] = g.unwrap_or(0);
             tile_data[idx + 2] = b.unwrap_or(0);
             tile_data[idx + 3] = 255;
+        }
+    }
+
+    encode_png(&tile_data, tile_size)
+}
+
+/// Extract an RGB tile using pixel coordinates (for non-georeferenced images)
+/// Uses synthetic geographic bounds matching the frontend's coordinate system
+pub fn extract_pixel_rgb_tile(
+    dataset: &Dataset,
+    request: &TileRequest,
+    red_band: i32,
+    green_band: i32,
+    blue_band: i32,
+    red_stretch: &StretchParams,
+    green_stretch: &StretchParams,
+    blue_stretch: &StretchParams,
+) -> Result<Vec<u8>, String> {
+    let (img_width, img_height) = dataset.raster_size();
+    let tile_size = request.tile_size;
+
+    // Use the same synthetic coordinate system as the frontend
+    let scale = 0.01;
+    let half_width = (img_width as f64 * scale) / 2.0;
+    let half_height = (img_height as f64 * scale) / 2.0;
+    let clamped_half_height = half_height.min(85.0);
+
+    // Get tile bounds in geographic coordinates (from MapLibre)
+    let tile_geo_bounds = tile_to_geo_bounds(request.x, request.y, request.z);
+
+    // Image bounds in synthetic geographic coordinates
+    let img_geo_bounds = [
+        -half_width,
+        -clamped_half_height,
+        half_width,
+        clamped_half_height,
+    ];
+
+    // Check intersection
+    if !bounds_intersect(tile_geo_bounds, img_geo_bounds) {
+        return create_empty_tile(tile_size);
+    }
+
+    // Convert tile geographic bounds to pixel coordinates
+    let pixel_scale_y = if half_height > 85.0 {
+        (clamped_half_height * 2.0) / img_height as f64
+    } else {
+        scale
+    };
+
+    // Calculate full tile extent in source pixel coordinates (unclamped)
+    let tile_src_x_start = (tile_geo_bounds[0] + half_width) / scale;
+    let tile_src_y_start = (clamped_half_height - tile_geo_bounds[3]) / pixel_scale_y;
+    let tile_src_x_end = (tile_geo_bounds[2] + half_width) / scale;
+    let tile_src_y_end = (clamped_half_height - tile_geo_bounds[1]) / pixel_scale_y;
+
+    // Calculate the intersection with image bounds (clamped source coordinates)
+    let src_x_f = tile_src_x_start.max(0.0);
+    let src_y_f = tile_src_y_start.max(0.0);
+    let src_x_end_f = tile_src_x_end.min(img_width as f64);
+    let src_y_end_f = tile_src_y_end.min(img_height as f64);
+
+    // Integer source coordinates
+    let src_x = src_x_f.floor() as isize;
+    let src_y = src_y_f.floor() as isize;
+    let src_x_end = src_x_end_f.ceil() as isize;
+    let src_y_end = src_y_end_f.ceil() as isize;
+
+    let src_width = (src_x_end - src_x).max(0) as usize;
+    let src_height = (src_y_end - src_y).max(0) as usize;
+
+    if src_width == 0
+        || src_height == 0
+        || src_x >= img_width as isize
+        || src_y >= img_height as isize
+    {
+        return create_empty_tile(tile_size);
+    }
+
+    // Calculate where in the output tile the image data should be placed
+    let tile_pixel_width = tile_src_x_end - tile_src_x_start;
+    let tile_pixel_height = tile_src_y_end - tile_src_y_start;
+
+    // Destination rectangle in tile coordinates (0 to tile_size)
+    let dst_x_start =
+        ((src_x_f - tile_src_x_start) / tile_pixel_width * tile_size as f64).round() as usize;
+    let dst_y_start =
+        ((src_y_f - tile_src_y_start) / tile_pixel_height * tile_size as f64).round() as usize;
+    let dst_x_end =
+        ((src_x_end_f - tile_src_x_start) / tile_pixel_width * tile_size as f64).round() as usize;
+    let dst_y_end =
+        ((src_y_end_f - tile_src_y_start) / tile_pixel_height * tile_size as f64).round() as usize;
+
+    let dst_width = (dst_x_end - dst_x_start)
+        .max(1)
+        .min(tile_size - dst_x_start);
+    let dst_height = (dst_y_end - dst_y_start)
+        .max(1)
+        .min(tile_size - dst_y_start);
+
+    // Get nodata values for each band
+    let r_nodata = dataset
+        .rasterband(red_band as usize)
+        .ok()
+        .and_then(|b| b.no_data_value());
+    let g_nodata = dataset
+        .rasterband(green_band as usize)
+        .ok()
+        .and_then(|b| b.no_data_value());
+    let b_nodata = dataset
+        .rasterband(blue_band as usize)
+        .ok()
+        .and_then(|b| b.no_data_value());
+
+    // Read each band
+    let r_band = dataset
+        .rasterband(red_band as usize)
+        .map_err(|e| format!("Failed to get red band: {}", e))?;
+    let g_band = dataset
+        .rasterband(green_band as usize)
+        .map_err(|e| format!("Failed to get green band: {}", e))?;
+    let b_band = dataset
+        .rasterband(blue_band as usize)
+        .map_err(|e| format!("Failed to get blue band: {}", e))?;
+
+    let r_buffer = r_band
+        .read_as::<f64>(
+            (src_x, src_y),
+            (src_width, src_height),
+            (dst_width, dst_height),
+            None,
+        )
+        .map_err(|e| format!("Failed to read red: {}", e))?;
+
+    let g_buffer = g_band
+        .read_as::<f64>(
+            (src_x, src_y),
+            (src_width, src_height),
+            (dst_width, dst_height),
+            None,
+        )
+        .map_err(|e| format!("Failed to read green: {}", e))?;
+
+    let b_buffer = b_band
+        .read_as::<f64>(
+            (src_x, src_y),
+            (src_width, src_height),
+            (dst_width, dst_height),
+            None,
+        )
+        .map_err(|e| format!("Failed to read blue: {}", e))?;
+
+    let r_data = r_buffer.data();
+    let g_data = g_buffer.data();
+    let b_data = b_buffer.data();
+
+    let mut tile_data = vec![0u8; tile_size * tile_size * 4];
+
+    // Place the resampled data at the correct position in the output tile
+    for dy in 0..dst_height {
+        for dx in 0..dst_width {
+            let src_idx = dy * dst_width + dx;
+            let dst_tile_x = dst_x_start + dx;
+            let dst_tile_y = dst_y_start + dy;
+
+            if dst_tile_x >= tile_size || dst_tile_y >= tile_size {
+                continue;
+            }
+
+            let dst_idx = (dst_tile_y * tile_size + dst_tile_x) * 4;
+
+            let r = apply_stretch(r_data[src_idx], red_stretch, r_nodata);
+            let g = apply_stretch(g_data[src_idx], green_stretch, g_nodata);
+            let b = apply_stretch(b_data[src_idx], blue_stretch, b_nodata);
+
+            // If any band has valid data, show the pixel
+            if r.is_some() || g.is_some() || b.is_some() {
+                tile_data[dst_idx] = r.unwrap_or(0);
+                tile_data[dst_idx + 1] = g.unwrap_or(0);
+                tile_data[dst_idx + 2] = b.unwrap_or(0);
+                tile_data[dst_idx + 3] = 255;
+            }
         }
     }
 

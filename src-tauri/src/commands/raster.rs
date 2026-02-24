@@ -372,6 +372,11 @@ pub async fn get_rgb_tile(
     blue_gamma: f64,
     state: State<'_, DatasetCache>,
 ) -> Result<Vec<u8>, String> {
+    tracing::debug!(
+        "get_rgb_tile: id={}, z={}, bands=({},{},{}), r_stretch=({},{}), g_stretch=({},{}), b_stretch=({},{})",
+        id, z, red_band, green_band, blue_band,
+        red_min, red_max, green_min, green_max, blue_min, blue_max
+    );
     let path = state.get_path(&id).ok_or("Dataset not found")?;
     let dataset = open_dataset_for_zoom(&path, z)?;
 
@@ -613,6 +618,68 @@ pub async fn get_pixel_tile(
     let stretch = StretchParams { min, max, gamma };
 
     extract_pixel_tile(&dataset, &request, &stretch)
+}
+
+/// Get an RGB tile for non-georeferenced images (using pixel coordinates)
+#[tauri::command]
+pub async fn get_pixel_rgb_tile(
+    id: String,
+    x: i32,
+    y: i32,
+    z: u8,
+    red_band: i32,
+    green_band: i32,
+    blue_band: i32,
+    red_min: f64,
+    red_max: f64,
+    red_gamma: f64,
+    green_min: f64,
+    green_max: f64,
+    green_gamma: f64,
+    blue_min: f64,
+    blue_max: f64,
+    blue_gamma: f64,
+    state: State<'_, DatasetCache>,
+) -> Result<Vec<u8>, String> {
+    use crate::gdal::tile_extractor::{extract_pixel_rgb_tile, StretchParams, TileRequest};
+
+    let path = state.get_path(&id).ok_or("Dataset not found")?;
+    let dataset = Dataset::open(&path).map_err(|e| format!("Failed to open raster: {}", e))?;
+
+    let request = TileRequest {
+        x,
+        y,
+        z,
+        band: 1, // Not used directly
+        tile_size: 256,
+    };
+
+    let red_stretch = StretchParams {
+        min: red_min,
+        max: red_max,
+        gamma: red_gamma,
+    };
+    let green_stretch = StretchParams {
+        min: green_min,
+        max: green_max,
+        gamma: green_gamma,
+    };
+    let blue_stretch = StretchParams {
+        min: blue_min,
+        max: blue_max,
+        gamma: blue_gamma,
+    };
+
+    extract_pixel_rgb_tile(
+        &dataset,
+        &request,
+        red_band,
+        green_band,
+        blue_band,
+        &red_stretch,
+        &green_stretch,
+        &blue_stretch,
+    )
 }
 
 /// Get a cross-layer RGB tile for non-georeferenced images (using pixel coordinates)
