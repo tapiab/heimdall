@@ -34,12 +34,7 @@ describe('Notifications', () => {
     createMockDOM();
     // Dynamic import to get fresh module state
     const module = await import('../notifications.js');
-    showToast = module.showToast;
-    showError = module.showError;
-    showLoading = module.showLoading;
-    hideLoading = module.hideLoading;
-    withLoading = module.withLoading;
-    resetLoadingCount = module.resetLoadingCount;
+    ({ showToast, showError, showLoading, hideLoading, withLoading, resetLoadingCount } = module);
     // Reset state between tests
     resetLoadingCount();
   });

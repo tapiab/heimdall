@@ -10,11 +10,7 @@
  * 6. Apply and save georeferenced output
  */
 
-import maplibregl, {
-  type Map as MapLibreMap,
-  type MapMouseEvent,
-  type Marker,
-} from 'maplibre-gl';
+import maplibregl, { type Map as MapLibreMap, type MapMouseEvent, type Marker } from 'maplibre-gl';
 import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { save } from '@tauri-apps/plugin-dialog';
@@ -44,15 +40,18 @@ interface MapManager {
 
 /** Interface for LayerManager */
 interface LayerManager {
-  layers: Map<string, {
-    type: string;
-    path: string;
-    is_georeferenced?: boolean;
-    width?: number;
-    height?: number;
-    pixelScale?: number;
-    pixelOffset?: { x: number; y: number };
-  }>;
+  layers: Map<
+    string,
+    {
+      type: string;
+      path: string;
+      is_georeferenced?: boolean;
+      width?: number;
+      height?: number;
+      pixelScale?: number;
+      pixelOffset?: { x: number; y: number };
+    }
+  >;
   selectedLayerId: string | null;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   addRasterLayer: (path: string) => Promise<any>;
@@ -157,7 +156,12 @@ export class GeoreferenceTool {
   }
 
   /** Convert GCPs to backend format with proper pixel coordinates */
-  private gcpsToBackendFormat(): Array<{ pixel_x: number; pixel_y: number; geo_x: number; geo_y: number }> {
+  private gcpsToBackendFormat(): Array<{
+    pixel_x: number;
+    pixel_y: number;
+    geo_x: number;
+    geo_y: number;
+  }> {
     return this.getEnabledGcps().map(gcp => {
       const { pixelX, pixelY } = this.mapToPixelCoords(gcp.sourceX, gcp.sourceY);
       return {
@@ -259,8 +263,9 @@ export class GeoreferenceTool {
 
     const { lng, lat } = e.lngLat;
     const sourceMap = this.getSourceMap();
-    const isSourceMap = (clickedMap === 'primary' && sourceMap === this.map) ||
-                        (clickedMap === 'secondary' && sourceMap === this.secondaryMap);
+    const isSourceMap =
+      (clickedMap === 'primary' && sourceMap === this.map) ||
+      (clickedMap === 'secondary' && sourceMap === this.secondaryMap);
 
     if (this.state === 'collecting_source') {
       // Only accept source clicks on the map where the image is
@@ -287,7 +292,11 @@ export class GeoreferenceTool {
 
       // Update state
       this.state = 'collecting_target';
-      showToast('Now click on the basemap to set target coordinates, or enter manually', 'info', 4000);
+      showToast(
+        'Now click on the basemap to set target coordinates, or enter manually',
+        'info',
+        4000
+      );
 
       // Update panel to show pending GCP
       this.updatePanelState();
@@ -708,7 +717,10 @@ export class GeoreferenceTool {
   }
 
   /** Set secondary LayerManager and Map for split view support */
-  setSecondaryLayerManager(manager: LayerManager | null, secondaryMap: MapLibreMap | null = null): void {
+  setSecondaryLayerManager(
+    manager: LayerManager | null,
+    secondaryMap: MapLibreMap | null = null
+  ): void {
     // Remove old click handler if switching
     if (this.secondaryMap && this.active) {
       this.secondaryMap.off('click', this.handleSecondaryClick);
@@ -724,7 +736,11 @@ export class GeoreferenceTool {
   }
 
   /** Get non-georeferenced layers for selection (includes both primary and secondary) */
-  getNonGeoreferencedLayers(): Array<{ id: string; name: string; source: 'primary' | 'secondary' }> {
+  getNonGeoreferencedLayers(): Array<{
+    id: string;
+    name: string;
+    source: 'primary' | 'secondary';
+  }> {
     const layers: Array<{ id: string; name: string; source: 'primary' | 'secondary' }> = [];
 
     // Primary LayerManager layers

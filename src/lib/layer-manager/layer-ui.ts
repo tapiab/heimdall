@@ -3,7 +3,13 @@
  * @module layer-manager/layer-ui
  */
 
-import type { LayerManagerInterface, RasterLayer, VectorLayer, CrossLayerRgbConfig, LayerManagerOptions } from './types';
+import type {
+  LayerManagerInterface,
+  RasterLayer,
+  VectorLayer,
+  CrossLayerRgbConfig,
+  LayerManagerOptions,
+} from './types';
 
 /** Extended LayerManager interface with UI-specific properties */
 interface LayerManagerWithUI extends LayerManagerInterface {
@@ -307,7 +313,9 @@ export function updateLayerPanel(manager: LayerManagerWithUI): void {
     layerList.appendChild(item);
   });
 
-  const fitBoundsBtn = document.getElementById(manager.options.fitBoundsButtonId) as HTMLButtonElement | null;
+  const fitBoundsBtn = document.getElementById(
+    manager.options.fitBoundsButtonId
+  ) as HTMLButtonElement | null;
   if (fitBoundsBtn) {
     fitBoundsBtn.disabled = manager.layers.size === 0;
   }

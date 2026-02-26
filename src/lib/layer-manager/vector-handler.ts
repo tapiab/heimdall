@@ -115,7 +115,7 @@ function addAllVectorLayers(
   sourceId: string,
   style: VectorStyle
 ): void {
-  const map = manager.mapManager.map;
+  const { map } = manager.mapManager;
   if (!map) {
     log.error('Map not available when adding vector layers');
     return;

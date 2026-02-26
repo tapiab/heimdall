@@ -245,6 +245,7 @@ fn solve_3x3(a: &[[f64; 3]; 3], b: &[f64; 3]) -> Result<[f64; 3], String> {
         // Eliminate
         for row in (col + 1)..3 {
             let factor = aug[row][col] / aug[col][col];
+            #[allow(clippy::needless_range_loop)]
             for j in col..4 {
                 aug[row][j] -= factor * aug[col][j];
             }
@@ -387,6 +388,7 @@ fn solve_nxn(a: &[Vec<f64>], b: &[f64]) -> Result<Vec<f64>, String> {
         // Eliminate
         for row in (col + 1)..n {
             let factor = aug[row][col] / aug[col][col];
+            #[allow(clippy::needless_range_loop)]
             for j in col..=n {
                 aug[row][j] -= factor * aug[col][j];
             }
@@ -1132,7 +1134,7 @@ fn apply_warped_georeference(
 
                 // Update progress counter
                 let completed = rows_completed.fetch_add(1, Ordering::Relaxed);
-                if completed % (total_rows / 20).max(1) == 0 {
+                if completed.is_multiple_of((total_rows / 20).max(1)) {
                     let row_progress = completed as f32 / total_rows as f32;
                     let band_progress =
                         band_progress_start + row_progress * (0.6 / band_count as f32);

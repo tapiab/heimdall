@@ -131,8 +131,8 @@ export class LocationSearch {
   private parseCoordinates(input: string): { lat: number; lng: number } | null {
     // Normalize input: replace common separators
     const normalized = input
-      .replace(/[;|/]/g, ',')  // Replace ; | / with comma
-      .replace(/\s+/g, ' ')     // Normalize whitespace
+      .replace(/[;|/]/g, ',') // Replace ; | / with comma
+      .replace(/\s+/g, ' ') // Normalize whitespace
       .trim();
 
     // Try various coordinate formats:
@@ -261,9 +261,7 @@ export class LocationSearch {
     const parts: string[] = [];
     if (props.name) parts.push(props.name);
     if (props.street) {
-      const streetPart = props.housenumber
-        ? `${props.street} ${props.housenumber}`
-        : props.street;
+      const streetPart = props.housenumber ? `${props.street} ${props.housenumber}` : props.street;
       if (streetPart !== props.name) parts.push(streetPart);
     }
     if (props.city && props.city !== props.name) parts.push(props.city);
@@ -289,8 +287,7 @@ export class LocationSearch {
     if (!this.resultsList) return;
 
     if (this.results.length === 0) {
-      this.resultsList.innerHTML =
-        '<div class="search-no-results">No results found</div>';
+      this.resultsList.innerHTML = '<div class="search-no-results">No results found</div>';
       return;
     }
 
@@ -358,8 +355,7 @@ export class LocationSearch {
   /** Select previous result */
   private selectPrevious(): void {
     if (this.results.length === 0) return;
-    this.selectedIndex =
-      this.selectedIndex <= 0 ? this.results.length - 1 : this.selectedIndex - 1;
+    this.selectedIndex = this.selectedIndex <= 0 ? this.results.length - 1 : this.selectedIndex - 1;
     this.renderResults();
   }
 

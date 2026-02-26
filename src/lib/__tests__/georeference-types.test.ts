@@ -159,12 +159,7 @@ describe('georeference-types', () => {
 
   describe('TransformationType', () => {
     it('should accept valid transformation types', () => {
-      const types: TransformationType[] = [
-        'polynomial1',
-        'polynomial2',
-        'polynomial3',
-        'tps',
-      ];
+      const types: TransformationType[] = ['polynomial1', 'polynomial2', 'polynomial3', 'tps'];
 
       expect(types).toHaveLength(4);
       types.forEach(t => {

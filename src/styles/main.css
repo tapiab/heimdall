@@ -52,7 +52,8 @@
      TYPOGRAPHY
      ───────────────────────────────────────────────────────────────────────── */
 
-  --font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif;
+  --font-family:
+    -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif;
   --font-family-mono: 'SF Mono', 'Cascadia Code', 'Consolas', monospace;
 
   --font-size-xs: 11px;
@@ -193,7 +194,9 @@ select {
   border-radius: var(--radius-md);
   font-size: var(--font-size-sm);
   cursor: pointer;
-  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+  transition:
+    border-color var(--transition-fast),
+    box-shadow var(--transition-fast);
 }
 
 select:hover {
@@ -228,7 +231,9 @@ textarea {
   padding: var(--space-2) var(--space-3);
   font-size: var(--font-size-sm);
   font-family: var(--font-family);
-  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+  transition:
+    border-color var(--transition-fast),
+    box-shadow var(--transition-fast);
 }
 
 input:hover,
@@ -321,7 +326,9 @@ input[type='range']::-webkit-slider-thumb {
   background: var(--accent-primary);
   border-radius: var(--radius-full);
   cursor: grab;
-  transition: transform var(--transition-fast), box-shadow var(--transition-fast);
+  transition:
+    transform var(--transition-fast),
+    box-shadow var(--transition-fast);
   box-shadow: var(--shadow-sm);
 }
 
@@ -539,7 +546,9 @@ button:disabled {
 
 #layer-panel {
   max-height: 50%;
-  transition: max-height var(--transition-slow) ease, opacity var(--transition-normal) ease;
+  transition:
+    max-height var(--transition-slow) ease,
+    opacity var(--transition-normal) ease;
   animation: panelSlideIn 0.3s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
@@ -1397,7 +1406,9 @@ button:disabled {
   color: var(--text-primary);
   min-width: 72px;
   text-align: center;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2), inset 0 -1px 0 rgba(0, 0, 0, 0.2);
+  box-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.2),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.2);
 }
 
 .shortcuts-content hr {
@@ -2038,7 +2049,9 @@ button:disabled {
   color: white;
   cursor: pointer;
   box-shadow: var(--shadow-md);
-  transition: transform var(--transition-fast), box-shadow var(--transition-fast);
+  transition:
+    transform var(--transition-fast),
+    box-shadow var(--transition-fast);
 }
 
 .measure-marker:hover {
@@ -2136,7 +2149,9 @@ button:disabled {
   font-size: var(--font-size-sm);
   color: var(--text-primary);
   outline: none;
-  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+  transition:
+    border-color var(--transition-fast),
+    box-shadow var(--transition-fast);
 }
 
 .layer-name-input:focus {
@@ -2181,7 +2196,10 @@ button:disabled {
   opacity: 0;
   visibility: hidden;
   transform: translateY(-4px);
-  transition: opacity var(--transition-fast), visibility var(--transition-fast), transform var(--transition-fast);
+  transition:
+    opacity var(--transition-fast),
+    visibility var(--transition-fast),
+    transform var(--transition-fast);
   pointer-events: none;
 }
 
@@ -2473,7 +2491,9 @@ button:disabled {
   color: white;
   cursor: pointer;
   box-shadow: var(--shadow-md);
-  transition: transform var(--transition-fast), box-shadow var(--transition-fast);
+  transition:
+    transform var(--transition-fast),
+    box-shadow var(--transition-fast);
 }
 
 .profile-marker:hover {
@@ -2648,8 +2668,13 @@ button:disabled {
 }
 
 @keyframes markerPulse {
-  0%, 100% { transform: scale(1); }
-  50% { transform: scale(1.1); }
+  0%,
+  100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.1);
+  }
 }
 
 .annotation-popup {
@@ -2666,7 +2691,9 @@ button:disabled {
   font-size: var(--font-size-sm);
   outline: none;
   margin-bottom: var(--space-2);
-  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+  transition:
+    border-color var(--transition-fast),
+    box-shadow var(--transition-fast);
 }
 
 .annotation-label-input:focus {
@@ -2750,7 +2777,10 @@ button:disabled {
   opacity: 0;
   visibility: hidden;
   transform: translateY(-4px);
-  transition: opacity var(--transition-fast), transform var(--transition-fast), visibility var(--transition-fast);
+  transition:
+    opacity var(--transition-fast),
+    transform var(--transition-fast),
+    visibility var(--transition-fast);
 }
 
 .menu-dropdown.visible {
@@ -4164,7 +4194,9 @@ button:disabled {
   flex-direction: column;
   gap: var(--space-3);
   z-index: var(--z-dropdown);
-  transition: width var(--transition-slow), opacity var(--transition-normal);
+  transition:
+    width var(--transition-slow),
+    opacity var(--transition-normal);
 }
 
 /* Secondary panel collapsed state */
@@ -4238,7 +4270,8 @@ button:disabled {
   cursor: default;
   border-bottom: 1px solid var(--border-subtle);
   border-radius: 0;
-  margin: calc(-1 * var(--space-1)) calc(-1 * var(--space-2)) var(--space-2) calc(-1 * var(--space-2));
+  margin: calc(-1 * var(--space-1)) calc(-1 * var(--space-2)) var(--space-2)
+    calc(-1 * var(--space-2));
   padding: var(--space-3) var(--space-4);
   background: var(--bg-tertiary);
 }

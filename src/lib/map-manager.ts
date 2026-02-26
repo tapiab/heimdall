@@ -28,7 +28,15 @@ const DEFAULT_SATELLITE: BasemapConfig = {
   name: 'Sentinel-2 Cloudless',
 };
 
-type BasemapType = 'osm' | 'satellite' | 'topo' | 'carto-light' | 'carto-dark' | 'custom' | 'pixel' | 'none';
+type BasemapType =
+  | 'osm'
+  | 'satellite'
+  | 'topo'
+  | 'carto-light'
+  | 'carto-dark'
+  | 'custom'
+  | 'pixel'
+  | 'none';
 
 interface PixelExtent {
   width: number;
@@ -78,7 +86,11 @@ export class MapManager {
    * @param configManager - Optional config manager for custom basemaps
    * @param options - Optional configuration options
    */
-  constructor(containerId: string, configManager: ConfigManager | null = null, options: MapManagerOptions = {}) {
+  constructor(
+    containerId: string,
+    configManager: ConfigManager | null = null,
+    options: MapManagerOptions = {}
+  ) {
     this.containerId = containerId;
     this.configManager = configManager;
     this.options = {
@@ -496,7 +508,9 @@ export class MapManager {
         this.createPixelGridBasemap(extent);
         this.setBasemap('pixel');
         // Update basemap selector UI
-        const basemapSelect = document.getElementById(this.getElementId('basemap-select')) as HTMLSelectElement | null;
+        const basemapSelect = document.getElementById(
+          this.getElementId('basemap-select')
+        ) as HTMLSelectElement | null;
         if (basemapSelect) {
           basemapSelect.value = 'pixel';
         }
@@ -507,7 +521,9 @@ export class MapManager {
       if (this.previousBasemap && this.previousBasemap !== 'pixel') {
         this.setBasemap(this.previousBasemap);
         // Update basemap selector UI
-        const basemapSelect = document.getElementById(this.getElementId('basemap-select')) as HTMLSelectElement | null;
+        const basemapSelect = document.getElementById(
+          this.getElementId('basemap-select')
+        ) as HTMLSelectElement | null;
         if (basemapSelect) {
           basemapSelect.value = this.previousBasemap;
         }

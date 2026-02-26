@@ -46,7 +46,7 @@ export class GeoreferencePanel {
     const layerSelect = document.getElementById('georef-layer-select') as HTMLSelectElement | null;
     if (layerSelect) {
       layerSelect.addEventListener('change', () => {
-        const value = layerSelect.value;
+        const { value } = layerSelect;
         if (!value) {
           this.tool.setSourceLayerWithManager(null, 'primary');
         } else {
@@ -149,9 +149,7 @@ export class GeoreferencePanel {
 
   /** Update the transform type dropdown */
   private updateTransformDropdown(): void {
-    const select = document.getElementById(
-      'georef-transform-select'
-    ) as HTMLSelectElement | null;
+    const select = document.getElementById('georef-transform-select') as HTMLSelectElement | null;
     if (!select) return;
 
     const current = this.tool.getTransformationType();
@@ -272,7 +270,9 @@ export class GeoreferencePanel {
     const hasSourceLayer = this.tool.getSourceLayerId() !== null;
 
     const addBtn = document.getElementById('georef-add-gcp-btn') as HTMLButtonElement | null;
-    const calculateBtn = document.getElementById('georef-calculate-btn') as HTMLButtonElement | null;
+    const calculateBtn = document.getElementById(
+      'georef-calculate-btn'
+    ) as HTMLButtonElement | null;
     const applyBtn = document.getElementById('georef-apply-btn') as HTMLButtonElement | null;
     const clearBtn = document.getElementById('georef-clear-all-btn') as HTMLButtonElement | null;
 
@@ -323,8 +323,7 @@ export class GeoreferencePanel {
     }
 
     if (cancelBtn) {
-      (cancelBtn as HTMLButtonElement).style.display =
-        state !== 'idle' ? 'inline-block' : 'none';
+      (cancelBtn as HTMLButtonElement).style.display = state !== 'idle' ? 'inline-block' : 'none';
     }
 
     if (manualBtn) {
