@@ -28,7 +28,15 @@ const DEFAULT_SATELLITE: BasemapConfig = {
   name: 'Sentinel-2 Cloudless',
 };
 
-type BasemapType = 'osm' | 'satellite' | 'custom' | 'pixel' | 'none';
+type BasemapType =
+  | 'osm'
+  | 'satellite'
+  | 'topo'
+  | 'carto-light'
+  | 'carto-dark'
+  | 'custom'
+  | 'pixel'
+  | 'none';
 
 interface PixelExtent {
   width: number;
@@ -49,9 +57,17 @@ interface ConfigManager {
   getCustomConfig: () => BasemapConfig | null;
 }
 
+export interface MapManagerOptions {
+  /** Enable status bar updates (coordinates, zoom, bearing, pitch). Default: true */
+  enableStatusBar?: boolean;
+  /** ID prefix for DOM elements (status bar, basemap select). Default: '' */
+  elementIdPrefix?: string;
+}
+
 export class MapManager {
   private containerId: string;
   private configManager: ConfigManager | null;
+  private options: MapManagerOptions;
   map: MapLibreMap | null;
   private basemapVisible: boolean;
   private currentBasemap: BasemapType;
@@ -68,10 +84,19 @@ export class MapManager {
    * Create a new MapManager instance
    * @param containerId - DOM element ID for the map container
    * @param configManager - Optional config manager for custom basemaps
+   * @param options - Optional configuration options
    */
-  constructor(containerId: string, configManager: ConfigManager | null = null) {
+  constructor(
+    containerId: string,
+    configManager: ConfigManager | null = null,
+    options: MapManagerOptions = {}
+  ) {
     this.containerId = containerId;
     this.configManager = configManager;
+    this.options = {
+      enableStatusBar: options.enableStatusBar ?? true,
+      elementIdPrefix: options.elementIdPrefix ?? '',
+    };
     this.map = null;
     this.basemapVisible = true;
     this.currentBasemap = 'osm';
@@ -83,6 +108,11 @@ export class MapManager {
     this.pixelGridCanvas = null;
     this._terrainErrorHandlerBound = false;
     this._boundTerrainErrorHandler = null;
+  }
+
+  /** Get element ID with optional prefix */
+  private getElementId(id: string): string {
+    return this.options.elementIdPrefix ? `${this.options.elementIdPrefix}-${id}` : id;
   }
 
   /**
@@ -106,6 +136,32 @@ export class MapManager {
         tiles: [satelliteConfig.url],
         tileSize: 256,
         attribution: satelliteConfig.attribution,
+      },
+      topo: {
+        type: 'raster',
+        tiles: ['https://tile.opentopomap.org/{z}/{x}/{y}.png'],
+        tileSize: 256,
+        attribution: '&copy; OpenTopoMap contributors',
+      },
+      'carto-light': {
+        type: 'raster',
+        tiles: [
+          'https://a.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png',
+          'https://b.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png',
+          'https://c.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png',
+        ],
+        tileSize: 256,
+        attribution: '&copy; CARTO',
+      },
+      'carto-dark': {
+        type: 'raster',
+        tiles: [
+          'https://a.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png',
+          'https://b.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png',
+          'https://c.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png',
+        ],
+        tileSize: 256,
+        attribution: '&copy; CARTO',
       },
     };
 
@@ -131,6 +187,30 @@ export class MapManager {
         id: 'satellite-tiles',
         type: 'raster',
         source: 'satellite',
+        minzoom: 0,
+        maxzoom: 19,
+        layout: { visibility: 'none' },
+      },
+      {
+        id: 'topo-tiles',
+        type: 'raster',
+        source: 'topo',
+        minzoom: 0,
+        maxzoom: 17,
+        layout: { visibility: 'none' },
+      },
+      {
+        id: 'carto-light-tiles',
+        type: 'raster',
+        source: 'carto-light',
+        minzoom: 0,
+        maxzoom: 19,
+        layout: { visibility: 'none' },
+      },
+      {
+        id: 'carto-dark-tiles',
+        type: 'raster',
+        source: 'carto-dark',
         minzoom: 0,
         maxzoom: 19,
         layout: { visibility: 'none' },
@@ -187,66 +267,70 @@ export class MapManager {
   private setupEventListeners(): void {
     if (!this.map) return;
 
-    // Update coordinates on mouse move
-    this.map.on('mousemove', e => {
-      const coordsEl = document.getElementById('coordinates');
-      if (coordsEl) {
-        if (this.pixelCoordMode && this.pixelExtent) {
-          // Convert map coords back to pixel coords using the scale
-          const { lng, lat } = e.lngLat;
-          const scale = this.pixelExtent.scale || 0.01;
-          const offsetX = this.pixelExtent.offsetX || 0;
-          const offsetY = this.pixelExtent.offsetY || 0;
-          // Map coords to pixels: x = (lng + offset) / scale, y = (offset - lat) / scale (inverted)
-          const x = Math.round((lng + offsetX) / scale);
-          const y = Math.round((offsetY - lat) / scale);
-          coordsEl.textContent = `Pixel: ${x}, ${y}`;
-        } else {
-          const { lng, lat } = e.lngLat;
-          coordsEl.textContent = `${lat.toFixed(6)}, ${lng.toFixed(6)}`;
+    // Only set up status bar updates if enabled
+    if (this.options.enableStatusBar) {
+      // Update coordinates on mouse move
+      this.map.on('mousemove', e => {
+        const coordsEl = document.getElementById(this.getElementId('coordinates'));
+        if (coordsEl) {
+          if (this.pixelCoordMode && this.pixelExtent) {
+            // Convert map coords back to pixel coords using the scale
+            const { lng, lat } = e.lngLat;
+            const scale = this.pixelExtent.scale || 0.01;
+            const offsetX = this.pixelExtent.offsetX || 0;
+            const offsetY = this.pixelExtent.offsetY || 0;
+            // Map coords to pixels: x = (lng + offset) / scale, y = (offset - lat) / scale (inverted)
+            const x = Math.round((lng + offsetX) / scale);
+            const y = Math.round((offsetY - lat) / scale);
+            coordsEl.textContent = `Pixel: ${x}, ${y}`;
+          } else {
+            const { lng, lat } = e.lngLat;
+            coordsEl.textContent = `${lat.toFixed(6)}, ${lng.toFixed(6)}`;
+          }
         }
-      }
-    });
+      });
 
-    // Update zoom level
-    this.map.on('zoom', () => {
+      // Update zoom level
+      this.map.on('zoom', () => {
+        this.updateZoomDisplay();
+      });
+
+      // Update bearing display
+      this.map.on('rotate', () => {
+        this.updateBearingDisplay();
+      });
+
+      // Update pitch display
+      this.map.on('pitch', () => {
+        this.updatePitchDisplay();
+      });
+
+      // Initial displays
       this.updateZoomDisplay();
-    });
-
-    // Update bearing display
-    this.map.on('rotate', () => {
       this.updateBearingDisplay();
-    });
-
-    // Update pitch display
-    this.map.on('pitch', () => {
       this.updatePitchDisplay();
-    });
-
-    // Initial displays
-    this.updateZoomDisplay();
-    this.updateBearingDisplay();
-    this.updatePitchDisplay();
+    }
   }
 
   private updateZoomDisplay(): void {
-    const zoomEl = document.getElementById('zoom-level');
+    if (!this.options.enableStatusBar) return;
+    const zoomEl = document.getElementById(this.getElementId('zoom-level'));
     if (zoomEl && this.map) {
       zoomEl.textContent = `Zoom: ${this.map.getZoom().toFixed(2)}`;
     }
   }
 
   private updateBearingDisplay(): void {
-    if (!this.map) return;
+    if (!this.options.enableStatusBar || !this.map) return;
 
     const bearing = this.map.getBearing();
-    const bearingEl = document.getElementById('bearing');
+    const bearingEl = document.getElementById(this.getElementId('bearing'));
     if (bearingEl) {
       bearingEl.textContent = `${bearing.toFixed(1)}°`;
     }
 
     // Update compass indicator rotation
-    const compassEl = document.getElementById('compass-arrow');
+    const compassEl = document.getElementById(this.getElementId('compass-arrow'));
     if (compassEl) {
       compassEl.style.transform = `rotate(${-bearing}deg)`;
     }
@@ -324,24 +408,35 @@ export class MapManager {
   setBasemap(type: BasemapType): void {
     this.currentBasemap = type;
 
+    // All basemap layer IDs
+    const basemapLayers = [
+      'osm-tiles',
+      'satellite-tiles',
+      'topo-tiles',
+      'carto-light-tiles',
+      'carto-dark-tiles',
+      'custom-tiles',
+      'pixel-grid',
+    ];
+
     if (type === 'none') {
       this.basemapVisible = false;
-      this.setLayerVisibility('osm-tiles', false);
-      this.setLayerVisibility('satellite-tiles', false);
-      this.setLayerVisibility('custom-tiles', false);
-      this.setLayerVisibility('pixel-grid', false);
+      basemapLayers.forEach(layer => this.setLayerVisibility(layer, false));
     } else if (type === 'pixel') {
       this.basemapVisible = true;
-      this.setLayerVisibility('osm-tiles', false);
-      this.setLayerVisibility('satellite-tiles', false);
-      this.setLayerVisibility('custom-tiles', false);
-      this.setLayerVisibility('pixel-grid', true);
+      basemapLayers.forEach(layer => this.setLayerVisibility(layer, layer === 'pixel-grid'));
     } else {
       this.basemapVisible = true;
-      this.setLayerVisibility('osm-tiles', type === 'osm');
-      this.setLayerVisibility('satellite-tiles', type === 'satellite');
-      this.setLayerVisibility('custom-tiles', type === 'custom');
-      this.setLayerVisibility('pixel-grid', false);
+      const layerMap: Record<string, string> = {
+        osm: 'osm-tiles',
+        satellite: 'satellite-tiles',
+        topo: 'topo-tiles',
+        'carto-light': 'carto-light-tiles',
+        'carto-dark': 'carto-dark-tiles',
+        custom: 'custom-tiles',
+      };
+      const activeLayer = layerMap[type];
+      basemapLayers.forEach(layer => this.setLayerVisibility(layer, layer === activeLayer));
     }
   }
 
@@ -413,7 +508,9 @@ export class MapManager {
         this.createPixelGridBasemap(extent);
         this.setBasemap('pixel');
         // Update basemap selector UI
-        const basemapSelect = document.getElementById('basemap-select') as HTMLSelectElement | null;
+        const basemapSelect = document.getElementById(
+          this.getElementId('basemap-select')
+        ) as HTMLSelectElement | null;
         if (basemapSelect) {
           basemapSelect.value = 'pixel';
         }
@@ -424,7 +521,9 @@ export class MapManager {
       if (this.previousBasemap && this.previousBasemap !== 'pixel') {
         this.setBasemap(this.previousBasemap);
         // Update basemap selector UI
-        const basemapSelect = document.getElementById('basemap-select') as HTMLSelectElement | null;
+        const basemapSelect = document.getElementById(
+          this.getElementId('basemap-select')
+        ) as HTMLSelectElement | null;
         if (basemapSelect) {
           basemapSelect.value = this.previousBasemap;
         }
@@ -765,10 +864,10 @@ export class MapManager {
   }
 
   private updatePitchDisplay(): void {
-    if (!this.map) return;
+    if (!this.options.enableStatusBar || !this.map) return;
 
     const pitch = this.map.getPitch();
-    const pitchEl = document.getElementById('pitch-display');
+    const pitchEl = document.getElementById(this.getElementId('pitch-display'));
     if (pitchEl) {
       pitchEl.textContent = `Pitch: ${pitch.toFixed(0)}°`;
     }

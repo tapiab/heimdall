@@ -9,6 +9,10 @@ import { AnnotationTool } from './lib/annotation-tool.js';
 import { ZoomRectTool } from './lib/zoom-rect-tool.js';
 import { ProjectManager } from './lib/project-manager.js';
 import { StacBrowser } from './lib/stac-browser.js';
+import { GeoreferenceTool } from './lib/georeference-tool.js';
+import { GeoreferencePanel } from './lib/georeference-panel.js';
+import { SplitView } from './lib/split-view.js';
+import { LocationSearch } from './lib/location-search.js';
 import { setupUI } from './lib/ui.js';
 import { logger } from './lib/logger.js';
 import { getConfigManager } from './lib/config-manager.js';
@@ -57,8 +61,19 @@ async function init() {
   // Create STAC browser
   const stacBrowser = new StacBrowser(layerManager, mapManager);
 
+  // Create georeference tool and panel
+  const georeferenceTool = new GeoreferenceTool(mapManager, layerManager);
+  const georeferencePanel = new GeoreferencePanel(georeferenceTool);
+
+  // Create split view with configManager so it can use custom basemaps
+  const splitView = new SplitView(mapManager, configManager);
+
+  // Create location search
+  const locationSearch = new LocationSearch(mapManager.map);
+  locationSearch.init('location-search');
+
   // Setup UI interactions
-  setupUI(
+  setupUI({
     mapManager,
     layerManager,
     measureTool,
@@ -69,8 +84,12 @@ async function init() {
     zoomRectTool,
     projectManager,
     stacBrowser,
-    configManager
-  );
+    configManager,
+    georeferenceTool,
+    georeferencePanel,
+    splitView,
+    locationSearch,
+  });
 
   // Fetch and display version
   try {

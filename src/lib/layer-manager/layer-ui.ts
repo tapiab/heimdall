@@ -3,10 +3,17 @@
  * @module layer-manager/layer-ui
  */
 
-import type { LayerManagerInterface, RasterLayer, VectorLayer, CrossLayerRgbConfig } from './types';
+import type {
+  LayerManagerInterface,
+  RasterLayer,
+  VectorLayer,
+  CrossLayerRgbConfig,
+  LayerManagerOptions,
+} from './types';
 
 /** Extended LayerManager interface with UI-specific properties */
 interface LayerManagerWithUI extends LayerManagerInterface {
+  options: Required<LayerManagerOptions>;
   draggedItem: HTMLElement | null;
   selectLayer: (id: string) => void;
   toggleLayerVisibility: (id: string) => void;
@@ -44,7 +51,7 @@ interface RasterLayerWithUI extends RasterLayer {
  * @param manager - The LayerManager instance
  */
 export function updateLayerPanel(manager: LayerManagerWithUI): void {
-  const layerList = document.getElementById('layer-list');
+  const layerList = document.getElementById(manager.options.layerListId);
   if (!layerList) return;
 
   // Ensure the container allows drops (only add once)
@@ -98,17 +105,19 @@ export function updateLayerPanel(manager: LayerManagerWithUI): void {
     const fileName = layer.path.split('/').pop()?.split('\\').pop() || 'Unknown';
     const displayName = layer.displayName || fileName;
     name.textContent = displayName;
+    // Store full name as data attribute for CSS hover popup
+    name.dataset.fullName = displayName;
 
     if (layer.type === 'vector') {
       const vectorLayer = layer as VectorLayer;
-      name.title = `${layer.path}\n${vectorLayer.feature_count} features, ${vectorLayer.geometry_type}\nDouble-click to rename`;
+      name.title = `${displayName}\n\n${layer.path}\n${vectorLayer.feature_count} features, ${vectorLayer.geometry_type}\nDouble-click to rename`;
     } else if ((layer as RasterLayer).isComposition) {
       const rasterLayer = layer as RasterLayer;
-      name.title = `RGB Composition\nR: Band ${rasterLayer.rgbBands.r}, G: Band ${rasterLayer.rgbBands.g}, B: Band ${rasterLayer.rgbBands.b}\n${rasterLayer.width}x${rasterLayer.height}\nDouble-click to rename`;
+      name.title = `${displayName}\n\nRGB Composition\nR: Band ${rasterLayer.rgbBands.r}, G: Band ${rasterLayer.rgbBands.g}, B: Band ${rasterLayer.rgbBands.b}\n${rasterLayer.width}x${rasterLayer.height}\nDouble-click to rename`;
       name.style.fontStyle = 'italic';
     } else {
       const rasterLayer = layer as RasterLayer;
-      name.title = `${layer.path}\n${rasterLayer.width}x${rasterLayer.height}, ${rasterLayer.bands} band(s)\nDouble-click to rename`;
+      name.title = `${displayName}\n\n${layer.path}\n${rasterLayer.width}x${rasterLayer.height}, ${rasterLayer.bands} band(s)\nDouble-click to rename`;
     }
 
     // Double-click to rename
@@ -171,6 +180,10 @@ export function updateLayerPanel(manager: LayerManagerWithUI): void {
     opacitySlider.min = '0';
     opacitySlider.max = '100';
     opacitySlider.value = String(Math.round(layer.opacity * 100));
+    opacitySlider.draggable = false;
+    // Prevent drag from starting when using slider
+    opacitySlider.addEventListener('mousedown', e => e.stopPropagation());
+    opacitySlider.addEventListener('touchstart', e => e.stopPropagation());
     opacitySlider.addEventListener('input', e => {
       const target = e.target as HTMLInputElement;
       manager.setLayerOpacity(id, parseInt(target.value, 10) / 100);
@@ -235,12 +248,74 @@ export function updateLayerPanel(manager: LayerManagerWithUI): void {
         bandRow.appendChild(bandSelect);
         item.appendChild(bandRow);
       }
+
+      // Add quick actions row for raster layers
+      const actionsRow = document.createElement('div');
+      actionsRow.className = 'layer-actions';
+
+      // Auto Stretch button
+      const autoStretchBtn = document.createElement('button');
+      autoStretchBtn.className = 'layer-action-btn';
+      autoStretchBtn.innerHTML = '<span class="action-icon">⚡</span> Auto';
+      autoStretchBtn.title = 'Auto stretch to min/max values';
+      autoStretchBtn.addEventListener('click', e => {
+        e.stopPropagation();
+        const bandStats = rasterLayer.band_stats[rasterLayer.band - 1];
+        if (bandStats) {
+          manager.setLayerStretch(id, bandStats.min, bandStats.max, 1.0);
+        }
+      });
+
+      // Histogram button (toggle)
+      const histogramBtn = document.createElement('button');
+      histogramBtn.className = 'layer-action-btn';
+      histogramBtn.innerHTML = '<span class="action-icon">📊</span> Hist';
+      histogramBtn.title = 'Toggle histogram for this layer';
+      histogramBtn.addEventListener('click', e => {
+        e.stopPropagation();
+        const histPanel = document.getElementById('histogram-panel');
+        if (histPanel && histPanel.classList.contains('visible')) {
+          histPanel.classList.remove('visible');
+        } else {
+          manager.showHistogram(id, rasterLayer.band);
+        }
+      });
+
+      // Display button (opens floating display panel)
+      const displayBtn = document.createElement('button');
+      displayBtn.className = 'layer-action-btn';
+      displayBtn.innerHTML = '<span class="action-icon">🎨</span> Display';
+      displayBtn.title = 'Open display settings for this layer';
+      displayBtn.addEventListener('click', e => {
+        e.stopPropagation();
+        const displayPanel = document.getElementById('display-panel');
+        if (displayPanel) {
+          const isVisible = displayPanel.classList.contains('visible');
+          const currentSelected = manager.selectedLayerId;
+
+          if (isVisible && currentSelected === id) {
+            // Toggle off if same layer
+            displayPanel.classList.remove('visible');
+          } else {
+            // Select this layer and show panel
+            manager.selectLayer(id);
+            displayPanel.classList.add('visible');
+          }
+        }
+      });
+
+      actionsRow.appendChild(autoStretchBtn);
+      actionsRow.appendChild(histogramBtn);
+      actionsRow.appendChild(displayBtn);
+      item.appendChild(actionsRow);
     }
 
     layerList.appendChild(item);
   });
 
-  const fitBoundsBtn = document.getElementById('fit-bounds') as HTMLButtonElement | null;
+  const fitBoundsBtn = document.getElementById(
+    manager.options.fitBoundsButtonId
+  ) as HTMLButtonElement | null;
   if (fitBoundsBtn) {
     fitBoundsBtn.disabled = manager.layers.size === 0;
   }
@@ -291,7 +366,7 @@ function startRenameLayer(
  * @param manager - The LayerManager instance
  */
 export function updateDynamicControls(manager: LayerManagerWithUI): void {
-  const controlsPanel = document.getElementById('dynamic-controls');
+  const controlsPanel = document.getElementById(manager.options.dynamicControlsId);
   if (!controlsPanel) return;
 
   const layer = manager.selectedLayerId ? manager.layers.get(manager.selectedLayerId) : null;
@@ -956,6 +1031,18 @@ function attachRgbListeners(manager: LayerManagerWithUI, layer: RasterLayerWithU
  * Handle drag start for layer reordering
  */
 function handleDragStart(manager: LayerManagerWithUI, e: DragEvent, item: HTMLElement): void {
+  // Prevent drag when starting from interactive elements
+  const target = e.target as HTMLElement;
+  if (
+    target.tagName === 'INPUT' ||
+    target.tagName === 'SELECT' ||
+    target.tagName === 'BUTTON' ||
+    target.closest('input, select, button')
+  ) {
+    e.preventDefault();
+    return;
+  }
+
   e.stopPropagation();
   manager.draggedItem = item;
   item.classList.add('dragging');

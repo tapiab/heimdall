@@ -25,6 +25,7 @@ import type {
   HistogramData,
   DisplayMode,
   VectorStyle,
+  LayerManagerOptions,
 } from './types';
 
 /** Value for a single band from pixel query */
@@ -82,6 +83,15 @@ interface MapFeature {
   layer: { id: string };
 }
 
+/** Default options for LayerManager */
+const DEFAULT_OPTIONS: Required<LayerManagerOptions> = {
+  layerListId: 'layer-list',
+  dynamicControlsId: 'dynamic-controls',
+  fitBoundsButtonId: 'fit-bounds',
+  enablePopups: true,
+  enableStatusBarUpdates: true,
+};
+
 /**
  * LayerManager handles raster and vector layer management for the map.
  *
@@ -95,6 +105,9 @@ interface MapFeature {
 export class LayerManager {
   /** MapManager instance for map operations */
   mapManager: MapManagerInterface;
+
+  /** Configuration options */
+  options: Required<LayerManagerOptions>;
 
   /** Map of layer ID to layer data */
   layers: Map<string, Layer>;
@@ -132,9 +145,11 @@ export class LayerManager {
   /**
    * Create a new LayerManager instance.
    * @param mapManager - The MapManager instance to use for map operations
+   * @param options - Optional configuration options
    */
-  constructor(mapManager: MapManagerInterface) {
+  constructor(mapManager: MapManagerInterface, options: LayerManagerOptions = {}) {
     this.mapManager = mapManager;
+    this.options = { ...DEFAULT_OPTIONS, ...options };
     this.layers = new Map();
     this.layerOrder = [];
     this.tileCache = new LRUCache(500);
@@ -146,9 +161,13 @@ export class LayerManager {
     this.currentHistogram = null;
     this._lastStatusBarQuery = 0;
     this._statusBarQueryPending = false;
-    this.setupFeatureInteraction();
+    if (this.options.enablePopups) {
+      this.setupFeatureInteraction();
+    }
     this.setupZoomTracking();
-    this.setupStatusBarUpdates();
+    if (this.options.enableStatusBarUpdates) {
+      this.setupStatusBarUpdates();
+    }
   }
 
   /**

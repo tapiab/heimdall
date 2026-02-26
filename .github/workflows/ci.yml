@@ -101,6 +101,8 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libgdal-dev libgtk-3-dev libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev patchelf xdg-utils
       - run: make ci-install
+      - name: Sync version from git tag
+        run: ./scripts/sync-version.sh
       - run: make ci-build
       - uses: actions/upload-artifact@v4
         with:
@@ -133,6 +135,8 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libgdal-dev libgtk-3-dev libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev patchelf xdg-utils
       - run: make ci-install
+      - name: Sync version from git tag
+        run: ./scripts/sync-version.sh
       - run: make ci-build
       - uses: actions/upload-artifact@v4
         with:
@@ -172,6 +176,8 @@ jobs:
           echo "GDAL_HOME=$GDAL_PREFIX" >> $GITHUB_ENV
           echo "PKG_CONFIG_PATH=$GDAL_PREFIX/lib/pkgconfig:$PKG_CONFIG_PATH" >> $GITHUB_ENV
       - run: make ci-install
+      - name: Sync version from git tag
+        run: ./scripts/sync-version.sh
       - name: Build
         run: npm run tauri:build -- --target aarch64-apple-darwin --verbose
       - uses: actions/upload-artifact@v4
@@ -207,6 +213,8 @@ jobs:
           echo "GDAL_HOME=$GDAL_PREFIX" >> $GITHUB_ENV
           echo "PKG_CONFIG_PATH=$GDAL_PREFIX/lib/pkgconfig:$PKG_CONFIG_PATH" >> $GITHUB_ENV
       - run: make ci-install
+      - name: Sync version from git tag
+        run: ./scripts/sync-version.sh
       - name: Build
         run: npm run tauri:build -- --target x86_64-apple-darwin --verbose
       - uses: actions/upload-artifact@v4
