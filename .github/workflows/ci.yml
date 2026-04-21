@@ -332,6 +332,7 @@ jobs:
 
       - name: Rename artifacts for clarity
         run: |
+          shopt -s globstar
           VERSION="${{ github.ref_name }}"
           VERSION="${VERSION#v}"
           mkdir -p release
