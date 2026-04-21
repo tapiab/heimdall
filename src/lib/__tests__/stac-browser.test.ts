@@ -72,7 +72,10 @@ function createMockMap() {
     })),
     fitBounds: vi.fn(),
     getCanvas: vi.fn(() => ({ style: {} })),
+    getZoom: vi.fn(() => 10),
+    setLayoutProperty: vi.fn(),
     on: vi.fn(),
+    off: vi.fn(),
   };
 }
 

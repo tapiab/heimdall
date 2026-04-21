@@ -2166,10 +2166,10 @@ mod tests {
         let href = "../collections/surface.json";
 
         let resolved = resolve_url(base, href);
-        // Note: Our simple implementation just appends, doesn't handle ..
+        // url::Url::join properly resolves ../ traversal
         assert_eq!(
             resolved,
-            "https://example.com/data/catalogs/../collections/surface.json"
+            "https://example.com/data/collections/surface.json"
         );
     }
 
