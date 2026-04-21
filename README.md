@@ -132,6 +132,46 @@ Georeference non-georeferenced images using Ground Control Points:
 
 Configure custom basemaps via the gear icon next to the basemap dropdown.
 
+### Configuration File
+
+Heimdall stores its configuration in `~/.config/heimdall/config.json` (all platforms).
+
+```json
+{
+  "version": "1.0",
+  "basemaps": {
+    "satellite": {
+      "url": "https://tiles.maps.eox.at/wmts/1.0.0/s2cloudless-2021_3857/default/GoogleMapsCompatible/{z}/{y}/{x}.jpg",
+      "attribution": "Sentinel-2 cloudless by EOX - CC BY 4.0",
+      "name": "Sentinel-2 Cloudless"
+    },
+    "custom": {
+      "url": "",
+      "attribution": "",
+      "name": "Custom"
+    }
+  },
+  "stac": {
+    "catalogs": [
+      {
+        "url": "https://earth-search.aws.element84.com/v1",
+        "name": "Earth Search (AWS) - Sentinel-2, Landsat"
+      },
+      {
+        "url": "https://planetarycomputer.microsoft.com/api/stac/v1",
+        "name": "Planetary Computer - Landsat, NAIP, more"
+      }
+    ]
+  }
+}
+```
+
+| Section | Description |
+|---------|-------------|
+| `basemaps.satellite` | Default satellite basemap tile URL and attribution |
+| `basemaps.custom` | User-defined custom basemap |
+| `stac.catalogs` | List of STAC catalog entries shown in the STAC browser dropdown |
+
 ## Documentation
 
 - [Building from Source](docs/BUILDING.md)

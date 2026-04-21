@@ -4,7 +4,7 @@
 mod commands;
 mod gdal;
 
-use commands::app::get_version;
+use commands::app::{get_version, read_config, write_config};
 use commands::georef::{apply_georeference, calculate_transformation};
 use commands::raster::{
     close_dataset, get_cross_layer_pixel_rgb_tile, get_cross_layer_rgb_tile, get_elevation_profile,
@@ -13,8 +13,8 @@ use commands::raster::{
     query_pixel_value_at_pixel,
 };
 use commands::stac::{
-    browse_static_collection, connect_stac_api, fetch_stac_resource, get_static_catalog_children,
-    list_stac_collections, open_stac_asset, search_stac_items,
+    browse_static_collection, connect_stac_api, fetch_stac_resource, fetch_stac_thumbnail,
+    get_static_catalog_children, list_stac_collections, open_stac_asset, search_stac_items,
 };
 use commands::vector::open_vector;
 use gdal::dataset_cache::DatasetCache;
@@ -77,6 +77,8 @@ fn main() {
         .manage(DatasetCache::new(10))
         .invoke_handler(tauri::generate_handler![
             get_version,
+            read_config,
+            write_config,
             open_raster,
             get_tile,
             get_tile_stretched,
@@ -101,6 +103,7 @@ fn main() {
             // Static STAC catalog commands
             get_static_catalog_children,
             fetch_stac_resource,
+            fetch_stac_thumbnail,
             browse_static_collection,
             // Georeferencing commands
             calculate_transformation,

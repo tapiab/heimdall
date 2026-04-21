@@ -32,13 +32,12 @@ if [[ "$GIT_DESCRIBE" =~ ^([0-9]+\.[0-9]+\.[0-9]+)(-([0-9]+)-g[a-f0-9]+)?(-dirty
         VERSION="$BASE"
     else
         VERSION="$BASE"
-        if [[ -n "$COMMITS" ]] && [[ -n "$DIRTY" ]]; then
+        if [[ -n "$COMMITS" ]]; then
+            # Commits ahead of tag: mark as dev build
             VERSION="${BASE}-dev${COMMITS}"
-        elif [[ -n "$COMMITS" ]]; then
-            VERSION="${BASE}-dev${COMMITS}"
-        elif [[ -n "$DIRTY" ]]; then
-            VERSION="${BASE}-dev0"
         fi
+        # Dirty flag alone (no extra commits) keeps the base version —
+        # local uncommitted changes don't change the version number.
     fi
 else
     # No valid tag found (shallow clone or no tags) - use fallback

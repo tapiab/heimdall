@@ -9,6 +9,11 @@ vi.mock('@tauri-apps/api/core', () => ({
   invoke: vi.fn(),
 }));
 
+// Mock Tauri dialog plugin
+vi.mock('@tauri-apps/plugin-dialog', () => ({
+  ask: vi.fn(),
+}));
+
 // Mock maplibre-gl
 vi.mock('maplibre-gl', () => {
   class MockLngLatBounds {
@@ -67,7 +72,10 @@ function createMockMap() {
     })),
     fitBounds: vi.fn(),
     getCanvas: vi.fn(() => ({ style: {} })),
+    getZoom: vi.fn(() => 10),
+    setLayoutProperty: vi.fn(),
     on: vi.fn(),
+    off: vi.fn(),
   };
 }
 
@@ -439,6 +447,7 @@ describe('StacBrowser', () => {
 
       expect(invoke).toHaveBeenCalledWith('connect_stac_api', {
         url: 'https://earth-search.aws.element84.com/v1',
+        acceptInvalidCerts: false,
       });
     });
 
@@ -510,6 +519,56 @@ describe('StacBrowser', () => {
       await stacBrowser.connect();
 
       expect(stacBrowser.connectBtn.disabled).toBe(false);
+    });
+
+    it('should detect TLS errors and prompt user to retry', async () => {
+      const { ask } = await import('@tauri-apps/plugin-dialog');
+      const mockAsk = vi.mocked(ask);
+      mockAsk.mockResolvedValueOnce(false);
+
+      invoke.mockRejectedValueOnce('[TLS_ERROR] error sending request');
+
+      await stacBrowser.connect();
+
+      expect(mockAsk).toHaveBeenCalledWith(
+        expect.stringContaining('invalid or self-signed'),
+        expect.objectContaining({ kind: 'warning' })
+      );
+      // User declined, so error is shown
+      expect(showError).toHaveBeenCalledWith('Connection failed', expect.any(String));
+    });
+
+    it('should retry with acceptInvalidCerts when user accepts TLS warning', async () => {
+      const { ask } = await import('@tauri-apps/plugin-dialog');
+      const mockAsk = vi.mocked(ask);
+      mockAsk.mockResolvedValueOnce(true);
+
+      // First call fails with TLS error, retry succeeds
+      invoke
+        .mockRejectedValueOnce('[TLS_ERROR] certificate error')
+        .mockResolvedValueOnce(mockCatalogInfo)
+        .mockResolvedValueOnce(mockCollections);
+
+      await stacBrowser.connect();
+
+      // Second call should have acceptInvalidCerts: true
+      expect(invoke).toHaveBeenCalledWith('connect_stac_api', {
+        url: 'https://earth-search.aws.element84.com/v1',
+        acceptInvalidCerts: true,
+      });
+      expect(stacBrowser.currentCatalogUrl).toBe('https://earth-search.aws.element84.com/v1');
+    });
+
+    it('should not prompt for non-TLS errors', async () => {
+      const { ask } = await import('@tauri-apps/plugin-dialog');
+      const mockAsk = vi.mocked(ask);
+
+      invoke.mockRejectedValueOnce('DNS resolution failed');
+
+      await stacBrowser.connect();
+
+      expect(mockAsk).not.toHaveBeenCalled();
+      expect(showError).toHaveBeenCalled();
     });
   });
 
@@ -621,6 +680,7 @@ describe('StacBrowser', () => {
           collections: ['sentinel-2-l2a'],
           limit: 20,
         }),
+        acceptInvalidCerts: false,
       });
     });
 
@@ -923,6 +983,7 @@ describe('StacBrowser', () => {
 
       expect(invoke).toHaveBeenCalledWith('open_stac_asset', {
         assetHref: 'https://example.com/visual.tif',
+        acceptInvalidCerts: false,
       });
     });
 
@@ -1227,6 +1288,7 @@ describe('StacBrowser', () => {
 
         expect(invoke).toHaveBeenCalledWith('get_static_catalog_children', {
           catalogUrl: 'https://earth-search.aws.element84.com/v1',
+          acceptInvalidCerts: false,
         });
       });
 
@@ -1277,6 +1339,7 @@ describe('StacBrowser', () => {
 
         expect(invoke).toHaveBeenCalledWith('list_stac_collections', {
           url: 'https://earth-search.aws.element84.com/v1',
+          acceptInvalidCerts: false,
         });
       });
 
@@ -1432,6 +1495,7 @@ describe('StacBrowser', () => {
         expect(invoke).toHaveBeenCalledWith('browse_static_collection', {
           collectionUrl: 'https://example.com/collection.json',
           limit: 20,
+          acceptInvalidCerts: false,
         });
       });
 
@@ -1640,6 +1704,7 @@ describe('StacBrowser', () => {
 
           expect(invoke).toHaveBeenCalledWith('get_static_catalog_children', {
             catalogUrl: 'https://example.com/year/catalog.json',
+            acceptInvalidCerts: false,
           });
         });
 
@@ -1751,6 +1816,7 @@ describe('StacBrowser', () => {
 
           expect(invoke).toHaveBeenCalledWith('get_static_catalog_children', {
             catalogUrl: 'https://example.com/catalog.json',
+            acceptInvalidCerts: false,
           });
         });
 
@@ -1797,6 +1863,7 @@ describe('StacBrowser', () => {
 
           expect(invoke).toHaveBeenCalledWith('get_static_catalog_children', {
             catalogUrl: 'https://example.com/year/catalog.json',
+            acceptInvalidCerts: false,
           });
         });
 
