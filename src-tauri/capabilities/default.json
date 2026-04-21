@@ -12,9 +12,6 @@
     "dialog:allow-save",
     "dialog:allow-ask",
     "fs:default",
-    "fs:allow-write",
-    "fs:allow-exists",
-    "fs:allow-mkdir",
     "fs:allow-app-read",
     "fs:allow-app-write",
     {

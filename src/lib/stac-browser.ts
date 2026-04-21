@@ -119,10 +119,10 @@ interface StacSearchResult {
   context?: { matched?: number };
 }
 
-/** Thumbnail response from backend */
+/** Thumbnail response from backend (Tauri auto-converts snake_case to camelCase) */
 interface StacThumbnailResponse {
   data: string;
-  content_type: string;
+  contentType: string;
 }
 
 /** Raster metadata from backend */
@@ -1954,20 +1954,22 @@ export class StacBrowser {
     const map = this.mapManager?.map;
     if (!map) return;
 
-    // Remove previous handler
+    // Remove previous handlers
     if (this.thumbnailMoveHandler) {
       map.off('moveend', this.thumbnailMoveHandler);
+      map.off('zoomend', this.thumbnailMoveHandler);
     }
 
     this.thumbnailMoveHandler = () => this.loadVisibleThumbnails();
     map.on('moveend', this.thumbnailMoveHandler);
+    map.on('zoomend', this.thumbnailMoveHandler);
 
     // Load immediately for what's already visible
     this.loadVisibleThumbnails();
   }
 
   /** Load thumbnails for items currently visible on screen at sufficient zoom. */
-  private loadVisibleThumbnails(): void {
+  private async loadVisibleThumbnails(): Promise<void> {
     const map = this.mapManager?.map;
     if (!map) return;
 
@@ -1989,11 +1991,14 @@ export class StacBrowser {
 
     if (visibleItems.length === 0) return;
 
-    // Load in parallel, fire-and-forget
-    for (const item of visibleItems) {
-      // Mark as loading immediately to prevent duplicate requests
-      this.loadedThumbnailIds.add(item.id);
-      this.loadSingleThumbnail(item);
+    // Load in batches to avoid flooding the backend
+    const BATCH_SIZE = 6;
+    for (let i = 0; i < visibleItems.length; i += BATCH_SIZE) {
+      const batch = visibleItems.slice(i, i + BATCH_SIZE);
+      for (const item of batch) {
+        this.loadedThumbnailIds.add(item.id);
+      }
+      await Promise.allSettled(batch.map(item => this.loadSingleThumbnail(item)));
     }
   }
 
@@ -2014,19 +2019,19 @@ export class StacBrowser {
         acceptInvalidCerts: this.acceptInvalidCerts,
       });
 
-      const byteChars = atob(response.data);
-      const byteArray = new Uint8Array(byteChars.length);
-      for (let i = 0; i < byteChars.length; i++) {
-        byteArray[i] = byteChars.charCodeAt(i);
-      }
-      const blob = new Blob([byteArray], { type: response.content_type });
-      const blobUrl = URL.createObjectURL(blob);
-      this.thumbnailBlobUrls.push(blobUrl);
-
       const sourceId = `stac-thumb-${item.id}`;
       const layerId = `stac-thumb-layer-${item.id}`;
 
       if (!map.getSource(sourceId)) {
+        const byteChars = atob(response.data);
+        const byteArray = new Uint8Array(byteChars.length);
+        for (let i = 0; i < byteChars.length; i++) {
+          byteArray[i] = byteChars.charCodeAt(i);
+        }
+        const blob = new Blob([byteArray], { type: response.contentType });
+        const blobUrl = URL.createObjectURL(blob);
+        this.thumbnailBlobUrls.push(blobUrl);
+
         map.addSource(sourceId, {
           type: 'image',
           url: blobUrl,
@@ -2057,9 +2062,10 @@ export class StacBrowser {
     const map = this.mapManager?.map;
     if (!map) return;
 
-    // Remove move handler
+    // Remove move/zoom handlers
     if (this.thumbnailMoveHandler) {
       map.off('moveend', this.thumbnailMoveHandler);
+      map.off('zoomend', this.thumbnailMoveHandler);
       this.thumbnailMoveHandler = null;
     }
 

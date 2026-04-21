@@ -810,11 +810,7 @@ pub async fn browse_static_collection(
         collection_url
     );
 
-    let client = reqwest::Client::builder()
-        .user_agent("Heimdall/0.3.1")
-        .danger_accept_invalid_certs(accept_invalid_certs.unwrap_or(false))
-        .build()
-        .map_err(|e| format!("Failed to create HTTP client: {}", e))?;
+    let client = build_client(accept_invalid_certs.unwrap_or(false))?;
     let max_items = limit.unwrap_or(20) as usize;
 
     println!("[STAC] Fetching collection with limit: {}", max_items);
@@ -1023,17 +1019,22 @@ async fn fetch_single_item(client: &reqwest::Client, url: &str) -> Result<StacIt
     Ok(item)
 }
 
-/// Resolve a potentially relative URL against a base URL
+/// Resolve a potentially relative URL against a base URL.
+/// Handles `../` traversal correctly via the `url` crate.
 fn resolve_url(base: &str, href: &str) -> String {
-    // If href is already absolute, return it
     if href.starts_with("http://") || href.starts_with("https://") {
         return href.to_string();
     }
 
-    // Parse base URL to get the directory
+    if let Ok(base_url) = url::Url::parse(base) {
+        if let Ok(resolved) = base_url.join(href) {
+            return resolved.to_string();
+        }
+    }
+
+    // Last resort: simple concatenation
     if let Some(pos) = base.rfind('/') {
-        let base_dir = &base[..=pos];
-        format!("{}{}", base_dir, href)
+        format!("{}{}", &base[..=pos], href)
     } else {
         href.to_string()
     }
@@ -1137,11 +1138,15 @@ pub async fn open_stac_asset(
     println!("[STAC] Final vsicurl path: '{}'", vsicurl_path);
     println!("[STAC] ========================================");
 
-    // Allow GDAL to skip SSL verification for self-signed certificates
-    if accept_invalid_certs.unwrap_or(false) {
-        gdal::config::set_config_option("GDAL_HTTP_UNSAFESSL", "YES")
-            .map_err(|e| format!("Failed to set GDAL SSL config: {}", e))?;
-    }
+    // Explicitly set GDAL SSL verification based on the flag.
+    // Must always set to avoid leaking a previous "YES" to unrelated requests.
+    let ssl_value = if accept_invalid_certs.unwrap_or(false) {
+        "YES"
+    } else {
+        "NO"
+    };
+    gdal::config::set_config_option("GDAL_HTTP_UNSAFESSL", ssl_value)
+        .map_err(|e| format!("Failed to set GDAL SSL config: {}", e))?;
 
     // Open GDAL dataset directly (GDAL config is already set globally at startup)
     println!("[GDAL] Attempting to open: {}", &vsicurl_path);

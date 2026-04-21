@@ -517,6 +517,56 @@ describe('StacBrowser', () => {
 
       expect(stacBrowser.connectBtn.disabled).toBe(false);
     });
+
+    it('should detect TLS errors and prompt user to retry', async () => {
+      const { ask } = await import('@tauri-apps/plugin-dialog');
+      const mockAsk = vi.mocked(ask);
+      mockAsk.mockResolvedValueOnce(false);
+
+      invoke.mockRejectedValueOnce('[TLS_ERROR] error sending request');
+
+      await stacBrowser.connect();
+
+      expect(mockAsk).toHaveBeenCalledWith(
+        expect.stringContaining('invalid or self-signed'),
+        expect.objectContaining({ kind: 'warning' })
+      );
+      // User declined, so error is shown
+      expect(showError).toHaveBeenCalledWith('Connection failed', expect.any(String));
+    });
+
+    it('should retry with acceptInvalidCerts when user accepts TLS warning', async () => {
+      const { ask } = await import('@tauri-apps/plugin-dialog');
+      const mockAsk = vi.mocked(ask);
+      mockAsk.mockResolvedValueOnce(true);
+
+      // First call fails with TLS error, retry succeeds
+      invoke
+        .mockRejectedValueOnce('[TLS_ERROR] certificate error')
+        .mockResolvedValueOnce(mockCatalogInfo)
+        .mockResolvedValueOnce(mockCollections);
+
+      await stacBrowser.connect();
+
+      // Second call should have acceptInvalidCerts: true
+      expect(invoke).toHaveBeenCalledWith('connect_stac_api', {
+        url: 'https://earth-search.aws.element84.com/v1',
+        acceptInvalidCerts: true,
+      });
+      expect(stacBrowser.currentCatalogUrl).toBe('https://earth-search.aws.element84.com/v1');
+    });
+
+    it('should not prompt for non-TLS errors', async () => {
+      const { ask } = await import('@tauri-apps/plugin-dialog');
+      const mockAsk = vi.mocked(ask);
+
+      invoke.mockRejectedValueOnce('DNS resolution failed');
+
+      await stacBrowser.connect();
+
+      expect(mockAsk).not.toHaveBeenCalled();
+      expect(showError).toHaveBeenCalled();
+    });
   });
 
   describe('populateCollections', () => {
