@@ -4,7 +4,7 @@
 mod commands;
 mod gdal;
 
-use commands::app::get_version;
+use commands::app::{get_version, read_config, write_config};
 use commands::georef::{apply_georeference, calculate_transformation};
 use commands::raster::{
     close_dataset, get_cross_layer_pixel_rgb_tile, get_cross_layer_rgb_tile, get_elevation_profile,
@@ -77,6 +77,8 @@ fn main() {
         .manage(DatasetCache::new(10))
         .invoke_handler(tauri::generate_handler![
             get_version,
+            read_config,
+            write_config,
             open_raster,
             get_tile,
             get_tile_stretched,

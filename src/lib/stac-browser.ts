@@ -278,6 +278,7 @@ export class StacBrowser {
     if (configManager && this.apiSelect) {
       this.apiSelect.innerHTML = '';
       const catalogs = configManager.getStacCatalogs();
+      console.log('[STAC] Catalogs from config:', catalogs);
       for (const catalog of catalogs) {
         const option = document.createElement('option');
         option.value = catalog.url;
@@ -368,6 +369,18 @@ export class StacBrowser {
     // Show all checkbox - toggle filter controls visibility
     if (this.showAllCheckbox) {
       this.showAllCheckbox.addEventListener('change', () => this.onShowAllChange());
+    }
+
+    // Enter key on date inputs triggers search
+    for (const input of [this.dateStart, this.dateEnd]) {
+      if (input) {
+        input.addEventListener('keydown', e => {
+          if (e.key === 'Enter') {
+            input.blur();
+            this.search();
+          }
+        });
+      }
     }
 
     // Search button

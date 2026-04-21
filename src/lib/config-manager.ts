@@ -1,15 +1,15 @@
 /**
  * ConfigManager - Manages application configuration stored in a JSON file
+ *
+ * Config is stored at ~/.config/heimdall/config.json on all platforms.
+ * Uses Rust backend commands for file I/O to avoid Tauri FS scope issues.
  */
 
-import { readTextFile, writeTextFile, mkdir, exists } from '@tauri-apps/plugin-fs';
-import { homeDir, join } from '@tauri-apps/api/path';
+import { invoke } from '@tauri-apps/api/core';
 import { logger } from './logger';
 import type { AppConfig, BasemapConfig, StacCatalogEntry } from '../types/config';
 
 const log = logger.child('ConfigManager');
-
-const CONFIG_FILENAME = 'config.json';
 
 // Default configuration
 const DEFAULT_CONFIG: AppConfig = {
@@ -42,12 +42,10 @@ const DEFAULT_CONFIG: AppConfig = {
 
 export class ConfigManager {
   private config: AppConfig | null;
-  private configPath: string | null;
   private loaded: boolean;
 
   constructor() {
     this.config = null;
-    this.configPath = null;
     this.loaded = false;
   }
 
@@ -56,28 +54,23 @@ export class ConfigManager {
    */
   async init(): Promise<AppConfig> {
     try {
-      const home = await homeDir();
-      const dataDir = await join(home, '.config', 'heimdall');
-      this.configPath = await join(dataDir, CONFIG_FILENAME);
+      const content = await invoke<string>('read_config');
 
-      // Check if config file exists
-      const configExists = await exists(this.configPath);
-
-      if (configExists) {
-        await this.load();
+      if (content) {
+        const parsed = JSON.parse(content) as Partial<AppConfig>;
+        this.config = this.mergeWithDefaults(parsed);
+        log.info('Loaded config from ~/.config/heimdall/config.json');
       } else {
-        // Create default config
+        // File doesn't exist — create with defaults
         this.config = structuredClone(DEFAULT_CONFIG);
-        await this.ensureDataDir(dataDir);
         await this.save();
-        log.info('Created default config file');
+        log.info('Created default config at ~/.config/heimdall/config.json');
       }
 
       this.loaded = true;
-      return this.config!;
+      return this.config;
     } catch (error) {
       log.error('Failed to initialize config', { error: String(error) });
-      // Fall back to default config in memory
       this.config = structuredClone(DEFAULT_CONFIG);
       this.loaded = true;
       return this.config;
@@ -85,49 +78,12 @@ export class ConfigManager {
   }
 
   /**
-   * Ensure the app data directory exists
-   */
-  private async ensureDataDir(dataDir: string): Promise<void> {
-    try {
-      const dirExists = await exists(dataDir);
-      if (!dirExists) {
-        await mkdir(dataDir, { recursive: true });
-      }
-    } catch (error) {
-      log.warn('Could not create data directory', { error: String(error) });
-    }
-  }
-
-  /**
-   * Load configuration from file
-   */
-  private async load(): Promise<void> {
-    try {
-      const content = await readTextFile(this.configPath!);
-      const parsed = JSON.parse(content) as Partial<AppConfig>;
-
-      // Merge with defaults to ensure all fields exist
-      this.config = this.mergeWithDefaults(parsed);
-      log.info('Loaded config from file');
-    } catch (error) {
-      log.error('Failed to load config', { error: String(error) });
-      this.config = structuredClone(DEFAULT_CONFIG);
-    }
-  }
-
-  /**
    * Save configuration to file
    */
   async save(): Promise<boolean> {
-    if (!this.configPath) {
-      log.warn('Config path not set, cannot save');
-      return false;
-    }
-
     try {
       const content = JSON.stringify(this.config, null, 2);
-      await writeTextFile(this.configPath, content);
-      log.info('Saved config to file');
+      await invoke('write_config', { content });
       return true;
     } catch (error) {
       log.error('Failed to save config', { error: String(error) });
