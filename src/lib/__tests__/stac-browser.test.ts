@@ -9,6 +9,11 @@ vi.mock('@tauri-apps/api/core', () => ({
   invoke: vi.fn(),
 }));
 
+// Mock Tauri dialog plugin
+vi.mock('@tauri-apps/plugin-dialog', () => ({
+  ask: vi.fn(),
+}));
+
 // Mock maplibre-gl
 vi.mock('maplibre-gl', () => {
   class MockLngLatBounds {
@@ -439,6 +444,7 @@ describe('StacBrowser', () => {
 
       expect(invoke).toHaveBeenCalledWith('connect_stac_api', {
         url: 'https://earth-search.aws.element84.com/v1',
+        acceptInvalidCerts: false,
       });
     });
 
@@ -621,6 +627,7 @@ describe('StacBrowser', () => {
           collections: ['sentinel-2-l2a'],
           limit: 20,
         }),
+        acceptInvalidCerts: false,
       });
     });
 
@@ -923,6 +930,7 @@ describe('StacBrowser', () => {
 
       expect(invoke).toHaveBeenCalledWith('open_stac_asset', {
         assetHref: 'https://example.com/visual.tif',
+        acceptInvalidCerts: false,
       });
     });
 
@@ -1227,6 +1235,7 @@ describe('StacBrowser', () => {
 
         expect(invoke).toHaveBeenCalledWith('get_static_catalog_children', {
           catalogUrl: 'https://earth-search.aws.element84.com/v1',
+          acceptInvalidCerts: false,
         });
       });
 
@@ -1277,6 +1286,7 @@ describe('StacBrowser', () => {
 
         expect(invoke).toHaveBeenCalledWith('list_stac_collections', {
           url: 'https://earth-search.aws.element84.com/v1',
+          acceptInvalidCerts: false,
         });
       });
 
@@ -1432,6 +1442,7 @@ describe('StacBrowser', () => {
         expect(invoke).toHaveBeenCalledWith('browse_static_collection', {
           collectionUrl: 'https://example.com/collection.json',
           limit: 20,
+          acceptInvalidCerts: false,
         });
       });
 
@@ -1640,6 +1651,7 @@ describe('StacBrowser', () => {
 
           expect(invoke).toHaveBeenCalledWith('get_static_catalog_children', {
             catalogUrl: 'https://example.com/year/catalog.json',
+            acceptInvalidCerts: false,
           });
         });
 
@@ -1751,6 +1763,7 @@ describe('StacBrowser', () => {
 
           expect(invoke).toHaveBeenCalledWith('get_static_catalog_children', {
             catalogUrl: 'https://example.com/catalog.json',
+            acceptInvalidCerts: false,
           });
         });
 
@@ -1797,6 +1810,7 @@ describe('StacBrowser', () => {
 
           expect(invoke).toHaveBeenCalledWith('get_static_catalog_children', {
             catalogUrl: 'https://example.com/year/catalog.json',
+            acceptInvalidCerts: false,
           });
         });
 

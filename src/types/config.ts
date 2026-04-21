@@ -15,8 +15,20 @@ export interface BasemapsConfig {
   custom: BasemapConfig;
 }
 
+// STAC catalog entry
+export interface StacCatalogEntry {
+  url: string;
+  name: string;
+}
+
+// STAC section of config
+export interface StacConfig {
+  catalogs: StacCatalogEntry[];
+}
+
 // Root configuration object
 export interface AppConfig {
   version: string;
   basemaps: BasemapsConfig;
+  stac: StacConfig;
 }

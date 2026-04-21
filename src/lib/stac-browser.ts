@@ -7,11 +7,13 @@
  */
 
 import { invoke } from '@tauri-apps/api/core';
+import { ask } from '@tauri-apps/plugin-dialog';
 import maplibregl from 'maplibre-gl';
 import { showToast, showError, showLoading, hideLoading } from './notifications';
 import { logger } from './logger';
 import type { LayerManager } from './layer-manager/index';
 import type { MapManager } from './map-manager';
+import type { ConfigManager } from './config-manager';
 import type {
   RasterLayer,
   BandStats,
@@ -117,6 +119,12 @@ interface StacSearchResult {
   context?: { matched?: number };
 }
 
+/** Thumbnail response from backend */
+interface StacThumbnailResponse {
+  data: string;
+  content_type: string;
+}
+
 /** Raster metadata from backend */
 interface RasterMetadata {
   id: string;
@@ -168,11 +176,19 @@ export class StacBrowser {
   private searchResults: StacItem[] = [];
   private selectedItem: StacItem | null = null;
   private searchBbox: number[] | null = null;
+  private acceptInvalidCerts = false;
 
   // Map layer IDs for footprints
   private footprintSourceId = 'stac-footprints';
   private footprintFillLayerId = 'stac-footprints-fill';
   private footprintLineLayerId = 'stac-footprints-line';
+
+  // Thumbnail overlay state
+  private thumbnailOverlays: Array<{ sourceId: string; layerId: string }> = [];
+  private thumbnailBlobUrls: string[] = [];
+  private loadedThumbnailIds = new Set<string>();
+  private thumbnailMoveHandler: (() => void) | null = null;
+  private static readonly THUMBNAIL_MIN_ZOOM = 7;
 
   // Drawing state
   private isDrawing = false;
@@ -217,8 +233,9 @@ export class StacBrowser {
    * Create a new StacBrowser instance.
    * @param layerManager - LayerManager for adding loaded assets
    * @param mapManager - MapManager for map operations
+   * @param configManager - Optional ConfigManager for STAC catalog configuration
    */
-  constructor(layerManager: LayerManager, mapManager: MapManager) {
+  constructor(layerManager: LayerManager, mapManager: MapManager, configManager?: ConfigManager) {
     this.layerManager = layerManager;
     this.mapManager = mapManager;
 
@@ -256,6 +273,23 @@ export class StacBrowser {
     this.itemProperties = document.getElementById('stac-item-properties');
     this.assetList = document.getElementById('stac-asset-list');
     this.itemBackBtn = document.getElementById('stac-item-back');
+
+    // Populate STAC catalog dropdown from config
+    if (configManager && this.apiSelect) {
+      this.apiSelect.innerHTML = '';
+      const catalogs = configManager.getStacCatalogs();
+      for (const catalog of catalogs) {
+        const option = document.createElement('option');
+        option.value = catalog.url;
+        option.textContent = catalog.name;
+        this.apiSelect.appendChild(option);
+      }
+      // Always add "Custom URL..." as last option
+      const customOption = document.createElement('option');
+      customOption.value = 'custom';
+      customOption.textContent = 'Custom URL...';
+      this.apiSelect.appendChild(customOption);
+    }
 
     this.setupEventListeners();
     this.setDefaultDates();
@@ -467,11 +501,29 @@ export class StacBrowser {
       this.connectBtn.textContent = 'Connecting...';
     }
 
+    // Reset insecure mode for new connections
+    this.acceptInvalidCerts = false;
+    await this.doConnect(url);
+  }
+
+  /**
+   * Perform the actual connection to a STAC catalog.
+   * Separated from connect() to allow retrying with acceptInvalidCerts.
+   */
+  private async doConnect(url: string): Promise<void> {
+    if (this.connectBtn) {
+      this.connectBtn.disabled = true;
+      this.connectBtn.textContent = 'Connecting...';
+    }
+
     try {
-      log.info('Connecting to STAC catalog', { url });
+      log.info('Connecting to STAC catalog', { url, acceptInvalidCerts: this.acceptInvalidCerts });
 
       // Connect to catalog - returns extended info with type detection
-      const catalogInfo = await invoke<StacCatalogInfo>('connect_stac_api', { url });
+      const catalogInfo = await invoke<StacCatalogInfo>('connect_stac_api', {
+        url,
+        acceptInvalidCerts: this.acceptInvalidCerts,
+      });
       this.currentCatalogUrl = catalogInfo.base_url;
       this.currentCatalog = {
         id: catalogInfo.id,
@@ -488,6 +540,7 @@ export class StacBrowser {
         // STAC API - fetch collections from /collections endpoint
         const collections = await invoke<StacCollection[]>('list_stac_collections', {
           url: this.currentCatalogUrl,
+          acceptInvalidCerts: this.acceptInvalidCerts,
         });
         this.collections = collections;
         this.staticCollections = [];
@@ -511,17 +564,45 @@ export class StacBrowser {
         collections: this.collections.length + this.staticCollections.length,
       });
     } catch (error) {
+      const errorStr = String(error);
+
+      // Detect TLS/certificate errors and offer to retry with insecure mode
+      if (!this.acceptInvalidCerts && this.isCertificateError(errorStr)) {
+        log.warn('TLS certificate error detected, prompting user', { url });
+        const accepted = await ask(
+          `The server at "${url}" has an invalid or self-signed TLS certificate.\n\nDo you want to connect anyway? This is insecure and should only be used for trusted servers.`,
+          { title: 'Invalid Certificate', kind: 'warning' }
+        );
+        if (accepted) {
+          this.acceptInvalidCerts = true;
+          await this.doConnect(url);
+          return;
+        }
+      }
+
       log.error(
         'Failed to connect to STAC catalog',
-        error instanceof Error ? error : { error: String(error) }
+        error instanceof Error ? error : { error: errorStr }
       );
-      showError('Connection failed', error instanceof Error ? error : String(error));
+      showError('Connection failed', error instanceof Error ? error : errorStr);
     } finally {
       if (this.connectBtn) {
         this.connectBtn.disabled = false;
         this.connectBtn.textContent = 'Connect';
       }
     }
+  }
+
+  /** Check if an error message indicates a TLS/certificate problem */
+  private isCertificateError(error: string): boolean {
+    const lower = error.toLowerCase();
+    return (
+      lower.includes('[tls_error]') ||
+      lower.includes('certificate') ||
+      lower.includes('self signed') ||
+      lower.includes('self-signed') ||
+      lower.includes('invalid peer certificate')
+    );
   }
 
   /**
@@ -535,6 +616,7 @@ export class StacBrowser {
     try {
       const children = await invoke<StacChildEntry[]>('get_static_catalog_children', {
         catalogUrl,
+        acceptInvalidCerts: this.acceptInvalidCerts,
       });
 
       this.staticCollections = [];
@@ -1167,23 +1249,27 @@ export class StacBrowser {
     try {
       let result: StacSearchResult;
 
+      // Parse limit: 0 means "all" (no limit)
+      const rawLimit = parseInt(this.limitSelect?.value || '100', 10);
+      const limit = rawLimit === 0 ? 10000 : rawLimit;
+
       if (this.catalogType === 'Static' && this.selectedStaticCollection) {
         // Static catalog - browse collection by following links
         const collectionUrl = this.selectedStaticCollection.url;
-        const limit = parseInt(this.limitSelect?.value || '20', 10);
         log.info('Browsing static collection', { url: collectionUrl, limit });
         console.log('[STAC] Browsing static collection:', collectionUrl, 'limit:', limit);
 
         result = await invoke<StacSearchResult>('browse_static_collection', {
           collectionUrl,
           limit,
+          acceptInvalidCerts: this.acceptInvalidCerts,
         });
         console.log('[STAC] Browse result:', JSON.stringify(result, null, 2));
       } else if (this.selectedCollection) {
         // STAC API - use search endpoint
         const params: StacSearchParams = {
           collections: [this.selectedCollection.id],
-          limit: parseInt(this.limitSelect?.value || '20', 10),
+          limit,
         };
 
         // Add bbox if set
@@ -1208,6 +1294,7 @@ export class StacBrowser {
         result = await invoke<StacSearchResult>('search_stac_items', {
           url: this.currentCatalogUrl,
           params,
+          acceptInvalidCerts: this.acceptInvalidCerts,
         });
       } else {
         throw new Error('No collection selected');
@@ -1230,8 +1317,9 @@ export class StacBrowser {
       const totalMatched = result.number_matched || result.context?.matched || totalBeforeFilter;
       this.renderResults(this.searchResults, totalMatched, filtered);
 
-      // Display footprints on map
+      // Display footprints and set up lazy thumbnail loading
       this.displayFootprints(this.searchResults);
+      this.setupThumbnailLazyLoad();
     } catch (error) {
       log.error('Search failed', error instanceof Error ? error : { error: String(error) });
       console.error('STAC search error details:', error);
@@ -1542,7 +1630,8 @@ export class StacBrowser {
     this.resultsSection?.classList.add('hidden');
     this.itemDetailSection?.classList.add('hidden');
 
-    // Clear footprints from map
+    // Clear footprints and thumbnails from map
+    this.removeAllThumbnailOverlays();
     this.clearFootprints();
   }
 
@@ -1781,6 +1870,213 @@ export class StacBrowser {
   }
 
   // ============================================
+  // Thumbnail Overlays (lazy-loaded)
+  // ============================================
+
+  /** Find the thumbnail asset URL for a STAC item. */
+  private getThumbnailUrl(item: StacItem): string | null {
+    const assets = item.assets || {};
+    for (const [key, asset] of Object.entries(assets)) {
+      const roles = asset.roles || [];
+      if (roles.includes('thumbnail') || key === 'thumbnail') return asset.href;
+    }
+    for (const [key, asset] of Object.entries(assets)) {
+      const roles = asset.roles || [];
+      if (roles.includes('overview') || key === 'preview') return asset.href;
+    }
+    return null;
+  }
+
+  /**
+   * Get image source coordinates from the item's geometry.
+   * MapLibre image source expects [top-left, top-right, bottom-right, bottom-left].
+   *
+   * For any polygon, finds the 4 extreme vertices (closest to each bbox corner)
+   * so the thumbnail warps to match the actual ground footprint.
+   */
+  private getImageCoordinates(
+    item: StacItem
+  ): [[number, number], [number, number], [number, number], [number, number]] | null {
+    const { bbox } = item;
+    if (!bbox || bbox.length < 4) return null;
+    const [west, south, east, north] = bbox;
+
+    const geom = item.geometry;
+    if (geom && geom.type === 'Polygon') {
+      const ring = (geom as GeoJSON.Polygon).coordinates[0];
+      if (ring && ring.length >= 4) {
+        // For each image corner (NW, NE, SE, SW), find the polygon vertex closest to it.
+        // Each vertex can only be used once to avoid degenerate quads.
+        const bboxCorners: [number, number][] = [
+          [west, north], // top-left
+          [east, north], // top-right
+          [east, south], // bottom-right
+          [west, south], // bottom-left
+        ];
+        const used = new Set<number>();
+        const result: [number, number][] = [];
+
+        for (const target of bboxCorners) {
+          let bestIdx = 0;
+          let bestDist = Infinity;
+          for (let i = 0; i < ring.length - 1; i++) {
+            // skip closing point (ring.length - 1)
+            if (used.has(i)) continue;
+            const dx = ring[i][0] - target[0];
+            const dy = ring[i][1] - target[1];
+            const dist = dx * dx + dy * dy;
+            if (dist < bestDist) {
+              bestDist = dist;
+              bestIdx = i;
+            }
+          }
+          used.add(bestIdx);
+          result.push([ring[bestIdx][0], ring[bestIdx][1]]);
+        }
+        return result as [[number, number], [number, number], [number, number], [number, number]];
+      }
+    }
+
+    // Fallback: axis-aligned bbox
+    return [
+      [west, north],
+      [east, north],
+      [east, south],
+      [west, south],
+    ];
+  }
+
+  /**
+   * Start lazy-loading thumbnails based on visible viewport and zoom.
+   * Called after search results are displayed.
+   */
+  private setupThumbnailLazyLoad(): void {
+    const map = this.mapManager?.map;
+    if (!map) return;
+
+    // Remove previous handler
+    if (this.thumbnailMoveHandler) {
+      map.off('moveend', this.thumbnailMoveHandler);
+    }
+
+    this.thumbnailMoveHandler = () => this.loadVisibleThumbnails();
+    map.on('moveend', this.thumbnailMoveHandler);
+
+    // Load immediately for what's already visible
+    this.loadVisibleThumbnails();
+  }
+
+  /** Load thumbnails for items currently visible on screen at sufficient zoom. */
+  private loadVisibleThumbnails(): void {
+    const map = this.mapManager?.map;
+    if (!map) return;
+
+    if (map.getZoom() < StacBrowser.THUMBNAIL_MIN_ZOOM) return;
+
+    const bounds = map.getBounds();
+
+    const visibleItems = this.searchResults.filter(item => {
+      if (this.loadedThumbnailIds.has(item.id)) return false;
+      if (!item.bbox || item.bbox.length < 4) return false;
+      const [west, south, east, north] = item.bbox;
+      return (
+        bounds.getWest() <= east &&
+        bounds.getEast() >= west &&
+        bounds.getSouth() <= north &&
+        bounds.getNorth() >= south
+      );
+    });
+
+    if (visibleItems.length === 0) return;
+
+    // Load in parallel, fire-and-forget
+    for (const item of visibleItems) {
+      // Mark as loading immediately to prevent duplicate requests
+      this.loadedThumbnailIds.add(item.id);
+      this.loadSingleThumbnail(item);
+    }
+  }
+
+  /** Fetch and display a single item's thumbnail on the map. */
+  private async loadSingleThumbnail(item: StacItem): Promise<void> {
+    const thumbnailUrl = this.getThumbnailUrl(item);
+    if (!thumbnailUrl) return;
+
+    const coordinates = this.getImageCoordinates(item);
+    if (!coordinates) return;
+
+    const map = this.mapManager?.map;
+    if (!map) return;
+
+    try {
+      const response = await invoke<StacThumbnailResponse>('fetch_stac_thumbnail', {
+        url: thumbnailUrl,
+        acceptInvalidCerts: this.acceptInvalidCerts,
+      });
+
+      const byteChars = atob(response.data);
+      const byteArray = new Uint8Array(byteChars.length);
+      for (let i = 0; i < byteChars.length; i++) {
+        byteArray[i] = byteChars.charCodeAt(i);
+      }
+      const blob = new Blob([byteArray], { type: response.content_type });
+      const blobUrl = URL.createObjectURL(blob);
+      this.thumbnailBlobUrls.push(blobUrl);
+
+      const sourceId = `stac-thumb-${item.id}`;
+      const layerId = `stac-thumb-layer-${item.id}`;
+
+      if (!map.getSource(sourceId)) {
+        map.addSource(sourceId, {
+          type: 'image',
+          url: blobUrl,
+          coordinates,
+        });
+
+        // Insert below footprint outlines so outlines remain visible
+        map.addLayer(
+          {
+            id: layerId,
+            type: 'raster',
+            source: sourceId,
+            paint: { 'raster-opacity': 0.85 },
+          },
+          this.footprintFillLayerId
+        );
+
+        this.thumbnailOverlays.push({ sourceId, layerId });
+      }
+    } catch {
+      // Remove from loaded set so it can be retried on next pan
+      this.loadedThumbnailIds.delete(item.id);
+    }
+  }
+
+  /** Remove all thumbnail overlays from the map. */
+  private removeAllThumbnailOverlays(): void {
+    const map = this.mapManager?.map;
+    if (!map) return;
+
+    // Remove move handler
+    if (this.thumbnailMoveHandler) {
+      map.off('moveend', this.thumbnailMoveHandler);
+      this.thumbnailMoveHandler = null;
+    }
+
+    for (const { sourceId, layerId } of this.thumbnailOverlays) {
+      if (map.getLayer(layerId)) map.removeLayer(layerId);
+      if (map.getSource(sourceId)) map.removeSource(sourceId);
+    }
+    this.thumbnailOverlays = [];
+    this.loadedThumbnailIds.clear();
+
+    for (const blobUrl of this.thumbnailBlobUrls) {
+      URL.revokeObjectURL(blobUrl);
+    }
+    this.thumbnailBlobUrls = [];
+  }
+
+  // ============================================
   // Asset Loading
   // ============================================
 
@@ -1797,6 +2093,9 @@ export class StacBrowser {
     const assetHref = asset.href;
     const assetTitle = asset.title || assetKey;
 
+    // Remove thumbnail previews when loading a full asset
+    this.removeAllThumbnailOverlays();
+
     showLoading(`Loading ${assetTitle}...`);
 
     try {
@@ -1804,7 +2103,10 @@ export class StacBrowser {
       log.info('Loading STAC asset', { itemId: item.id, assetKey, href: assetHref });
 
       // Call backend to open via /vsicurl/
-      const metadata = await invoke<RasterMetadata>('open_stac_asset', { assetHref });
+      const metadata = await invoke<RasterMetadata>('open_stac_asset', {
+        assetHref,
+        acceptInvalidCerts: this.acceptInvalidCerts,
+      });
 
       console.log('[STAC] Got metadata:', JSON.stringify(metadata, null, 2));
       console.log('[STAC] Bounds:', metadata.bounds);

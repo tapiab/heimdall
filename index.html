@@ -317,8 +317,7 @@
           <div id="stac-connection" class="stac-section">
             <label for="stac-api-select">STAC API:</label>
             <select id="stac-api-select">
-              <option value="https://earth-search.aws.element84.com/v1">Earth Search (AWS) - Sentinel-2, Landsat</option>
-              <option value="https://planetarycomputer.microsoft.com/api/stac/v1">Planetary Computer - Landsat, NAIP, more</option>
+              <!-- Populated from config.json -->
               <option value="custom">Custom URL...</option>
             </select>
             <div id="stac-custom-url-row" class="stac-url-row hidden">
@@ -353,9 +352,9 @@
             <div class="stac-filter-row">
               <label>Date Range:</label>
               <div class="stac-date-inputs">
-                <input type="date" id="stac-date-start">
+                <input type="text" id="stac-date-start" placeholder="YYYY-MM-DD">
                 <span>to</span>
-                <input type="date" id="stac-date-end">
+                <input type="text" id="stac-date-end" placeholder="YYYY-MM-DD">
               </div>
             </div>
 
@@ -377,10 +376,10 @@
             <div class="stac-filter-row">
               <label for="stac-limit">Results Limit:</label>
               <select id="stac-limit">
-                <option value="10">10</option>
-                <option value="20" selected>20</option>
-                <option value="50">50</option>
-                <option value="100">100</option>
+                <option value="100" selected>100</option>
+                <option value="200">200</option>
+                <option value="500">500</option>
+                <option value="0">All</option>
               </select>
             </div>
 

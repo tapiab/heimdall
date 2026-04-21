@@ -3,9 +3,9 @@
  */
 
 import { readTextFile, writeTextFile, mkdir, exists } from '@tauri-apps/plugin-fs';
-import { appDataDir, join } from '@tauri-apps/api/path';
+import { homeDir, join } from '@tauri-apps/api/path';
 import { logger } from './logger';
-import type { AppConfig, BasemapConfig } from '../types/config';
+import type { AppConfig, BasemapConfig, StacCatalogEntry } from '../types/config';
 
 const log = logger.child('ConfigManager');
 
@@ -26,6 +26,18 @@ const DEFAULT_CONFIG: AppConfig = {
       name: 'Custom',
     },
   },
+  stac: {
+    catalogs: [
+      {
+        url: 'https://earth-search.aws.element84.com/v1',
+        name: 'Earth Search (AWS) - Sentinel-2, Landsat',
+      },
+      {
+        url: 'https://planetarycomputer.microsoft.com/api/stac/v1',
+        name: 'Planetary Computer - Landsat, NAIP, more',
+      },
+    ],
+  },
 };
 
 export class ConfigManager {
@@ -44,7 +56,8 @@ export class ConfigManager {
    */
   async init(): Promise<AppConfig> {
     try {
-      const dataDir = await appDataDir();
+      const home = await homeDir();
+      const dataDir = await join(home, '.config', 'heimdall');
       this.configPath = await join(dataDir, CONFIG_FILENAME);
 
       // Check if config file exists
@@ -147,6 +160,10 @@ export class ConfigManager {
       }
     }
 
+    if (loaded.stac?.catalogs) {
+      merged.stac.catalogs = loaded.stac.catalogs;
+    }
+
     return merged;
   }
 
@@ -185,6 +202,13 @@ export class ConfigManager {
    */
   hasCustomBasemap(): boolean {
     return !!this.config?.basemaps?.custom?.url;
+  }
+
+  /**
+   * Get the STAC catalog entries
+   */
+  getStacCatalogs(): StacCatalogEntry[] {
+    return this.config?.stac?.catalogs || DEFAULT_CONFIG.stac.catalogs;
   }
 
   /**

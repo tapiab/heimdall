@@ -59,7 +59,7 @@ async function init() {
   const projectManager = new ProjectManager(mapManager, layerManager, annotationTool);
 
   // Create STAC browser
-  const stacBrowser = new StacBrowser(layerManager, mapManager);
+  const stacBrowser = new StacBrowser(layerManager, mapManager, configManager);
 
   // Create georeference tool and panel
   const georeferenceTool = new GeoreferenceTool(mapManager, layerManager);

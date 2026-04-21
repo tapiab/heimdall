@@ -33,6 +33,30 @@ use tracing::{debug, error, info};
 use super::raster::{BandStats, RasterMetadata};
 
 // ============================================================================
+// HTTP Client Builder
+// ============================================================================
+
+/// Build a reqwest client, optionally accepting invalid TLS certificates.
+/// This is needed for connecting to STAC catalogs served with self-signed certificates.
+fn build_client(accept_invalid_certs: bool) -> Result<reqwest::Client, String> {
+    reqwest::Client::builder()
+        .danger_accept_invalid_certs(accept_invalid_certs)
+        .build()
+        .map_err(|e| format!("Failed to create HTTP client: {}", e))
+}
+
+/// Format a reqwest connection error, tagging TLS errors so the frontend can detect them.
+fn format_connect_error(e: &reqwest::Error) -> String {
+    if e.is_connect() {
+        // Connection errors on HTTPS are almost always TLS issues
+        // (self-signed cert, expired cert, wrong hostname, etc.)
+        format!("[TLS_ERROR] {}", e)
+    } else {
+        e.to_string()
+    }
+}
+
+// ============================================================================
 // STAC Data Structures
 // ============================================================================
 
@@ -105,6 +129,15 @@ pub struct StacCollection {
     pub stac_version: Option<String>,
     /// Links to related resources (items, parent, root)
     pub links: Option<Vec<StacLink>>,
+}
+
+/// Response for thumbnail fetch: base64-encoded image data with content type
+#[derive(Clone, Serialize, Deserialize, Debug)]
+pub struct StacThumbnailResponse {
+    /// Base64-encoded image bytes
+    pub data: String,
+    /// MIME content type (e.g., "image/png", "image/jpeg")
+    pub content_type: String,
 }
 
 /// A child entry from a static catalog (can be a catalog or collection)
@@ -381,8 +414,11 @@ pub struct StacSearchContext {
 /// - The response is not valid STAC catalog JSON
 /// - The server returns an error status code
 #[tauri::command]
-pub async fn connect_stac_api(url: String) -> Result<StacCatalogInfo, String> {
-    let client = reqwest::Client::new();
+pub async fn connect_stac_api(
+    url: String,
+    accept_invalid_certs: Option<bool>,
+) -> Result<StacCatalogInfo, String> {
+    let client = build_client(accept_invalid_certs.unwrap_or(false))?;
 
     // Normalize URL - remove trailing slash
     let base_url = url.trim_end_matches('/').to_string();
@@ -392,7 +428,12 @@ pub async fn connect_stac_api(url: String) -> Result<StacCatalogInfo, String> {
         .header("Accept", "application/json")
         .send()
         .await
-        .map_err(|e| format!("Failed to connect to STAC catalog: {}", e))?;
+        .map_err(|e| {
+            format!(
+                "Failed to connect to STAC catalog: {}",
+                format_connect_error(&e)
+            )
+        })?;
 
     if !response.status().is_success() {
         return Err(format!(
@@ -471,8 +512,11 @@ async fn detect_catalog_type(
 ///
 /// Returns a vector of collection metadata on success.
 #[tauri::command]
-pub async fn list_stac_collections(url: String) -> Result<Vec<StacCollection>, String> {
-    let client = reqwest::Client::new();
+pub async fn list_stac_collections(
+    url: String,
+    accept_invalid_certs: Option<bool>,
+) -> Result<Vec<StacCollection>, String> {
+    let client = build_client(accept_invalid_certs.unwrap_or(false))?;
 
     // Normalize URL
     let base_url = url.trim_end_matches('/');
@@ -530,8 +574,9 @@ pub async fn list_stac_collections(url: String) -> Result<Vec<StacCollection>, S
 pub async fn search_stac_items(
     url: String,
     params: StacSearchParams,
+    accept_invalid_certs: Option<bool>,
 ) -> Result<StacSearchResult, String> {
-    let client = reqwest::Client::new();
+    let client = build_client(accept_invalid_certs.unwrap_or(false))?;
 
     // Normalize URL
     let base_url = url.trim_end_matches('/');
@@ -622,8 +667,9 @@ pub async fn search_stac_items(
 #[tauri::command]
 pub async fn get_static_catalog_children(
     catalog_url: String,
+    accept_invalid_certs: Option<bool>,
 ) -> Result<Vec<StacChildEntry>, String> {
-    let client = reqwest::Client::new();
+    let client = build_client(accept_invalid_certs.unwrap_or(false))?;
 
     let response = client
         .get(&catalog_url)
@@ -669,8 +715,11 @@ pub async fn get_static_catalog_children(
 ///
 /// This is used to navigate static catalogs by fetching child resources.
 #[tauri::command]
-pub async fn fetch_stac_resource(url: String) -> Result<serde_json::Value, String> {
-    let client = reqwest::Client::new();
+pub async fn fetch_stac_resource(
+    url: String,
+    accept_invalid_certs: Option<bool>,
+) -> Result<serde_json::Value, String> {
+    let client = build_client(accept_invalid_certs.unwrap_or(false))?;
 
     let response = client
         .get(&url)
@@ -694,6 +743,48 @@ pub async fn fetch_stac_resource(url: String) -> Result<serde_json::Value, Strin
     Ok(resource)
 }
 
+/// Fetch raw image bytes from a URL (for thumbnails and previews).
+///
+/// Returns the image as base64-encoded data with its content type,
+/// so the frontend can create a blob URL for MapLibre's image source.
+#[tauri::command]
+pub async fn fetch_stac_thumbnail(
+    url: String,
+    accept_invalid_certs: Option<bool>,
+) -> Result<StacThumbnailResponse, String> {
+    let client = build_client(accept_invalid_certs.unwrap_or(false))?;
+
+    let response = client
+        .get(&url)
+        .send()
+        .await
+        .map_err(|e| format!("Failed to fetch thumbnail: {}", format_connect_error(&e)))?;
+
+    if !response.status().is_success() {
+        return Err(format!(
+            "Failed to fetch thumbnail: HTTP {}",
+            response.status()
+        ));
+    }
+
+    let content_type = response
+        .headers()
+        .get("content-type")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("image/png")
+        .to_string();
+
+    let bytes = response
+        .bytes()
+        .await
+        .map_err(|e| format!("Failed to read thumbnail bytes: {}", e))?;
+
+    use base64::Engine;
+    let data = base64::engine::general_purpose::STANDARD.encode(&bytes);
+
+    Ok(StacThumbnailResponse { data, content_type })
+}
+
 /// Browse items in a static STAC collection.
 ///
 /// For static collections, items are accessed by following links rather than
@@ -712,6 +803,7 @@ pub async fn fetch_stac_resource(url: String) -> Result<serde_json::Value, Strin
 pub async fn browse_static_collection(
     collection_url: String,
     limit: Option<u32>,
+    accept_invalid_certs: Option<bool>,
 ) -> Result<StacSearchResult, String> {
     println!(
         "[STAC] browse_static_collection called with URL: {}",
@@ -720,6 +812,7 @@ pub async fn browse_static_collection(
 
     let client = reqwest::Client::builder()
         .user_agent("Heimdall/0.3.1")
+        .danger_accept_invalid_certs(accept_invalid_certs.unwrap_or(false))
         .build()
         .map_err(|e| format!("Failed to create HTTP client: {}", e))?;
     let max_items = limit.unwrap_or(20) as usize;
@@ -971,6 +1064,7 @@ fn resolve_url(base: &str, href: &str) -> String {
 #[tauri::command]
 pub async fn open_stac_asset(
     asset_href: String,
+    accept_invalid_certs: Option<bool>,
     state: State<'_, DatasetCache>,
 ) -> Result<RasterMetadata, String> {
     // Construct /vsicurl/ path - strip any existing /vsicurl/ prefix to avoid doubling
@@ -1042,6 +1136,12 @@ pub async fn open_stac_asset(
     println!("[STAC] HTTP href: '{}'", http_href);
     println!("[STAC] Final vsicurl path: '{}'", vsicurl_path);
     println!("[STAC] ========================================");
+
+    // Allow GDAL to skip SSL verification for self-signed certificates
+    if accept_invalid_certs.unwrap_or(false) {
+        gdal::config::set_config_option("GDAL_HTTP_UNSAFESSL", "YES")
+            .map_err(|e| format!("Failed to set GDAL SSL config: {}", e))?;
+    }
 
     // Open GDAL dataset directly (GDAL config is already set globally at startup)
     println!("[GDAL] Attempting to open: {}", &vsicurl_path);
