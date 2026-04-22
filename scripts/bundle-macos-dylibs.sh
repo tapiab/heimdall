@@ -141,6 +141,12 @@ ls -lh "$FRAMEWORKS_DIR"/*.dylib 2>/dev/null || true
 # Phase 4: Recreate DMG
 echo "=== Recreating DMG ==="
 APP_NAME=$(basename "$APP_PATH" .app)
+
+# Detach any mounted volumes from the old DMG (Tauri or macOS may have mounted it)
+for vol in /Volumes/"$APP_NAME"*; do
+    [ -d "$vol" ] && hdiutil detach "$vol" -force 2>/dev/null || true
+done
+
 rm -f "$DMG_PATH"
 hdiutil create -volname "$APP_NAME" -srcfolder "$APP_PATH" -ov -format UDZO "$DMG_PATH"
 echo "  DMG: $DMG_PATH ($(du -h "$DMG_PATH" | awk '{print $1}'))"

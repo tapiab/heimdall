@@ -198,14 +198,18 @@ jobs:
           security list-keychain -d user -s $KEYCHAIN_PATH
       - name: Build
         env:
-          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-        run: npm run tauri:build -- --target aarch64-apple-darwin --verbose
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY || '-' }}
+        run: |
+          # Only set notarization env vars when secrets are configured
+          if [ -n "${{ secrets.APPLE_TEAM_ID }}" ]; then
+            export APPLE_ID="${{ secrets.APPLE_ID }}"
+            export APPLE_PASSWORD="${{ secrets.APPLE_PASSWORD }}"
+            export APPLE_TEAM_ID="${{ secrets.APPLE_TEAM_ID }}"
+          fi
+          npm run tauri:build -- --target aarch64-apple-darwin --verbose
       - name: Bundle GDAL into app
         env:
-          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY || '-' }}
         run: |
           TARGET=src-tauri/target/aarch64-apple-darwin/release/bundle
           ./scripts/bundle-macos-dylibs.sh "$TARGET/macos/Heimdall.app" "$TARGET/dmg/"*.dmg
@@ -267,14 +271,18 @@ jobs:
           security list-keychain -d user -s $KEYCHAIN_PATH
       - name: Build
         env:
-          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-        run: npm run tauri:build -- --target x86_64-apple-darwin --verbose
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY || '-' }}
+        run: |
+          # Only set notarization env vars when secrets are configured
+          if [ -n "${{ secrets.APPLE_TEAM_ID }}" ]; then
+            export APPLE_ID="${{ secrets.APPLE_ID }}"
+            export APPLE_PASSWORD="${{ secrets.APPLE_PASSWORD }}"
+            export APPLE_TEAM_ID="${{ secrets.APPLE_TEAM_ID }}"
+          fi
+          npm run tauri:build -- --target x86_64-apple-darwin --verbose
       - name: Bundle GDAL into app
         env:
-          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY || '-' }}
         run: |
           TARGET=src-tauri/target/x86_64-apple-darwin/release/bundle
           ./scripts/bundle-macos-dylibs.sh "$TARGET/macos/Heimdall.app" "$TARGET/dmg/"*.dmg
