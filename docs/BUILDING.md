@@ -7,6 +7,8 @@ This guide covers building Heimdall from source on various platforms.
 - **Rust** (1.70+): https://rustup.rs/
 - **Node.js** (20+): https://nodejs.org/
 
+> **Note**: GDAL and all native dependencies are bundled in the pre-built packages. The dependencies below are only needed when building from source.
+
 ## Platform-Specific Dependencies
 
 ### macOS

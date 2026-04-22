@@ -45,6 +45,18 @@ Download the latest release for your platform from the [GitHub Releases](https:/
 | Windows | `.msi`, `.exe` |
 | Linux | `.deb`, `.rpm`, `.AppImage` |
 
+All dependencies (GDAL, PROJ, etc.) are bundled — no extra installs needed.
+
+#### macOS
+
+The macOS builds are not yet code-signed. Gatekeeper will block the app after download. To fix this, run:
+
+```bash
+xattr -cr /Applications/Heimdall.app
+```
+
+You only need to do this once.
+
 ### Building from Source
 
 See [docs/BUILDING.md](docs/BUILDING.md) for detailed build instructions.

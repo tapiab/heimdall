@@ -984,6 +984,7 @@ describe('StacBrowser', () => {
       expect(invoke).toHaveBeenCalledWith('open_stac_asset', {
         assetHref: 'https://example.com/visual.tif',
         acceptInvalidCerts: false,
+        stacBbox: null,
       });
     });
 

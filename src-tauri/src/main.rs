@@ -25,6 +25,29 @@ fn init_gdal_for_remote_access() {
 
     // Set environment variables BEFORE any GDAL calls
     // This ensures they're picked up during GDAL initialization
+
+    // Ensure GDAL's curl can find CA certificates in bundled .app context.
+    // When launched from Finder, the process gets a minimal environment with
+    // no Homebrew paths. reqwest (rustls-tls) bundles its own CAs, but GDAL
+    // uses system curl which needs an explicit cert path on macOS.
+    #[cfg(target_os = "macos")]
+    {
+        if std::env::var("CURL_CA_BUNDLE").is_err() {
+            let candidates = [
+                "/etc/ssl/cert.pem",
+                "/opt/homebrew/etc/ca-certificates/cert.pem",
+                "/usr/local/etc/ca-certificates/cert.pem",
+            ];
+            for path in &candidates {
+                if std::path::Path::new(path).exists() {
+                    std::env::set_var("CURL_CA_BUNDLE", path);
+                    println!("[GDAL] Set CURL_CA_BUNDLE={}", path);
+                    break;
+                }
+            }
+        }
+    }
+
     std::env::set_var("GDAL_DISABLE_READDIR_ON_OPEN", "EMPTY_DIR");
     std::env::set_var("GDAL_HTTP_USERAGENT", "Heimdall/0.3 GDAL");
     std::env::set_var("GDAL_HTTP_CONNECTTIMEOUT", "60");
@@ -33,7 +56,7 @@ fn init_gdal_for_remote_access() {
     std::env::set_var("VSI_CACHE_SIZE", "50000000"); // 50MB cache
     std::env::set_var(
         "CPL_VSIL_CURL_ALLOWED_EXTENSIONS",
-        ".tif,.tiff,.TIF,.TIFF,.vrt,.VRT",
+        ".tif,.tiff,.TIF,.TIFF,.vrt,.VRT,.jp2,.JP2,.j2k,.J2K",
     );
 
     // Force driver registration - this triggers GDAL initialization
@@ -48,7 +71,7 @@ fn init_gdal_for_remote_access() {
     let _ = config::set_config_option("VSI_CACHE_SIZE", "50000000");
     let _ = config::set_config_option(
         "CPL_VSIL_CURL_ALLOWED_EXTENSIONS",
-        ".tif,.tiff,.TIF,.TIFF,.vrt,.VRT",
+        ".tif,.tiff,.TIF,.TIFF,.vrt,.VRT,.jp2,.JP2,.j2k,.J2K",
     );
 
     println!(

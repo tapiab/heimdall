@@ -185,6 +185,7 @@ export class StacBrowser {
 
   // Thumbnail overlay state
   private thumbnailOverlays: Array<{ sourceId: string; layerId: string }> = [];
+  /** @deprecated No longer used — thumbnails now use data URLs */
   private thumbnailBlobUrls: string[] = [];
   private loadedThumbnailIds = new Set<string>();
   private thumbnailMoveHandler: (() => void) | null = null;
@@ -1599,15 +1600,31 @@ export class StacBrowser {
             <div class="stac-asset-name">${title}</div>
             <div class="stac-asset-type">${type}</div>
           </div>
-          ${
-            canLoad
-              ? `<button class="stac-asset-load-btn" data-asset-key="${key}">Load</button>`
-              : ''
-          }
+          <div class="stac-asset-actions">
+            <button class="stac-asset-copy-btn" data-asset-href="${asset.href}" title="Copy URI">&#x2398;</button>
+            ${
+              canLoad
+                ? `<button class="stac-asset-load-btn" data-asset-key="${key}">Load</button>`
+                : ''
+            }
+          </div>
         </div>
       `;
       })
       .join('');
+
+    // Add click handlers for copy buttons
+    this.assetList.querySelectorAll('.stac-asset-copy-btn').forEach(btn => {
+      btn.addEventListener('click', e => {
+        e.stopPropagation();
+        const href = (btn as HTMLElement).dataset.assetHref;
+        if (href) {
+          navigator.clipboard.writeText(href).then(() => {
+            showToast('URI copied to clipboard', 'success', 2000);
+          });
+        }
+      });
+    });
 
     // Add click handlers for load buttons
     this.assetList.querySelectorAll('.stac-asset-load-btn').forEach(btn => {
@@ -2036,18 +2053,13 @@ export class StacBrowser {
       const layerId = `stac-thumb-layer-${item.id}`;
 
       if (!map.getSource(sourceId)) {
-        const byteChars = atob(response.data);
-        const byteArray = new Uint8Array(byteChars.length);
-        for (let i = 0; i < byteChars.length; i++) {
-          byteArray[i] = byteChars.charCodeAt(i);
-        }
-        const blob = new Blob([byteArray], { type: response.contentType });
-        const blobUrl = URL.createObjectURL(blob);
-        this.thumbnailBlobUrls.push(blobUrl);
+        // Use data URL instead of blob URL — WebKit in bundled Tauri apps
+        // can't reliably load blob: URLs from the tauri:// origin.
+        const dataUrl = `data:${response.contentType};base64,${response.data}`;
 
         map.addSource(sourceId, {
           type: 'image',
-          url: blobUrl,
+          url: dataUrl,
           coordinates,
         });
 
@@ -2064,10 +2076,26 @@ export class StacBrowser {
 
         this.thumbnailOverlays.push({ sourceId, layerId });
       }
-    } catch {
-      // Remove from loaded set so it can be retried on next pan
+    } catch (err) {
+      console.error('[STAC] Thumbnail failed for', item.id, err);
       this.loadedThumbnailIds.delete(item.id);
     }
+  }
+
+  /** Remove the thumbnail overlay for a single item. */
+  private removeThumbnailForItem(itemId: string): void {
+    const map = this.mapManager?.map;
+    if (!map) return;
+
+    const sourceId = `stac-thumb-${itemId}`;
+    const layerId = `stac-thumb-layer-${itemId}`;
+
+    if (map.getLayer(layerId)) map.removeLayer(layerId);
+    if (map.getSource(sourceId)) map.removeSource(sourceId);
+
+    this.thumbnailOverlays = this.thumbnailOverlays.filter(
+      o => o.sourceId !== sourceId
+    );
   }
 
   /** Remove all thumbnail overlays from the map. */
@@ -2112,8 +2140,8 @@ export class StacBrowser {
     const assetHref = asset.href;
     const assetTitle = asset.title || assetKey;
 
-    // Remove thumbnail previews when loading a full asset
-    this.removeAllThumbnailOverlays();
+    // Remove only this item's thumbnail — keep other items' thumbnails visible
+    this.removeThumbnailForItem(item.id);
 
     showLoading(`Loading ${assetTitle}...`);
 
@@ -2122,9 +2150,13 @@ export class StacBrowser {
       log.info('Loading STAC asset', { itemId: item.id, assetKey, href: assetHref });
 
       // Call backend to open via /vsicurl/
+      // Pass STAC item bbox so the backend can georeference non-georeferenced files
       const metadata = await invoke<RasterMetadata>('open_stac_asset', {
         assetHref,
         acceptInvalidCerts: this.acceptInvalidCerts,
+        stacBbox: item.bbox && item.bbox.length >= 4
+          ? [item.bbox[0], item.bbox[1], item.bbox[2], item.bbox[3]]
+          : null,
       });
 
       console.log('[STAC] Got metadata:', JSON.stringify(metadata, null, 2));
@@ -2160,6 +2192,8 @@ export class StacBrowser {
     // Create layer name from item ID and asset key
     const layerName = `${item.id}/${assetTitle}`;
 
+    const mapBounds = metadata.bounds;
+
     // Create layer data structure compatible with LayerManager
     // Smart stretch detection handles different data types automatically
     const layerData: StacLayerData = {
@@ -2172,7 +2206,7 @@ export class StacBrowser {
       width: metadata.width,
       height: metadata.height,
       bands: metadata.bands,
-      bounds: metadata.bounds,
+      bounds: mapBounds,
       band_stats: metadata.band_stats,
       is_georeferenced: metadata.is_georeferenced,
       displayMode: metadata.bands >= 3 ? 'rgb' : 'grayscale',
@@ -2207,7 +2241,7 @@ export class StacBrowser {
       type: 'raster',
       tiles: [`${protocolName}://{z}/{x}/{y}`],
       tileSize: 256,
-      bounds: metadata.bounds,
+      bounds: mapBounds,
       minzoom: 0,
       maxzoom: 22,
     });
@@ -2229,11 +2263,11 @@ export class StacBrowser {
     this.layerManager.selectLayer(metadata.id);
 
     // Fit to bounds
-    if (metadata.bounds && metadata.is_georeferenced) {
+    if (mapBounds && metadata.is_georeferenced) {
       map.fitBounds(
         [
-          [metadata.bounds[0], metadata.bounds[1]],
-          [metadata.bounds[2], metadata.bounds[3]],
+          [mapBounds[0], mapBounds[1]],
+          [mapBounds[2], mapBounds[3]],
         ],
         { padding: 50 }
       );
