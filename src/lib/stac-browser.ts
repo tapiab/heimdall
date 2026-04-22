@@ -2093,9 +2093,7 @@ export class StacBrowser {
     if (map.getLayer(layerId)) map.removeLayer(layerId);
     if (map.getSource(sourceId)) map.removeSource(sourceId);
 
-    this.thumbnailOverlays = this.thumbnailOverlays.filter(
-      o => o.sourceId !== sourceId
-    );
+    this.thumbnailOverlays = this.thumbnailOverlays.filter(o => o.sourceId !== sourceId);
   }
 
   /** Remove all thumbnail overlays from the map. */
@@ -2154,9 +2152,10 @@ export class StacBrowser {
       const metadata = await invoke<RasterMetadata>('open_stac_asset', {
         assetHref,
         acceptInvalidCerts: this.acceptInvalidCerts,
-        stacBbox: item.bbox && item.bbox.length >= 4
-          ? [item.bbox[0], item.bbox[1], item.bbox[2], item.bbox[3]]
-          : null,
+        stacBbox:
+          item.bbox && item.bbox.length >= 4
+            ? [item.bbox[0], item.bbox[1], item.bbox[2], item.bbox[3]]
+            : null,
       });
 
       console.log('[STAC] Got metadata:', JSON.stringify(metadata, null, 2));
