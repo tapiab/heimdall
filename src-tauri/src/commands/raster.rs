@@ -7,7 +7,10 @@ use crate::gdal::tile_extractor::{
 use gdal::spatial_ref::{CoordTransform, SpatialRef};
 use gdal::Dataset;
 use serde::{Deserialize, Serialize};
+use std::sync::atomic::{AtomicBool, Ordering};
 use tauri::State;
+
+static FIRST_TILE_LOGGED: AtomicBool = AtomicBool::new(false);
 
 /// Open dataset with appropriate overview level for the given zoom
 fn open_dataset_for_zoom(path: &str, _z: u8) -> Result<Dataset, String> {
@@ -336,6 +339,14 @@ pub async fn get_tile_stretched(
     state: State<'_, DatasetCache>,
 ) -> Result<Vec<u8>, String> {
     let path = state.get_path(&id).ok_or("Dataset not found")?;
+
+    if !FIRST_TILE_LOGGED.swap(true, Ordering::Relaxed) {
+        println!(
+            "[TILE] First tile request: z={} x={} y={} path={}",
+            z, x, y, &path
+        );
+    }
+
     let dataset = open_dataset_for_zoom(&path, z)?;
 
     let request = TileRequest {
@@ -372,12 +383,14 @@ pub async fn get_rgb_tile(
     blue_gamma: f64,
     state: State<'_, DatasetCache>,
 ) -> Result<Vec<u8>, String> {
-    tracing::debug!(
-        "get_rgb_tile: id={}, z={}, bands=({},{},{}), r_stretch=({},{}), g_stretch=({},{}), b_stretch=({},{})",
-        id, z, red_band, green_band, blue_band,
-        red_min, red_max, green_min, green_max, blue_min, blue_max
-    );
     let path = state.get_path(&id).ok_or("Dataset not found")?;
+
+    if !FIRST_TILE_LOGGED.swap(true, Ordering::Relaxed) {
+        println!("[TILE] First RGB tile request: z={} x={} y={} bands=({},{},{}) stretch=({}-{},{}-{},{}-{}) path={}",
+            z, x, y, red_band, green_band, blue_band,
+            red_min, red_max, green_min, green_max, blue_min, blue_max, &path);
+    }
+
     let dataset = open_dataset_for_zoom(&path, z)?;
 
     let request = TileRequest {

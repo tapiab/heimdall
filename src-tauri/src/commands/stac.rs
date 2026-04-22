@@ -28,7 +28,7 @@ use gdal::{Dataset, Metadata};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use tauri::State;
-use tracing::{debug, error, info};
+use tracing::{debug, info};
 
 use super::raster::{BandStats, RasterMetadata};
 
@@ -779,6 +779,13 @@ pub async fn fetch_stac_thumbnail(
         .await
         .map_err(|e| format!("Failed to read thumbnail bytes: {}", e))?;
 
+    println!(
+        "[STAC] Thumbnail fetched: {} ({}, {} bytes)",
+        url,
+        content_type,
+        bytes.len()
+    );
+
     use base64::Engine;
     let data = base64::engine::general_purpose::STANDARD.encode(&bytes);
 
@@ -1066,6 +1073,7 @@ fn resolve_url(base: &str, href: &str) -> String {
 pub async fn open_stac_asset(
     asset_href: String,
     accept_invalid_certs: Option<bool>,
+    stac_bbox: Option<[f64; 4]>,
     state: State<'_, DatasetCache>,
 ) -> Result<RasterMetadata, String> {
     // Construct /vsicurl/ path - strip any existing /vsicurl/ prefix to avoid doubling
@@ -1129,6 +1137,7 @@ pub async fn open_stac_asset(
     };
 
     let vsicurl_path = format!("/vsicurl/{}", http_href);
+    let unsafe_ssl = accept_invalid_certs.unwrap_or(false);
 
     println!("[STAC] ========================================");
     println!("[STAC] open_stac_asset called");
@@ -1136,57 +1145,154 @@ pub async fn open_stac_asset(
     println!("[STAC] Cleaned href: '{}'", clean_href);
     println!("[STAC] HTTP href: '{}'", http_href);
     println!("[STAC] Final vsicurl path: '{}'", vsicurl_path);
+    println!(
+        "[STAC] accept_invalid_certs: {:?} (unsafe_ssl={})",
+        accept_invalid_certs, unsafe_ssl
+    );
     println!("[STAC] ========================================");
 
+    // Pre-flight: probe the URL with reqwest to check reachability and Range support
+    let probe_client =
+        build_client(unsafe_ssl).map_err(|e| format!("Failed to build probe client: {}", e))?;
+    let supports_range;
+    match probe_client.head(&http_href).send().await {
+        Ok(resp) => {
+            let accept_ranges = resp
+                .headers()
+                .get("accept-ranges")
+                .and_then(|v| v.to_str().ok())
+                .unwrap_or("none");
+            supports_range = accept_ranges.contains("bytes");
+            println!("[STAC] Pre-flight HEAD {} => {} (content-type: {:?}, content-length: {:?}, accept-ranges: {})",
+                http_href,
+                resp.status(),
+                resp.headers().get("content-type"),
+                resp.headers().get("content-length"),
+                accept_ranges,
+            );
+            if !resp.status().is_success() {
+                return Err(format!(
+                    "Remote server returned HTTP {} for '{}'. The file may not exist or may require authentication.",
+                    resp.status(), http_href
+                ));
+            }
+        }
+        Err(e) => {
+            println!("[STAC] Pre-flight HEAD failed: {:?}", e);
+            let msg = if e.is_connect() {
+                format!("[TLS_ERROR] Cannot reach '{}': {}", http_href, e)
+            } else {
+                format!("Cannot reach '{}': {}", http_href, e)
+            };
+            return Err(msg);
+        }
+    }
+
     // Explicitly set GDAL SSL verification based on the flag.
-    // Must always set to avoid leaking a previous "YES" to unrelated requests.
-    let ssl_value = if accept_invalid_certs.unwrap_or(false) {
-        "YES"
-    } else {
-        "NO"
-    };
+    let ssl_value = if unsafe_ssl { "YES" } else { "NO" };
     gdal::config::set_config_option("GDAL_HTTP_UNSAFESSL", ssl_value)
         .map_err(|e| format!("Failed to set GDAL SSL config: {}", e))?;
-
-    // Open GDAL dataset directly (GDAL config is already set globally at startup)
-    println!("[GDAL] Attempting to open: {}", &vsicurl_path);
 
     use gdal::DatasetOptions;
     use gdal::GdalOpenFlags;
 
-    let options = DatasetOptions {
+    let make_options = || DatasetOptions {
         open_flags: GdalOpenFlags::GDAL_OF_READONLY
             | GdalOpenFlags::GDAL_OF_RASTER
             | GdalOpenFlags::GDAL_OF_VERBOSE_ERROR,
         ..Default::default()
     };
 
-    let dataset = Dataset::open_ex(&vsicurl_path, options).map_err(|e| {
-        println!("[GDAL] Error opening dataset: {:?}", e);
-        error!(error = %e, "GDAL error opening STAC asset");
-        format!("Cannot open remote COG '{}': {}", http_href, e)
-    })?;
+    // Try streaming via /vsicurl/ first (efficient for COGs on servers with Range support)
+    let (dataset_path, dataset) = if supports_range {
+        println!("[GDAL] Server supports Range requests, using /vsicurl/");
+        println!("[GDAL] Attempting to open: {}", &vsicurl_path);
+        match Dataset::open_ex(&vsicurl_path, make_options()) {
+            Ok(ds) => (vsicurl_path.clone(), ds),
+            Err(e) => {
+                println!(
+                    "[GDAL] /vsicurl/ failed ({}), falling back to full download",
+                    e
+                );
+                let path = download_remote_asset(&probe_client, &http_href).await?;
+                let ds = Dataset::open_ex(&path, make_options())
+                    .map_err(|e2| format!("Cannot open downloaded file '{}': {}", path, e2))?;
+                (path, ds)
+            }
+        }
+    } else {
+        // Server does not support Range requests — download the full file
+        println!("[GDAL] Server does not support Range requests, downloading full file");
+        let path = download_remote_asset(&probe_client, &http_href).await?;
+        let ds = Dataset::open_ex(&path, make_options())
+            .map_err(|e| format!("Cannot open downloaded file '{}': {}", path, e))?;
+        (path, ds)
+    };
 
     println!("[GDAL] Successfully opened dataset!");
 
     let (width, height) = dataset.raster_size();
     let bands = dataset.raster_count();
 
-    // Get georeferencing info
-    let (bounds, native_bounds, pixel_size, is_georeferenced) = get_georef_info(&dataset)?;
-
-    let projection = dataset.projection();
+    let (mut bounds, mut native_bounds, mut pixel_size, mut is_georeferenced) =
+        get_georef_info(&dataset)?;
+    let mut projection = dataset.projection();
     let nodata = dataset.rasterband(1).ok().and_then(|b| b.no_data_value());
-
-    // For remote COGs, use default stats for instant loading
-    // Actual stats can be computed on-demand when needed for visualization
     let band_stats = get_default_band_stats(&dataset);
+
+    // If the file has no internal georeferencing but we have a STAC bbox,
+    // create a VRT with proper geotransform so the tile renderer can reproject.
+    let mut final_path = dataset_path.clone();
+    if !is_georeferenced {
+        if let Some(bbox) = stac_bbox {
+            let [minx, miny, maxx, maxy] = bbox;
+            let vrt_path = create_georeferenced_vrt(
+                &dataset_path,
+                width,
+                height,
+                bands,
+                minx,
+                miny,
+                maxx,
+                maxy,
+            )?;
+            println!("[STAC] Created georeferenced VRT: {}", vrt_path);
+
+            // Re-read georef info from the VRT
+            let vrt_ds =
+                Dataset::open(&vrt_path).map_err(|e| format!("Failed to open VRT: {}", e))?;
+            let georef = get_georef_info(&vrt_ds)?;
+            bounds = georef.0;
+            native_bounds = georef.1;
+            pixel_size = georef.2;
+            is_georeferenced = georef.3;
+            projection = vrt_ds.projection();
+            final_path = vrt_path;
+        }
+    }
+
+    println!(
+        "[STAC] Metadata: {}x{}, {} bands, georef={}, proj={}",
+        width,
+        height,
+        bands,
+        is_georeferenced,
+        &projection[..projection.len().min(60)]
+    );
+    println!("[STAC] Bounds: {:?}", bounds);
+    println!(
+        "[STAC] Band stats: {:?}",
+        band_stats
+            .iter()
+            .map(|s| (s.min, s.max))
+            .collect::<Vec<_>>()
+    );
 
     let id = uuid::Uuid::new_v4().to_string();
 
     let metadata = RasterMetadata {
         id: id.clone(),
-        path: vsicurl_path.clone(),
+        path: final_path.clone(),
         width,
         height,
         bands,
@@ -1199,8 +1305,7 @@ pub async fn open_stac_asset(
         is_georeferenced,
     };
 
-    // Store the vsicurl path in cache
-    state.add(id, vsicurl_path);
+    state.add(id, final_path);
 
     Ok(metadata)
 }
@@ -1208,6 +1313,121 @@ pub async fn open_stac_asset(
 // ============================================================================
 // Helper Functions
 // ============================================================================
+
+/// Create a VRT file that adds EPSG:4326 georeferencing to a non-georeferenced raster
+/// using a STAC item's bounding box.
+#[allow(clippy::too_many_arguments)]
+fn create_georeferenced_vrt(
+    source_path: &str,
+    width: usize,
+    height: usize,
+    bands: usize,
+    minx: f64,
+    miny: f64,
+    maxx: f64,
+    maxy: f64,
+) -> Result<String, String> {
+    use std::io::Write;
+
+    let pixel_width = (maxx - minx) / width as f64;
+    let pixel_height = (maxy - miny) / height as f64;
+
+    // GeoTransform: [origin_x, pixel_width, 0, origin_y, 0, -pixel_height]
+    let geo_transform = format!(
+        "  <GeoTransform>{}, {}, 0, {}, 0, -{}</GeoTransform>",
+        minx, pixel_width, maxy, pixel_height
+    );
+
+    let mut band_xml = String::new();
+    for i in 1..=bands {
+        band_xml.push_str(&format!(
+            r#"  <VRTRasterBand dataType="Byte" band="{}">
+    <SimpleSource>
+      <SourceFilename relativeToVRT="0">{}</SourceFilename>
+      <SourceBand>{}</SourceBand>
+      <SrcRect xOff="0" yOff="0" xSize="{}" ySize="{}" />
+      <DstRect xOff="0" yOff="0" xSize="{}" ySize="{}" />
+    </SimpleSource>
+  </VRTRasterBand>
+"#,
+            i, source_path, i, width, height, width, height
+        ));
+    }
+
+    let vrt_content = format!(
+        r#"<VRTDataset rasterXSize="{}" rasterYSize="{}">
+  <SRS>EPSG:4326</SRS>
+{}
+{}
+</VRTDataset>"#,
+        width,
+        height,
+        geo_transform,
+        band_xml.trim_end()
+    );
+
+    let temp_dir = std::env::temp_dir().join("heimdall-stac");
+    std::fs::create_dir_all(&temp_dir)
+        .map_err(|e| format!("Failed to create temp directory: {}", e))?;
+
+    let vrt_path = temp_dir.join(format!("{}.vrt", uuid::Uuid::new_v4()));
+    let mut file = std::fs::File::create(&vrt_path)
+        .map_err(|e| format!("Failed to create VRT file: {}", e))?;
+    file.write_all(vrt_content.as_bytes())
+        .map_err(|e| format!("Failed to write VRT file: {}", e))?;
+
+    Ok(vrt_path.to_string_lossy().to_string())
+}
+
+/// Download a remote asset to a temp file when the server doesn't support Range requests.
+/// Returns the path to the downloaded file.
+async fn download_remote_asset(client: &reqwest::Client, url: &str) -> Result<String, String> {
+    use std::io::Write;
+
+    println!("[STAC] Downloading full file: {}", url);
+
+    let response = client
+        .get(url)
+        .send()
+        .await
+        .map_err(|e| format!("Failed to download '{}': {}", url, e))?;
+
+    if !response.status().is_success() {
+        return Err(format!(
+            "Download failed with HTTP {} for '{}'",
+            response.status(),
+            url
+        ));
+    }
+
+    // Extract filename from URL for the temp file extension
+    let extension = url
+        .rsplit('/')
+        .next()
+        .and_then(|name| name.rsplit('.').next())
+        .unwrap_or("tif");
+
+    let temp_dir = std::env::temp_dir().join("heimdall-stac");
+    std::fs::create_dir_all(&temp_dir)
+        .map_err(|e| format!("Failed to create temp directory: {}", e))?;
+
+    let temp_path = temp_dir.join(format!("{}.{}", uuid::Uuid::new_v4(), extension));
+
+    let bytes = response
+        .bytes()
+        .await
+        .map_err(|e| format!("Failed to read response body: {}", e))?;
+
+    let mut file = std::fs::File::create(&temp_path)
+        .map_err(|e| format!("Failed to create temp file: {}", e))?;
+    file.write_all(&bytes)
+        .map_err(|e| format!("Failed to write temp file: {}", e))?;
+
+    let path_str = temp_path.to_string_lossy().to_string();
+    println!("[STAC] Downloaded {} bytes to {}", bytes.len(), path_str);
+
+    Ok(path_str)
+}
 
 /// Sign a Planetary Computer URL using their token API
 /// Planetary Computer assets require SAS tokens for access

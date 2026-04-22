@@ -3449,6 +3449,30 @@ button:disabled {
   margin-top: 2px;
 }
 
+.stac-asset-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  flex-shrink: 0;
+}
+
+.stac-asset-copy-btn {
+  padding: var(--space-1);
+  background: transparent;
+  border: 1px solid var(--border-primary);
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  font-size: 14px;
+  cursor: pointer;
+  line-height: 1;
+  transition: all var(--transition-fast);
+}
+
+.stac-asset-copy-btn:hover {
+  background: var(--surface-hover);
+  color: var(--text-primary);
+}
+
 .stac-asset-load-btn {
   padding: var(--space-1) var(--space-3);
   background: var(--accent-primary);
