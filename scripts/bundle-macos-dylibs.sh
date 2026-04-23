@@ -101,6 +101,30 @@ while $CHANGED; do
     done
 done
 
+# Phase 1c: Bundle GDAL and PROJ data files
+echo "=== Bundling GDAL/PROJ data ==="
+RESOURCES_DIR="$APP_PATH/Contents/Resources"
+mkdir -p "$RESOURCES_DIR"
+
+GDAL_DATA_SRC="$BREW_PREFIX/opt/gdal/share/gdal"
+PROJ_DATA_SRC="$BREW_PREFIX/opt/proj/share/proj"
+
+if [ -d "$GDAL_DATA_SRC" ]; then
+    cp -R "$GDAL_DATA_SRC" "$RESOURCES_DIR/gdal"
+    echo "  GDAL data: $(du -sh "$RESOURCES_DIR/gdal" | awk '{print $1}')"
+else
+    echo "  Warning: GDAL data not found at $GDAL_DATA_SRC"
+fi
+
+if [ -d "$PROJ_DATA_SRC" ]; then
+    mkdir -p "$RESOURCES_DIR/proj"
+    # Only bundle proj.db (essential ~10MB) — skip the 700MB+ grid shift files
+    cp "$PROJ_DATA_SRC/proj.db" "$RESOURCES_DIR/proj/"
+    echo "  PROJ data: $(du -sh "$RESOURCES_DIR/proj" | awk '{print $1}')"
+else
+    echo "  Warning: PROJ data not found at $PROJ_DATA_SRC"
+fi
+
 # Phase 2: Fix dylib install names and references
 echo "=== Fixing dylib paths ==="
 
@@ -138,17 +162,45 @@ DYLIB_COUNT=$(ls -1 "$FRAMEWORKS_DIR"/*.dylib 2>/dev/null | wc -l | tr -d ' ')
 echo "=== Bundled $DYLIB_COUNT dylibs ==="
 ls -lh "$FRAMEWORKS_DIR"/*.dylib 2>/dev/null || true
 
-# Phase 4: Recreate DMG
-echo "=== Recreating DMG ==="
+# Phase 4: Update DMG in-place (preserves Tauri's drag-to-install layout)
+echo "=== Updating DMG ==="
 APP_NAME=$(basename "$APP_PATH" .app)
 
-# Detach any mounted volumes from the old DMG (Tauri or macOS may have mounted it)
+# Detach any mounted volumes from the old DMG
 for vol in /Volumes/"$APP_NAME"*; do
     [ -d "$vol" ] && hdiutil detach "$vol" -force 2>/dev/null || true
 done
 
+# Convert Tauri's compressed DMG to read-write, resize to fit new content, then mount
+RW_DMG="${DMG_PATH%.dmg}-rw.dmg"
+hdiutil convert "$DMG_PATH" -format UDRW -o "$RW_DMG"
+
+# Calculate required size: modified .app + 20MB headroom for filesystem overhead
+APP_SIZE_KB=$(du -sk "$APP_PATH" | awk '{print $1}')
+REQUIRED_MB=$(( (APP_SIZE_KB / 1024) + 20 ))
+echo "  App size: ${APP_SIZE_KB}KB, resizing DMG to ${REQUIRED_MB}MB"
+hdiutil resize -size "${REQUIRED_MB}m" "$RW_DMG"
+
+MOUNT_DIR=$(hdiutil attach "$RW_DMG" -nobrowse | grep '/Volumes/' | awk '{print substr($0, index($0,"/Volumes/"))}')
+echo "  Mounted at: $MOUNT_DIR"
+
+# Replace the .app inside the mounted DMG
+DMG_APP="$MOUNT_DIR/$APP_NAME.app"
+if [ -d "$DMG_APP" ]; then
+    rm -rf "$DMG_APP"
+    cp -R "$APP_PATH" "$DMG_APP"
+    echo "  Replaced $APP_NAME.app in DMG"
+else
+    echo "  Warning: $APP_NAME.app not found in DMG, copying fresh"
+    cp -R "$APP_PATH" "$DMG_APP"
+fi
+
+hdiutil detach "$MOUNT_DIR"
+
+# Convert back to compressed read-only
 rm -f "$DMG_PATH"
-hdiutil create -volname "$APP_NAME" -srcfolder "$APP_PATH" -ov -format UDZO "$DMG_PATH"
+hdiutil convert "$RW_DMG" -format UDZO -o "$DMG_PATH"
+rm -f "$RW_DMG"
 echo "  DMG: $DMG_PATH ($(du -h "$DMG_PATH" | awk '{print $1}'))"
 
 echo "Done!"

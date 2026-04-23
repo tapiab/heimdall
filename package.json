@@ -1,6 +1,6 @@
 {
   "name": "heimdall",
-  "version": "0.5.2",
+  "version": "0.5.4",
   "type": "module",
   "description": "Lightweight geospatial raster and vector viewer",
   "scripts": {
