@@ -26,12 +26,33 @@ fn init_gdal_for_remote_access() {
     // Set environment variables BEFORE any GDAL calls
     // This ensures they're picked up during GDAL initialization
 
-    // Ensure GDAL's curl can find CA certificates in bundled .app context.
-    // When launched from Finder, the process gets a minimal environment with
-    // no Homebrew paths. reqwest (rustls-tls) bundles its own CAs, but GDAL
-    // uses system curl which needs an explicit cert path on macOS.
+    // For bundled .app on macOS, set GDAL_DATA, PROJ_LIB, and CURL_CA_BUNDLE
+    // to the bundled Resources directory. When launched from Finder, the process
+    // gets a minimal environment with no Homebrew paths.
     #[cfg(target_os = "macos")]
     {
+        // Detect bundled app: the binary is at .app/Contents/MacOS/heimdall
+        // Resources are at .app/Contents/Resources/
+        if let Ok(exe) = std::env::current_exe() {
+            if let Some(macos_dir) = exe.parent() {
+                let resources = macos_dir
+                    .parent()
+                    .map(|contents| contents.join("Resources"));
+                if let Some(res) = resources {
+                    let gdal_data = res.join("gdal");
+                    if gdal_data.exists() && std::env::var("GDAL_DATA").is_err() {
+                        std::env::set_var("GDAL_DATA", &gdal_data);
+                        println!("[GDAL] Set GDAL_DATA={}", gdal_data.display());
+                    }
+                    let proj_data = res.join("proj");
+                    if proj_data.exists() && std::env::var("PROJ_LIB").is_err() {
+                        std::env::set_var("PROJ_LIB", &proj_data);
+                        println!("[GDAL] Set PROJ_LIB={}", proj_data.display());
+                    }
+                }
+            }
+        }
+
         if std::env::var("CURL_CA_BUNDLE").is_err() {
             let candidates = [
                 "/etc/ssl/cert.pem",
