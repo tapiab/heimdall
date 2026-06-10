@@ -23,6 +23,7 @@
             <svg class="icon" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
               <path d="M4 6h16M4 12h16M4 18h16" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
             </svg>
+            <span class="btn-label">Menu</span>
           </button>
           <div id="file-menu-dropdown" class="menu-dropdown">
             <div class="menu-item" data-action="open-file">
@@ -59,14 +60,17 @@
         <!-- Navigation Tools -->
         <button id="fit-bounds" title="Fit to layer extent (F)" disabled>
           <svg class="icon" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-            <path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+            <path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
           </svg>
+          <span class="btn-label">Fit</span>
         </button>
         <button id="zoom-rect-btn" title="Zoom to rectangle (Z)">
           <svg class="icon" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-            <rect x="3" y="3" width="18" height="18" rx="2" stroke="currentColor" stroke-width="1.5" fill="none"/>
-            <path d="M9 9h6v6H9z" stroke="currentColor" stroke-width="1.5" fill="none"/>
+            <circle cx="10" cy="10" r="6" stroke="currentColor" stroke-width="1.5" fill="none"/>
+            <path d="M10 7v6M7 10h6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+            <path d="M15 15l5 5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
           </svg>
+          <span class="btn-label">Zoom</span>
         </button>
 
         <div class="toolbar-divider"></div>
@@ -74,20 +78,29 @@
         <!-- Analysis Tools -->
         <button id="measure-btn" title="Measure distance (M)">
           <svg class="icon" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-            <path d="M2 12h4m12 0h4M6 12v-2m0 4v-2m4-4v8m4-8v8m4-6v-2m0 4v-2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
-            <path d="M6 4v4m12-4v4M6 16v4m12-4v4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+            <path d="M3 9l6-6 12 12-6 6z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" fill="none"/>
+            <path d="M7 7l2 2M10 4l3 3M13 7l2 2M16 10l3 3M13 13l2 2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
           </svg>
+          <span class="btn-label">Measure</span>
         </button>
         <button id="profile-btn" title="Value profile along line (P)">
           <svg class="icon" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-            <path d="M3 20h18" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
-            <path d="M3 17l4-5 4 3 5-8 5 6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+            <path d="M3 21V3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+            <path d="M3 21h18" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+            <path d="M5 16l4-5 3 3 4-8 5 6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+            <circle cx="9" cy="11" r="1.2" fill="currentColor"/>
+            <circle cx="12" cy="14" r="1.2" fill="currentColor"/>
+            <circle cx="16" cy="6" r="1.2" fill="currentColor"/>
           </svg>
+          <span class="btn-label">Profile</span>
         </button>
         <button id="elevation-btn" title="Elevation profile - enables 3D terrain (E)">
           <svg class="icon" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-            <path d="M3 20l5-10 4 5 5-12 4 8v9H3z" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+            <circle cx="18" cy="6" r="2" stroke="currentColor" stroke-width="1.5" fill="none"/>
+            <path d="M2 20l5-9 3 5 4-8 4 7 4 5z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" fill="none"/>
+            <path d="M7 11l1 2M14 8l1 2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
           </svg>
+          <span class="btn-label">Terrain</span>
         </button>
 
         <div class="toolbar-divider"></div>
@@ -95,18 +108,19 @@
         <!-- Data Tools -->
         <button id="stac-btn" title="Browse STAC Catalog (C)">
           <svg class="icon" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-            <circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.5" fill="none"/>
-            <path d="M12 3v18M3 12h18M5.6 5.6l12.8 12.8M18.4 5.6L5.6 18.4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+            <path d="M4 6.5L12 3l8 3.5-8 3.5z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" fill="none"/>
+            <path d="M4 12l8 3.5L20 12" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" fill="none"/>
+            <path d="M4 17.5L12 21l8-3.5" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" fill="none"/>
           </svg>
+          <span class="btn-label">STAC</span>
         </button>
         <div id="annotate-container" class="menu-container">
           <button id="annotate-btn" title="Add annotations (A)">
             <svg class="icon" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-              <path d="M12 19l7-7 3 3-7 7-3-3z" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
-              <path d="M18 13l-1.5-7.5L2 2l3.5 14.5L13 18l5-5z" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
-              <path d="M2 2l7.586 7.586" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
-              <circle cx="11" cy="11" r="2" stroke="currentColor" stroke-width="1.5" fill="none"/>
+              <path d="M14 4l6 6-10 10H4v-6z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" fill="none"/>
+              <path d="M13 5l6 6" stroke="currentColor" stroke-width="1.5"/>
             </svg>
+            <span class="btn-label">Annotate</span>
           </button>
           <div id="annotation-dropdown" class="menu-dropdown annotation-dropdown">
             <div class="menu-item" data-mode="marker">
@@ -138,33 +152,39 @@
         <!-- Georeferencing & View -->
         <button id="georef-btn" title="Georeference image (G)">
           <svg class="icon" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-            <circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.5" fill="none"/>
-            <path d="M12 2v4m0 12v4M2 12h4m12 0h4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
-            <circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="1.5" fill="none"/>
+            <path d="M4 4h6M4 4v6M20 4h-6M20 4v6M4 20h6M4 20v-6M20 20h-6M20 20v-6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+            <path d="M12 22s-5-5-5-10a5 5 0 1110 0c0 5-5 10-5 10z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" fill="none"/>
+            <circle cx="12" cy="11" r="1.8" fill="currentColor"/>
           </svg>
+          <span class="btn-label">Georef</span>
         </button>
         <button id="split-view-btn" title="Toggle split view (V)">
           <svg class="icon" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-            <rect x="3" y="3" width="18" height="18" rx="2" stroke="currentColor" stroke-width="1.5" fill="none"/>
-            <path d="M12 3v18" stroke="currentColor" stroke-width="1.5"/>
+            <rect x="3" y="4" width="18" height="16" rx="2" stroke="currentColor" stroke-width="1.5" fill="none"/>
+            <path d="M12 4v16" stroke="currentColor" stroke-width="1.5"/>
+            <path d="M6 12h3M15 12h3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
           </svg>
+          <span class="btn-label">Split</span>
         </button>
 
         <div class="toolbar-divider"></div>
 
         <!-- View Controls -->
-        <button id="reset-rotation" title="Reset rotation (R)">
+        <button id="reset-rotation" title="Reset rotation - point north (R)">
           <svg class="icon" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-            <path d="M12 2l4 4-4 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
-            <path d="M16 6H9a7 7 0 1 0 0 14h7" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" fill="none"/>
+            <circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.5" fill="none"/>
+            <path d="M12 4l3 9-3-2-3 2z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" fill="currentColor"/>
+            <text x="12" y="21" text-anchor="middle" font-size="6" font-weight="700" fill="currentColor" stroke="none">N</text>
           </svg>
+          <span class="btn-label">North</span>
         </button>
         <button id="reset-view" title="Reset view (pitch & rotation)">
           <svg class="icon" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-            <circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.5" fill="none"/>
-            <path d="M12 8v4l2.5 2.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-            <path d="M12 3v2M12 19v2M3 12h2M19 12h2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+            <path d="M3 11l9-8 9 8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+            <path d="M5 10v10h14V10" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" fill="none"/>
+            <path d="M10 20v-6h4v6" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" fill="none"/>
           </svg>
+          <span class="btn-label">Reset</span>
         </button>
 
         <div class="toolbar-divider"></div>

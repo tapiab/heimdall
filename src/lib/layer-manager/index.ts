@@ -57,9 +57,12 @@ import {
   addVectorLayer,
   setVectorStyle,
   setColorByField,
+  setVectorFeatureFilter,
+  computeFilterableFields,
   showFeaturePopup,
   showAttributeTable,
   getFeatureBounds,
+  type FilterableField,
 } from './vector-handler';
 import {
   createRgbCompositionLayer,
@@ -539,6 +542,30 @@ export class LayerManager {
    */
   setColorByField(id: string, fieldName: string | null): void {
     setColorByField(this, id, fieldName);
+  }
+
+  /**
+   * Set the allowed values for a field filter on a vector layer.
+   * @param id - Layer ID
+   * @param fieldName - Field name
+   * @param allowedValues - Array of allowed values, or null to clear filter
+   */
+  setVectorFeatureFilter(
+    id: string,
+    fieldName: string,
+    allowedValues: Array<string | number> | null
+  ): void {
+    setVectorFeatureFilter(this, id, fieldName, allowedValues);
+  }
+
+  /**
+   * Get the filterable (categorical) fields for a vector layer.
+   * @param id - Layer ID
+   */
+  getFilterableFields(id: string): FilterableField[] {
+    const layer = this.layers.get(id);
+    if (!layer || layer.type !== 'vector') return [];
+    return computeFilterableFields(layer as VectorLayer);
   }
 
   /**
