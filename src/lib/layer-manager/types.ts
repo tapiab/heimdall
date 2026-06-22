@@ -20,6 +20,8 @@ export interface VectorStyle {
   strokeWidth: number;
   pointRadius: number;
   colorByField?: string | null;
+  /** Per-field allowed-value filters. Absent field = show all. */
+  featureFilters?: { [fieldName: string]: Array<string | number> };
 }
 
 /** Default vector style */

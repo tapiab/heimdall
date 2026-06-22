@@ -23,10 +23,10 @@ export default [
       'no-unreachable-loop': 'error',
 
       // Best practices
-      'curly': ['error', 'multi-line'],
+      curly: ['error', 'multi-line'],
       'default-case-last': 'error',
       'dot-notation': 'error',
-      'eqeqeq': ['error', 'always', { null: 'ignore' }],
+      eqeqeq: ['error', 'always', { null: 'ignore' }],
       'no-caller': 'error',
       'no-eval': 'error',
       'no-extend-native': 'error',
@@ -53,16 +53,19 @@ export default [
       'no-useless-concat': 'error',
       'no-useless-return': 'error',
       'prefer-promise-reject-errors': 'error',
-      'radix': 'error',
-      'yoda': 'error',
+      radix: 'error',
+      yoda: 'error',
 
       // Variables
       'no-shadow': 'warn',
-      'no-unused-vars': ['error', {
-        argsIgnorePattern: '^_',
-        varsIgnorePattern: '^_',
-        caughtErrorsIgnorePattern: '^_'
-      }],
+      'no-unused-vars': [
+        'error',
+        {
+          argsIgnorePattern: '^_',
+          varsIgnorePattern: '^_',
+          caughtErrorsIgnorePattern: '^_',
+        },
+      ],
       'no-use-before-define': ['error', { functions: false, classes: true }],
 
       // ES6+
@@ -106,11 +109,14 @@ export default [
     rules: {
       // TypeScript handles these better
       'no-unused-vars': 'off',
-      '@typescript-eslint/no-unused-vars': ['error', {
-        argsIgnorePattern: '^_',
-        varsIgnorePattern: '^_',
-        caughtErrorsIgnorePattern: '^_',
-      }],
+      '@typescript-eslint/no-unused-vars': [
+        'error',
+        {
+          argsIgnorePattern: '^_',
+          varsIgnorePattern: '^_',
+          caughtErrorsIgnorePattern: '^_',
+        },
+      ],
       'no-use-before-define': 'off',
       '@typescript-eslint/no-use-before-define': ['error', { functions: false, classes: true }],
       // TypeScript-specific rules
@@ -141,10 +147,6 @@ export default [
     },
   },
   {
-    ignores: [
-      'dist/**',
-      'node_modules/**',
-      'src-tauri/**',
-    ],
+    ignores: ['dist/**', 'node_modules/**', 'src-tauri/**'],
   },
 ];

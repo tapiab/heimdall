@@ -1,6 +1,7 @@
 #![allow(clippy::too_many_arguments)]
 
 use gdal::raster::reproject;
+use gdal::raster::ColorInterpretation;
 use gdal::spatial_ref::SpatialRef;
 use gdal::{Dataset, DriverManager};
 use image::ImageBuffer;
@@ -65,30 +66,52 @@ fn tile_to_geo_bounds(x: i32, y: i32, z: u8) -> [f64; 4] {
     [lon_min, lat_min, lon_max, lat_max]
 }
 
-/// Get dataset bounds in EPSG:4326
+/// Get dataset bounds in EPSG:4326.
+///
+/// Uses the full affine geotransform (including shear terms gt[2]/gt[4]) so
+/// that rotated rasters yield a bbox covering all four actual corners. Without
+/// this, tiles overlapping a rotated raster's corner triangles get rejected by
+/// the bounds_intersect early-out and never rendered.
 fn get_dataset_geo_bounds(dataset: &Dataset) -> Result<[f64; 4], String> {
     let gt = dataset
         .geo_transform()
         .map_err(|e| format!("Failed to get geotransform: {}", e))?;
 
     let (width, height) = dataset.raster_size();
+    let (w, h) = (width as f64, height as f64);
     let projection = dataset.projection();
 
-    // Calculate native bounds
-    let native_min_x = gt[0];
-    let native_max_x = gt[0] + (width as f64) * gt[1];
-    let native_max_y = gt[3];
-    let native_min_y = gt[3] + (height as f64) * gt[5];
+    // World coordinates of the four actual pixel corners.
+    let native_xs = [
+        gt[0],
+        gt[0] + w * gt[1],
+        gt[0] + h * gt[2],
+        gt[0] + w * gt[1] + h * gt[2],
+    ];
+    let native_ys = [
+        gt[3],
+        gt[3] + w * gt[4],
+        gt[3] + h * gt[5],
+        gt[3] + w * gt[4] + h * gt[5],
+    ];
+
+    let bbox_from = |xs: &[f64], ys: &[f64]| -> [f64; 4] {
+        let min_x = xs.iter().cloned().fold(f64::INFINITY, f64::min);
+        let max_x = xs.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+        let min_y = ys.iter().cloned().fold(f64::INFINITY, f64::min);
+        let max_y = ys.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+        [min_x, min_y, max_x, max_y]
+    };
 
     if projection.is_empty() {
-        return Ok([native_min_x, native_min_y, native_max_x, native_max_y]);
+        return Ok(bbox_from(&native_xs, &native_ys));
     }
 
     let source_srs = SpatialRef::from_wkt(&projection)
         .map_err(|e| format!("Failed to parse source SRS: {}", e))?;
 
     if source_srs.is_geographic() {
-        return Ok([native_min_x, native_min_y, native_max_x, native_max_y]);
+        return Ok(bbox_from(&native_xs, &native_ys));
     }
 
     // Transform to EPSG:4326
@@ -100,24 +123,88 @@ fn get_dataset_geo_bounds(dataset: &Dataset) -> Result<[f64; 4], String> {
     let transform = gdal::spatial_ref::CoordTransform::new(&source_srs, &target_srs)
         .map_err(|e| format!("Failed to create transform: {}", e))?;
 
-    let mut xs = vec![native_min_x, native_max_x, native_min_x, native_max_x];
-    let mut ys = vec![native_min_y, native_min_y, native_max_y, native_max_y];
+    let mut xs = native_xs.to_vec();
+    let mut ys = native_ys.to_vec();
 
     transform
         .transform_coords(&mut xs, &mut ys, &mut [])
         .map_err(|e| format!("Failed to transform: {}", e))?;
 
-    let min_lon = xs.iter().cloned().fold(f64::INFINITY, f64::min);
-    let max_lon = xs.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
-    let min_lat = ys.iter().cloned().fold(f64::INFINITY, f64::min);
-    let max_lat = ys.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
-
-    Ok([min_lon, min_lat, max_lon, max_lat])
+    Ok(bbox_from(&xs, &ys))
 }
 
 /// Check if two bounding boxes intersect
 fn bounds_intersect(a: [f64; 4], b: [f64; 4]) -> bool {
     !(a[2] < b[0] || a[0] > b[2] || a[3] < b[1] || a[1] > b[3])
+}
+
+/// Per-output-pixel boolean mask: true where the tile pixel falls inside the
+/// source raster's footprint, false where it would be outside (i.e. padded by
+/// the warp). Used to keep outside-extent padding transparent for RGB
+/// composites where band-level nodata=0 is ambiguous with valid imagery zeros.
+fn compute_tile_coverage_mask(
+    dataset: &Dataset,
+    request: &TileRequest,
+) -> Result<Vec<bool>, String> {
+    let tile_bounds = tile_to_web_mercator_bounds(request.x, request.y, request.z);
+    let tile_size = request.tile_size;
+    let (img_w, img_h) = dataset.raster_size();
+    let (img_w, img_h) = (img_w as f64, img_h as f64);
+
+    let gt = dataset
+        .geo_transform()
+        .map_err(|e| format!("Failed to get geotransform: {}", e))?;
+    let det = gt[1] * gt[5] - gt[2] * gt[4];
+    if det.abs() < 1e-30 {
+        return Ok(vec![true; tile_size * tile_size]);
+    }
+
+    let pixel_size_x = (tile_bounds[2] - tile_bounds[0]) / tile_size as f64;
+    let pixel_size_y = (tile_bounds[1] - tile_bounds[3]) / tile_size as f64;
+
+    // Build WM -> source-CRS transform. If source has no projection, the WM
+    // bounds already match dataset bounds; treat as identity.
+    let proj = dataset.projection();
+    let mut xs = Vec::with_capacity(tile_size * tile_size);
+    let mut ys = Vec::with_capacity(tile_size * tile_size);
+    for j in 0..tile_size {
+        let cy = tile_bounds[3] + (j as f64 + 0.5) * pixel_size_y;
+        for i in 0..tile_size {
+            let cx = tile_bounds[0] + (i as f64 + 0.5) * pixel_size_x;
+            xs.push(cx);
+            ys.push(cy);
+        }
+    }
+
+    if !proj.is_empty() {
+        let src_srs = SpatialRef::from_wkt(&proj)
+            .map_err(|e| format!("Failed to parse source SRS: {}", e))?;
+        let web_mercator = SpatialRef::from_epsg(3857)
+            .map_err(|e| format!("Failed to create EPSG:3857: {}", e))?;
+        let transform = gdal::spatial_ref::CoordTransform::new(&web_mercator, &src_srs)
+            .map_err(|e| format!("Failed to create transform: {}", e))?;
+        let mut zs: Vec<f64> = vec![0.0; xs.len()];
+        transform
+            .transform_coords(&mut xs, &mut ys, &mut zs)
+            .map_err(|e| format!("Failed to transform: {}", e))?;
+    }
+
+    let mut mask = vec![false; tile_size * tile_size];
+    for k in 0..mask.len() {
+        let x = xs[k];
+        let y = ys[k];
+        if !x.is_finite() || !y.is_finite() {
+            continue;
+        }
+        let dx = x - gt[0];
+        let dy = y - gt[3];
+        let i = (dx * gt[5] - dy * gt[2]) / det;
+        let j = (dy * gt[1] - dx * gt[4]) / det;
+        if i >= 0.0 && i < img_w && j >= 0.0 && j < img_h {
+            mask[k] = true;
+        }
+    }
+    Ok(mask)
 }
 
 /// Extract raw tile data (f64 values) for a single band
@@ -173,13 +260,94 @@ fn extract_raw_tile(dataset: &Dataset, request: &TileRequest) -> Result<Vec<f64>
 }
 
 /// Apply stretch and gamma to a value
+/// Resolve effective nodata values for an RGB composite.
+///
+/// Many 8-bit RGB orthos declare nodata=0 on every band as a marker for the
+/// outside-extent padding, but water/dark imagery pixels are *also* exactly 0
+/// (and individual channels are very often 0 on darker pixels). Honoring those
+/// nodata values produces speckle/holes on water. Heuristic: if all three
+/// bands report ColorInterp Red/Green/Blue and every declared nodata equals 0,
+/// treat the file as truly opaque RGB and drop the nodata mask.
+struct RgbNodata {
+    r: Option<f64>,
+    g: Option<f64>,
+    b: Option<f64>,
+    /// When true, mask nothing — neither per-band nor the all-bands gate.
+    /// Set by the heuristic that detects ambiguous nodata=0 on RGB orthos.
+    suppress_mask: bool,
+}
+
+fn resolve_rgb_nodata(
+    dataset: &Dataset,
+    red_band: i32,
+    green_band: i32,
+    blue_band: i32,
+) -> RgbNodata {
+    let r = dataset.rasterband(red_band as usize).ok();
+    let g = dataset.rasterband(green_band as usize).ok();
+    let b = dataset.rasterband(blue_band as usize).ok();
+
+    let r_nd = r.as_ref().and_then(|band| band.no_data_value());
+    let g_nd = g.as_ref().and_then(|band| band.no_data_value());
+    let b_nd = b.as_ref().and_then(|band| band.no_data_value());
+
+    let interps_match = matches!(
+        r.as_ref().map(|band| band.color_interpretation()),
+        Some(ColorInterpretation::RedBand)
+    ) && matches!(
+        g.as_ref().map(|band| band.color_interpretation()),
+        Some(ColorInterpretation::GreenBand)
+    ) && matches!(
+        b.as_ref().map(|band| band.color_interpretation()),
+        Some(ColorInterpretation::BlueBand)
+    );
+    let all_zero_nodata = r_nd == Some(0.0) && g_nd == Some(0.0) && b_nd == Some(0.0);
+
+    if interps_match && all_zero_nodata {
+        RgbNodata {
+            r: None,
+            g: None,
+            b: None,
+            suppress_mask: true,
+        }
+    } else {
+        RgbNodata {
+            r: r_nd,
+            g: g_nd,
+            b: b_nd,
+            suppress_mask: false,
+        }
+    }
+}
+
+/// Whether a sample should be treated as nodata.
+///
+/// If the band declares a nodata value, only that exact value (with epsilon)
+/// masks the pixel. If no nodata is declared, fall back to treating 0.0 as
+/// nodata so outside-extent padding stays transparent for legacy rasters.
+/// Non-finite samples always count as nodata.
+fn is_nodata(val: f64, nodata: Option<f64>) -> bool {
+    if !val.is_finite() {
+        return true;
+    }
+    match nodata {
+        Some(nd) => (val - nd).abs() < 1e-10,
+        None => val == 0.0,
+    }
+}
+
 fn apply_stretch(val: f64, stretch: &StretchParams, nodata: Option<f64>) -> Option<u8> {
-    // Check for nodata or invalid values
-    // Many rasters use 0 as nodata for areas outside the image extent
-    if val == 0.0 || nodata.is_some_and(|nd| (val - nd).abs() < 1e-10) || !val.is_finite() {
+    if is_nodata(val, nodata) {
         return None;
     }
+    Some(stretch_value(val, stretch))
+}
 
+/// Map a sample to 0..=255 via min/max stretch and gamma, with no nodata mask.
+fn stretch_value(val: f64, stretch: &StretchParams) -> u8 {
+    if !val.is_finite() {
+        return 0;
+    }
     let range = if stretch.max > stretch.min {
         stretch.max - stretch.min
     } else {
@@ -187,11 +355,8 @@ fn apply_stretch(val: f64, stretch: &StretchParams, nodata: Option<f64>) -> Opti
     };
     let normalized = (val - stretch.min) / range;
     let clamped = normalized.clamp(0.0, 1.0);
-
-    // Apply gamma correction
     let gamma_corrected = clamped.powf(1.0 / stretch.gamma);
-
-    Some((gamma_corrected * 255.0).clamp(0.0, 255.0) as u8)
+    (gamma_corrected * 255.0).clamp(0.0, 255.0) as u8
 }
 
 /// Extract a tile with custom stretch parameters
@@ -279,19 +444,7 @@ pub fn extract_rgb_tile(
         return create_empty_tile(request.tile_size);
     }
 
-    // Get nodata values for each band
-    let r_nodata = dataset
-        .rasterband(red_band as usize)
-        .ok()
-        .and_then(|b| b.no_data_value());
-    let g_nodata = dataset
-        .rasterband(green_band as usize)
-        .ok()
-        .and_then(|b| b.no_data_value());
-    let b_nodata = dataset
-        .rasterband(blue_band as usize)
-        .ok()
-        .and_then(|b| b.no_data_value());
+    let nd = resolve_rgb_nodata(dataset, red_band, green_band, blue_band);
 
     // Extract raw data for each band
     let r_request = TileRequest {
@@ -314,20 +467,39 @@ pub fn extract_rgb_tile(
     let tile_size = request.tile_size;
     let mut tile_data = vec![0u8; tile_size * tile_size * 4];
 
+    // When the resolver suppresses band-level nodata (ambiguous nodata=0 on an
+    // RGB ortho where water also sits at 0), the only way to tell padding from
+    // valid imagery is the source footprint itself. Build a coverage mask that
+    // marks tile pixels falling inside the source raster window.
+    let coverage = if nd.suppress_mask {
+        Some(compute_tile_coverage_mask(dataset, request)?)
+    } else {
+        None
+    };
+
+    // For RGB composites, only mask a pixel when ALL three bands are nodata
+    // (i.e. outside the data extent). Per-band masking would punch one channel
+    // to zero on valid dark pixels — e.g. 8-bit imagery with nodata=0 declared
+    // on every band sparkles cyan on water where R happens to be 0.
     for i in 0..r_data.len() {
         let idx = i * 4;
 
-        let r = apply_stretch(r_data[i], red_stretch, r_nodata);
-        let g = apply_stretch(g_data[i], green_stretch, g_nodata);
-        let b = apply_stretch(b_data[i], blue_stretch, b_nodata);
+        let rv = r_data[i];
+        let gv = g_data[i];
+        let bv = b_data[i];
 
-        // If any band has valid data, show the pixel
-        if r.is_some() || g.is_some() || b.is_some() {
-            tile_data[idx] = r.unwrap_or(0);
-            tile_data[idx + 1] = g.unwrap_or(0);
-            tile_data[idx + 2] = b.unwrap_or(0);
-            tile_data[idx + 3] = 255;
+        if let Some(mask) = &coverage {
+            if !mask[i] {
+                continue;
+            }
+        } else if is_nodata(rv, nd.r) && is_nodata(gv, nd.g) && is_nodata(bv, nd.b) {
+            continue;
         }
+
+        tile_data[idx] = stretch_value(rv, red_stretch);
+        tile_data[idx + 1] = stretch_value(gv, green_stretch);
+        tile_data[idx + 2] = stretch_value(bv, blue_stretch);
+        tile_data[idx + 3] = 255;
     }
 
     encode_png(&tile_data, tile_size)
@@ -644,19 +816,7 @@ pub fn extract_pixel_rgb_tile(
         .max(1)
         .min(tile_size - dst_y_start);
 
-    // Get nodata values for each band
-    let r_nodata = dataset
-        .rasterband(red_band as usize)
-        .ok()
-        .and_then(|b| b.no_data_value());
-    let g_nodata = dataset
-        .rasterband(green_band as usize)
-        .ok()
-        .and_then(|b| b.no_data_value());
-    let b_nodata = dataset
-        .rasterband(blue_band as usize)
-        .ok()
-        .and_then(|b| b.no_data_value());
+    let nd = resolve_rgb_nodata(dataset, red_band, green_band, blue_band);
 
     // Read each band
     let r_band = dataset
@@ -715,17 +875,22 @@ pub fn extract_pixel_rgb_tile(
 
             let dst_idx = (dst_tile_y * tile_size + dst_tile_x) * 4;
 
-            let r = apply_stretch(r_data[src_idx], red_stretch, r_nodata);
-            let g = apply_stretch(g_data[src_idx], green_stretch, g_nodata);
-            let b = apply_stretch(b_data[src_idx], blue_stretch, b_nodata);
+            let rv = r_data[src_idx];
+            let gv = g_data[src_idx];
+            let bv = b_data[src_idx];
 
-            // If any band has valid data, show the pixel
-            if r.is_some() || g.is_some() || b.is_some() {
-                tile_data[dst_idx] = r.unwrap_or(0);
-                tile_data[dst_idx + 1] = g.unwrap_or(0);
-                tile_data[dst_idx + 2] = b.unwrap_or(0);
-                tile_data[dst_idx + 3] = 255;
+            if !nd.suppress_mask
+                && is_nodata(rv, nd.r)
+                && is_nodata(gv, nd.g)
+                && is_nodata(bv, nd.b)
+            {
+                continue;
             }
+
+            tile_data[dst_idx] = stretch_value(rv, red_stretch);
+            tile_data[dst_idx + 1] = stretch_value(gv, green_stretch);
+            tile_data[dst_idx + 2] = stretch_value(bv, blue_stretch);
+            tile_data[dst_idx + 3] = 255;
         }
     }
 

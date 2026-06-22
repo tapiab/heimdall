@@ -108,6 +108,213 @@ export async function addVectorLayer(
   }
 }
 
+/** Build a MapLibre filter expression combining geometry type with feature filters */
+function buildFilterFor(
+  geomFilter: unknown[],
+  featureFilters: VectorStyle['featureFilters']
+): unknown[] {
+  const fieldFilters: unknown[] = [];
+  if (featureFilters) {
+    for (const [field, allowed] of Object.entries(featureFilters)) {
+      if (!Array.isArray(allowed)) continue;
+      // Empty array = exclude all features for this field
+      if (allowed.length === 0) {
+        return ['==', ['literal', 0], 1];
+      }
+      // Legacy "in" filter: ['in', fieldName, val1, val2, ...]
+      fieldFilters.push(['in', field, ...allowed]);
+    }
+  }
+  if (fieldFilters.length === 0) return geomFilter;
+  return ['all', geomFilter, ...fieldFilters];
+}
+
+/** Apply current feature filters to all sublayers of a vector layer */
+export function applyVectorFilters(manager: LayerManagerInterface, id: string): void {
+  const layer = manager.layers.get(id) as VectorLayer | undefined;
+  if (!layer || layer.type !== 'vector') return;
+  const { map } = manager.mapManager;
+  if (!map) return;
+  const { featureFilters } = layer.style;
+
+  const fillFilter = buildFilterFor(['==', '$type', 'Polygon'], featureFilters);
+  const lineFilter = buildFilterFor(
+    ['any', ['==', '$type', 'LineString'], ['==', '$type', 'Polygon']],
+    featureFilters
+  );
+  const circleFilter = buildFilterFor(['==', '$type', 'Point'], featureFilters);
+
+  try {
+    map.setFilter(`vector-fill-${id}`, fillFilter as maplibregl.FilterSpecification);
+  } catch (_e) {
+    /* layer may not exist */
+  }
+  try {
+    map.setFilter(`vector-line-${id}`, lineFilter as maplibregl.FilterSpecification);
+  } catch (_e) {
+    /* layer may not exist */
+  }
+  try {
+    map.setFilter(`vector-circle-${id}`, circleFilter as maplibregl.FilterSpecification);
+  } catch (_e) {
+    /* layer may not exist */
+  }
+}
+
+/**
+ * Set the allowed values for a field filter on a vector layer.
+ * Passing null or a full set restores "show all" for that field.
+ */
+export function setVectorFeatureFilter(
+  manager: LayerManagerInterface,
+  id: string,
+  fieldName: string,
+  allowedValues: Array<string | number> | null
+): void {
+  const layer = manager.layers.get(id) as VectorLayer | undefined;
+  if (!layer || layer.type !== 'vector') return;
+
+  if (!layer.style.featureFilters) layer.style.featureFilters = {};
+
+  if (allowedValues === null) {
+    delete layer.style.featureFilters[fieldName];
+  } else {
+    layer.style.featureFilters[fieldName] = allowedValues;
+  }
+
+  applyVectorFilters(manager, id);
+}
+
+/**
+ * Compute unique values + counts for each field that looks filterable
+ * (categorical: ≤ MAX_UNIQUE_VALUES unique entries).
+ */
+export interface FieldValueStats {
+  value: string | number;
+  count: number;
+}
+export interface FilterableField {
+  name: string;
+  displayName: string;
+  values: FieldValueStats[];
+}
+
+const MAX_UNIQUE_VALUES = 50;
+
+const FILTER_FIELD_LABEL_OVERRIDES: Record<string, string> = {
+  class: 'Layer',
+  class_name: 'Layer',
+  classname: 'Layer',
+  category: 'Category',
+  type: 'Type',
+  kind: 'Kind',
+  label: 'Label',
+};
+
+function humanizeFieldName(name: string): string {
+  const lower = name.toLowerCase();
+  if (FILTER_FIELD_LABEL_OVERRIDES[lower]) return FILTER_FIELD_LABEL_OVERRIDES[lower];
+  const spaced = lower.replace(/[_-]+/g, ' ').trim();
+  return spaced.replace(/\b\w/g, c => c.toUpperCase());
+}
+
+/**
+ * Canonical partition signature: for each feature, the order-of-first-appearance
+ * index of its value. Two fields with the same partition (e.g. numeric class id
+ * vs. string class_name) produce identical signatures.
+ */
+function canonicalPartition(
+  features: GeoJSON.Feature[],
+  fieldName: string,
+  fieldType: string
+): string {
+  const isNumericField = fieldType !== 'String';
+  const seen = new Map<string, number>();
+  const seq: number[] = [];
+  for (const f of features) {
+    const raw = f.properties?.[fieldName];
+    let key: string;
+    if (raw === null || raw === undefined) key = '__null__';
+    else if (typeof raw === 'string' || typeof raw === 'number') key = String(raw);
+    else key = JSON.stringify(raw);
+    let id = seen.get(key);
+    if (id === undefined) {
+      id = seen.size;
+      seen.set(key, id);
+    }
+    seq.push(id);
+  }
+  return (isNumericField ? 'N|' : 'S|') + seq.join(',');
+}
+
+export function computeFilterableFields(layer: VectorLayer): FilterableField[] {
+  const features = layer.geojson?.features || [];
+  if (features.length === 0) return [];
+
+  const candidates: Array<{
+    name: string;
+    fieldType: string;
+    values: FieldValueStats[];
+  }> = [];
+
+  for (const f of layer.fields || []) {
+    const counts = new Map<string | number, number>();
+    let abort = false;
+    for (const feat of features) {
+      const raw = feat.properties?.[f.name];
+      if (raw === null || raw === undefined) continue;
+      if (typeof raw !== 'string' && typeof raw !== 'number') continue;
+      counts.set(raw, (counts.get(raw) || 0) + 1);
+      if (counts.size > MAX_UNIQUE_VALUES) {
+        abort = true;
+        break;
+      }
+    }
+    if (abort || counts.size === 0) continue;
+    const values = Array.from(counts.entries())
+      .map(([value, count]) => ({ value, count }))
+      .sort((a, b) => b.count - a.count);
+    candidates.push({ name: f.name, fieldType: f.type, values });
+  }
+
+  // Dedupe fields that partition features identically (e.g. `class` ↔ `class_name`).
+  // Strip the field-type prefix so a numeric and string field with the same
+  // partition collide and only one wins.
+  const groups = new Map<string, typeof candidates>();
+  for (const c of candidates) {
+    const sig = canonicalPartition(features, c.name, c.fieldType).slice(2);
+    let bucket = groups.get(sig);
+    if (!bucket) {
+      bucket = [];
+      groups.set(sig, bucket);
+    }
+    bucket.push(c);
+  }
+
+  const out: FilterableField[] = [];
+  // Preserve original field order — emit one entry per partition group, using
+  // the first candidate seen in `candidates` order.
+  const emitted = new Set<string>();
+  for (const c of candidates) {
+    const sig = canonicalPartition(features, c.name, c.fieldType).slice(2);
+    if (emitted.has(sig)) continue;
+    emitted.add(sig);
+
+    const bucket = groups.get(sig) || [c];
+    // Prefer string-typed field (human-readable labels) when partition matches.
+    const preferred =
+      bucket.find(b => b.fieldType === 'String') ||
+      bucket.slice().sort((a, b) => b.name.length - a.name.length)[0];
+
+    out.push({
+      name: preferred.name,
+      displayName: humanizeFieldName(preferred.name),
+      values: preferred.values,
+    });
+  }
+  return out;
+}
+
 /** Add all vector layer types (for mixed geometry) */
 function addAllVectorLayers(
   manager: LayerManagerInterface,
@@ -127,12 +334,19 @@ function addAllVectorLayers(
     return;
   }
 
+  const fillFilter = buildFilterFor(['==', '$type', 'Polygon'], style.featureFilters);
+  const lineFilter = buildFilterFor(
+    ['any', ['==', '$type', 'LineString'], ['==', '$type', 'Polygon']],
+    style.featureFilters
+  );
+  const circleFilter = buildFilterFor(['==', '$type', 'Point'], style.featureFilters);
+
   // Add fill layer for polygons
   map.addLayer({
     id: `vector-fill-${id}`,
     type: 'fill',
     source: sourceId,
-    filter: ['==', '$type', 'Polygon'],
+    filter: fillFilter as maplibregl.FilterSpecification,
     paint: {
       'fill-color': style.fillColor,
       'fill-opacity': style.fillOpacity,
@@ -144,7 +358,7 @@ function addAllVectorLayers(
     id: `vector-line-${id}`,
     type: 'line',
     source: sourceId,
-    filter: ['any', ['==', '$type', 'LineString'], ['==', '$type', 'Polygon']],
+    filter: lineFilter as maplibregl.FilterSpecification,
     paint: {
       'line-color': style.strokeColor,
       'line-width': style.strokeWidth,
@@ -156,7 +370,7 @@ function addAllVectorLayers(
     id: `vector-circle-${id}`,
     type: 'circle',
     source: sourceId,
-    filter: ['==', '$type', 'Point'],
+    filter: circleFilter as maplibregl.FilterSpecification,
     paint: {
       'circle-color': style.fillColor,
       'circle-radius': style.pointRadius,

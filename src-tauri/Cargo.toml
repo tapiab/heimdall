@@ -1,6 +1,6 @@
 [package]
 name = "heimdall"
-version = "0.5.4"
+version = "0.5.5-dev1"
 edition = "2021"
 
 [build-dependencies]
@@ -26,13 +26,13 @@ tracing = "0.1"
 rayon = "1.10"
 dirs = "6"
 
-# GDAL: use bindgen on non-Windows (supports newer GDAL like 3.12),
-# but use pre-built bindings on Windows (avoids i32/u32 type mismatches)
+# GDAL: pin to PR #714 (fix: support GDAL 3.13) until merged into georust/gdal.
+# Use bindgen on non-Windows; pre-built bindings on Windows.
 [target.'cfg(not(target_os = "windows"))'.dependencies]
-gdal = { version = "0.19", features = ["bindgen"] }
+gdal = { git = "https://github.com/AlexanderWillner/gdal", rev = "bc255dce662300a70d64b64be7c641912f48e780", features = ["bindgen"] }
 
 [target.'cfg(target_os = "windows")'.dependencies]
-gdal = "0.19"
+gdal = { git = "https://github.com/AlexanderWillner/gdal", rev = "bc255dce662300a70d64b64be7c641912f48e780" }
 
 [profile.release]
 # Use "debuginfo" instead of true to keep symbols needed by Tauri bundler

@@ -10,6 +10,7 @@ import type {
   CrossLayerRgbConfig,
   LayerManagerOptions,
 } from './types';
+import { computeFilterableFields, type FilterableField } from './vector-handler';
 
 /** Extended LayerManager interface with UI-specific properties */
 interface LayerManagerWithUI extends LayerManagerInterface {
@@ -33,6 +34,11 @@ interface LayerManagerWithUI extends LayerManagerInterface {
   ) => void;
   setVectorStyle: (id: string, property: string, value: string | number) => void;
   setColorByField: (id: string, fieldName: string | null) => void;
+  setVectorFeatureFilter: (
+    id: string,
+    fieldName: string,
+    allowedValues: Array<string | number> | null
+  ) => void;
   showAttributeTable: (layerId: string) => void;
   showHistogram: (layerId: string, band: number) => void;
   createRgbCompositionLayer: (sourceLayerId: string) => Promise<string | null>;
@@ -43,6 +49,17 @@ interface LayerManagerWithUI extends LayerManagerInterface {
 /** Extended raster layer with UI state */
 interface RasterLayerWithUI extends RasterLayer {
   showRgbStretch?: boolean;
+}
+
+/** Per-layer transient UI state: which filter field groups are expanded */
+const expandedFilterFields = new Map<string, Set<string>>();
+function getExpandedFields(layerId: string): Set<string> {
+  let s = expandedFilterFields.get(layerId);
+  if (!s) {
+    s = new Set();
+    expandedFilterFields.set(layerId, s);
+  }
+  return s;
 }
 
 /**
@@ -194,6 +211,11 @@ export function updateLayerPanel(manager: LayerManagerWithUI): void {
 
     item.appendChild(headerRow);
     item.appendChild(opacityRow);
+
+    // Vector layer filter UI
+    if (layer.type === 'vector') {
+      renderVectorFilterUI(manager, item, layer as VectorLayer);
+    }
 
     // Add band selector for multi-band rasters
     if (layer.type === 'raster') {
@@ -358,6 +380,152 @@ function startRenameLayer(
   nameElement.replaceWith(input);
   input.focus();
   input.select();
+}
+
+/**
+ * Render inline filter UI for a vector layer.
+ * One collapsible group per categorical field, with checkboxes + counts and All/None buttons.
+ */
+function renderVectorFilterUI(
+  manager: LayerManagerWithUI,
+  item: HTMLElement,
+  layer: VectorLayer
+): void {
+  const fields: FilterableField[] = computeFilterableFields(layer);
+  if (fields.length === 0) return;
+
+  const container = document.createElement('div');
+  container.className = 'layer-filter';
+
+  const expandedSet = getExpandedFields(layer.id);
+  const currentFilters = layer.style.featureFilters || {};
+
+  for (const field of fields) {
+    const group = document.createElement('div');
+    group.className = 'filter-field';
+
+    const header = document.createElement('div');
+    header.className = 'filter-field-header';
+
+    const caret = document.createElement('span');
+    caret.className = 'filter-caret';
+    const isExpanded = expandedSet.has(field.name);
+    caret.textContent = isExpanded ? '▼' : '▶';
+
+    const fieldLabel = document.createElement('span');
+    fieldLabel.className = 'filter-field-name';
+    fieldLabel.textContent = field.displayName;
+    fieldLabel.title = field.name;
+
+    const summary = document.createElement('span');
+    summary.className = 'filter-field-summary';
+    const allowed = currentFilters[field.name];
+    if (!allowed) {
+      summary.textContent = `all (${field.values.length})`;
+    } else {
+      summary.textContent = `${allowed.length}/${field.values.length}`;
+    }
+
+    header.appendChild(caret);
+    header.appendChild(fieldLabel);
+    header.appendChild(summary);
+    header.addEventListener('click', e => {
+      e.stopPropagation();
+      if (expandedSet.has(field.name)) {
+        expandedSet.delete(field.name);
+      } else {
+        expandedSet.add(field.name);
+      }
+      manager.updateLayerPanel();
+    });
+    group.appendChild(header);
+
+    if (isExpanded) {
+      const body = document.createElement('div');
+      body.className = 'filter-field-body';
+
+      const list = document.createElement('div');
+      list.className = 'filter-value-list';
+
+      const allValues = field.values.map(v => v.value);
+      const isAllowed = (v: string | number): boolean => {
+        if (!allowed) return true;
+        return allowed.includes(v);
+      };
+
+      for (const entry of field.values) {
+        const row = document.createElement('label');
+        row.className = 'filter-value-row';
+        const cb = document.createElement('input');
+        cb.type = 'checkbox';
+        cb.checked = isAllowed(entry.value);
+        cb.addEventListener('mousedown', ev => ev.stopPropagation());
+        cb.addEventListener('change', () => {
+          const current = layer.style.featureFilters?.[field.name];
+          const present = current ? [...current] : [...allValues];
+          if (cb.checked) {
+            if (!present.includes(entry.value)) present.push(entry.value);
+          } else {
+            const idx = present.indexOf(entry.value);
+            if (idx >= 0) present.splice(idx, 1);
+          }
+          // If everything is selected, clear the filter
+          const next =
+            present.length === allValues.length && allValues.every(v => present.includes(v))
+              ? null
+              : present;
+          manager.setVectorFeatureFilter(layer.id, field.name, next);
+          manager.updateLayerPanel();
+        });
+
+        const valSpan = document.createElement('span');
+        valSpan.className = 'filter-value-name';
+        valSpan.textContent = String(entry.value);
+
+        const countSpan = document.createElement('span');
+        countSpan.className = 'filter-value-count';
+        countSpan.textContent = `(${entry.count})`;
+
+        row.appendChild(cb);
+        row.appendChild(valSpan);
+        row.appendChild(countSpan);
+        list.appendChild(row);
+      }
+
+      body.appendChild(list);
+
+      const actions = document.createElement('div');
+      actions.className = 'filter-actions';
+
+      const allBtn = document.createElement('button');
+      allBtn.className = 'filter-action-btn';
+      allBtn.textContent = 'All';
+      allBtn.addEventListener('click', e => {
+        e.stopPropagation();
+        manager.setVectorFeatureFilter(layer.id, field.name, null);
+        manager.updateLayerPanel();
+      });
+
+      const noneBtn = document.createElement('button');
+      noneBtn.className = 'filter-action-btn';
+      noneBtn.textContent = 'None';
+      noneBtn.addEventListener('click', e => {
+        e.stopPropagation();
+        manager.setVectorFeatureFilter(layer.id, field.name, []);
+        manager.updateLayerPanel();
+      });
+
+      actions.appendChild(allBtn);
+      actions.appendChild(noneBtn);
+      body.appendChild(actions);
+
+      group.appendChild(body);
+    }
+
+    container.appendChild(group);
+  }
+
+  item.appendChild(container);
 }
 
 /**
