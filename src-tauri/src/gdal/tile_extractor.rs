@@ -142,7 +142,10 @@ fn bounds_intersect(a: [f64; 4], b: [f64; 4]) -> bool {
 /// source raster's footprint, false where it would be outside (i.e. padded by
 /// the warp). Used to keep outside-extent padding transparent for RGB
 /// composites where band-level nodata=0 is ambiguous with valid imagery zeros.
-fn compute_tile_coverage_mask(dataset: &Dataset, request: &TileRequest) -> Result<Vec<bool>, String> {
+fn compute_tile_coverage_mask(
+    dataset: &Dataset,
+    request: &TileRequest,
+) -> Result<Vec<bool>, String> {
     let tile_bounds = tile_to_web_mercator_bounds(request.x, request.y, request.z);
     let tile_size = request.tile_size;
     let (img_w, img_h) = dataset.raster_size();
