@@ -65,30 +65,52 @@ fn tile_to_geo_bounds(x: i32, y: i32, z: u8) -> [f64; 4] {
     [lon_min, lat_min, lon_max, lat_max]
 }
 
-/// Get dataset bounds in EPSG:4326
+/// Get dataset bounds in EPSG:4326.
+///
+/// Uses the full affine geotransform (including shear terms gt[2]/gt[4]) so
+/// that rotated rasters yield a bbox covering all four actual corners. Without
+/// this, tiles overlapping a rotated raster's corner triangles get rejected by
+/// the bounds_intersect early-out and never rendered.
 fn get_dataset_geo_bounds(dataset: &Dataset) -> Result<[f64; 4], String> {
     let gt = dataset
         .geo_transform()
         .map_err(|e| format!("Failed to get geotransform: {}", e))?;
 
     let (width, height) = dataset.raster_size();
+    let (w, h) = (width as f64, height as f64);
     let projection = dataset.projection();
 
-    // Calculate native bounds
-    let native_min_x = gt[0];
-    let native_max_x = gt[0] + (width as f64) * gt[1];
-    let native_max_y = gt[3];
-    let native_min_y = gt[3] + (height as f64) * gt[5];
+    // World coordinates of the four actual pixel corners.
+    let native_xs = [
+        gt[0],
+        gt[0] + w * gt[1],
+        gt[0] + h * gt[2],
+        gt[0] + w * gt[1] + h * gt[2],
+    ];
+    let native_ys = [
+        gt[3],
+        gt[3] + w * gt[4],
+        gt[3] + h * gt[5],
+        gt[3] + w * gt[4] + h * gt[5],
+    ];
+
+    let bbox_from = |xs: &[f64], ys: &[f64]| -> [f64; 4] {
+        let min_x = xs.iter().cloned().fold(f64::INFINITY, f64::min);
+        let max_x = xs.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+        let min_y = ys.iter().cloned().fold(f64::INFINITY, f64::min);
+        let max_y = ys.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+        [min_x, min_y, max_x, max_y]
+    };
 
     if projection.is_empty() {
-        return Ok([native_min_x, native_min_y, native_max_x, native_max_y]);
+        return Ok(bbox_from(&native_xs, &native_ys));
     }
 
     let source_srs = SpatialRef::from_wkt(&projection)
         .map_err(|e| format!("Failed to parse source SRS: {}", e))?;
 
     if source_srs.is_geographic() {
-        return Ok([native_min_x, native_min_y, native_max_x, native_max_y]);
+        return Ok(bbox_from(&native_xs, &native_ys));
     }
 
     // Transform to EPSG:4326
@@ -100,19 +122,14 @@ fn get_dataset_geo_bounds(dataset: &Dataset) -> Result<[f64; 4], String> {
     let transform = gdal::spatial_ref::CoordTransform::new(&source_srs, &target_srs)
         .map_err(|e| format!("Failed to create transform: {}", e))?;
 
-    let mut xs = vec![native_min_x, native_max_x, native_min_x, native_max_x];
-    let mut ys = vec![native_min_y, native_min_y, native_max_y, native_max_y];
+    let mut xs = native_xs.to_vec();
+    let mut ys = native_ys.to_vec();
 
     transform
         .transform_coords(&mut xs, &mut ys, &mut [])
         .map_err(|e| format!("Failed to transform: {}", e))?;
 
-    let min_lon = xs.iter().cloned().fold(f64::INFINITY, f64::min);
-    let max_lon = xs.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
-    let min_lat = ys.iter().cloned().fold(f64::INFINITY, f64::min);
-    let max_lat = ys.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
-
-    Ok([min_lon, min_lat, max_lon, max_lat])
+    Ok(bbox_from(&xs, &ys))
 }
 
 /// Check if two bounding boxes intersect

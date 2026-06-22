@@ -144,20 +144,46 @@ fn is_georeferenced(dataset: &Dataset) -> bool {
     has_projection || !is_identity
 }
 
-/// Calculate bounds in native CRS
+/// Calculate bounds in native CRS.
+///
+/// Uses the full affine geotransform including shear terms (gt[2], gt[4]) so
+/// that rotated rasters yield a bbox covering all four actual corners. Earlier
+/// versions used only gt[0]/gt[1]/gt[3]/gt[5], which clipped a triangle off
+/// rotated UTM orthos.
 fn calculate_native_bounds(dataset: &Dataset) -> Result<[f64; 4], String> {
     let gt = dataset
         .geo_transform()
         .map_err(|e| format!("Failed to get geotransform: {}", e))?;
 
     let (width, height) = dataset.raster_size();
+    let (w, h) = (width as f64, height as f64);
 
-    // gt[0] = top left x, gt[3] = top left y
-    // gt[1] = pixel width, gt[5] = pixel height (usually negative)
-    let min_x = gt[0];
-    let max_x = gt[0] + (width as f64) * gt[1];
-    let max_y = gt[3];
-    let min_y = gt[3] + (height as f64) * gt[5];
+    // World coordinates of the four pixel corners.
+    let corners = [
+        (gt[0], gt[3]),
+        (gt[0] + w * gt[1], gt[3] + w * gt[4]),
+        (gt[0] + h * gt[2], gt[3] + h * gt[5]),
+        (gt[0] + w * gt[1] + h * gt[2], gt[3] + w * gt[4] + h * gt[5]),
+    ];
+
+    let mut min_x = f64::INFINITY;
+    let mut max_x = f64::NEG_INFINITY;
+    let mut min_y = f64::INFINITY;
+    let mut max_y = f64::NEG_INFINITY;
+    for (x, y) in corners {
+        if x < min_x {
+            min_x = x;
+        }
+        if x > max_x {
+            max_x = x;
+        }
+        if y < min_y {
+            min_y = y;
+        }
+        if y > max_y {
+            max_y = y;
+        }
+    }
 
     Ok([min_x, min_y, max_x, max_y])
 }
