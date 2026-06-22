@@ -471,8 +471,7 @@ function renderVectorFilterUI(
           }
           // If everything is selected, clear the filter
           const next =
-            present.length === allValues.length &&
-            allValues.every(v => present.includes(v))
+            present.length === allValues.length && allValues.every(v => present.includes(v))
               ? null
               : present;
           manager.setVectorFeatureFilter(layer.id, field.name, next);

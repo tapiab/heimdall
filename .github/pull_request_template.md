@@ -33,8 +33,8 @@ Please describe the tests that you ran to verify your changes:
 
 ### Test Configuration
 
-- **OS**: 
-- **GDAL Version**: 
+- **OS**:
+- **GDAL Version**:
 
 ## Screenshots (if applicable)
 
@@ -43,4 +43,3 @@ Add screenshots to show visual changes.
 ## Additional Notes
 
 Any additional information that reviewers should know.
-

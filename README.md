@@ -39,11 +39,11 @@ Just as Heimdall watches over the realms, this application lets you observe and 
 
 Download the latest release for your platform from the [GitHub Releases](https://github.com/tapiab/heimdall/releases) page:
 
-| Platform | Format |
-|----------|--------|
-| macOS | `.dmg` |
-| Windows | `.msi`, `.exe` |
-| Linux | `.deb`, `.rpm`, `.AppImage` |
+| Platform | Format                      |
+| -------- | --------------------------- |
+| macOS    | `.dmg`                      |
+| Windows  | `.msi`, `.exe`              |
+| Linux    | `.deb`, `.rpm`, `.AppImage` |
 
 All dependencies (GDAL, PROJ, etc.) are bundled — no extra installs needed.
 
@@ -62,6 +62,7 @@ You only need to do this once.
 See [docs/BUILDING.md](docs/BUILDING.md) for detailed build instructions.
 
 Quick start:
+
 ```bash
 git clone https://github.com/tapiab/heimdall.git
 cd heimdall
@@ -72,43 +73,48 @@ make dev
 ## Keyboard Shortcuts
 
 ### File Operations
-| Key | Action |
-|-----|--------|
-| `Ctrl+O` | Open file(s) |
-| `Ctrl+S` | Save project |
-| `Ctrl+Shift+O` | Load project |
-| `E` | Export as PNG |
+
+| Key            | Action        |
+| -------------- | ------------- |
+| `Ctrl+O`       | Open file(s)  |
+| `Ctrl+S`       | Save project  |
+| `Ctrl+Shift+O` | Load project  |
+| `E`            | Export as PNG |
 
 ### Tools
-| Key | Action |
-|-----|--------|
-| `Z` | Zoom rectangle |
-| `M` | Measure distance |
+
+| Key | Action               |
+| --- | -------------------- |
+| `Z` | Zoom rectangle       |
+| `M` | Measure distance     |
 | `I` | Inspect pixel values |
-| `P` | Elevation profile |
-| `A` | Annotate (markers) |
-| `G` | Georeference tool |
-| `C` | Open STAC Browser |
+| `P` | Elevation profile    |
+| `A` | Annotate (markers)   |
+| `G` | Georeference tool    |
+| `C` | Open STAC Browser    |
 
 ### View Controls
-| Key | Action |
-|-----|--------|
-| `F` | Fit to extent |
-| `R` | Reset rotation |
-| `B` | Cycle basemap |
-| `T` | Toggle 3D terrain |
-| `L` | Toggle layer panel |
+
+| Key | Action               |
+| --- | -------------------- |
+| `F` | Fit to extent        |
+| `R` | Reset rotation       |
+| `B` | Cycle basemap        |
+| `T` | Toggle 3D terrain    |
+| `L` | Toggle layer panel   |
 | `D` | Toggle display panel |
-| `H` | Show histogram |
+| `H` | Show histogram       |
 
 Press `?` for complete keyboard shortcuts reference.
 
 ## Supported Formats
 
 ### Raster
+
 Any format supported by GDAL: GeoTIFF, JPEG2000, PNG, JPEG, ERDAS Imagine, ENVI, NetCDF, HDF5, VRT, and more.
 
 ### Vector
+
 Shapefile, GeoJSON, GeoPackage, KML/KMZ, GML, GPX, FlatGeobuf, MapInfo TAB.
 
 ## STAC Browser
@@ -134,13 +140,13 @@ Georeference non-georeferenced images using Ground Control Points:
 
 ## Basemaps
 
-| Basemap | Description |
-|---------|-------------|
-| **OSM** | OpenStreetMap |
-| **Satellite** | Sentinel-2 Cloudless (10m resolution) |
-| **Custom** | User-configured tile URL |
-| **Pixel Grid** | For non-georeferenced images |
-| **None** | Transparent background |
+| Basemap        | Description                           |
+| -------------- | ------------------------------------- |
+| **OSM**        | OpenStreetMap                         |
+| **Satellite**  | Sentinel-2 Cloudless (10m resolution) |
+| **Custom**     | User-configured tile URL              |
+| **Pixel Grid** | For non-georeferenced images          |
+| **None**       | Transparent background                |
 
 Configure custom basemaps via the gear icon next to the basemap dropdown.
 
@@ -178,11 +184,11 @@ Heimdall stores its configuration in `~/.config/heimdall/config.json` (all platf
 }
 ```
 
-| Section | Description |
-|---------|-------------|
-| `basemaps.satellite` | Default satellite basemap tile URL and attribution |
-| `basemaps.custom` | User-defined custom basemap |
-| `stac.catalogs` | List of STAC catalog entries shown in the STAC browser dropdown |
+| Section              | Description                                                     |
+| -------------------- | --------------------------------------------------------------- |
+| `basemaps.satellite` | Default satellite basemap tile URL and attribution              |
+| `basemaps.custom`    | User-defined custom basemap                                     |
+| `stac.catalogs`      | List of STAC catalog entries shown in the STAC browser dropdown |
 
 ## Documentation
 

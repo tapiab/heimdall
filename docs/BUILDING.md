@@ -56,6 +56,7 @@ sudo pacman -S gdal gtk3 webkit2gtk-4.1 libayatana-appindicator librsvg patchelf
 Install GDAL via [GISInternals](https://www.gisinternals.com/release.php) or [OSGeo4W](https://trac.osgeo.org/osgeo4w/).
 
 Set environment variables:
+
 ```powershell
 $env:GDAL_HOME = "C:\path\to\gdal"
 $env:GDAL_LIB_DIR = "C:\path\to\gdal\lib"
@@ -110,11 +111,11 @@ npm run tauri:build -- --target x86_64-apple-darwin
 
 Production builds are located in `src-tauri/target/release/bundle/`:
 
-| Platform | Artifacts |
-|----------|-----------|
-| macOS | `.dmg`, `.app` |
-| Windows | `.msi`, `.exe` |
-| Linux | `.deb`, `.rpm`, `.AppImage` |
+| Platform | Artifacts                   |
+| -------- | --------------------------- |
+| macOS    | `.dmg`, `.app`              |
+| Windows  | `.msi`, `.exe`              |
+| Linux    | `.deb`, `.rpm`, `.AppImage` |
 
 ## CI/CD
 
@@ -128,13 +129,13 @@ The project includes GitHub Actions (`.github/workflows/ci.yml`) for automated m
 
 ### Supported Build Targets
 
-| Platform | Architecture | Artifacts |
-|----------|--------------|-----------|
-| Linux | x86_64 | `.deb`, `.rpm`, `.AppImage` |
-| Linux | ARM64 | `.deb`, `.AppImage` |
-| macOS | x86_64 | `.dmg` |
-| macOS | ARM64 (Apple Silicon) | `.dmg` |
-| Windows | x86_64 | `.msi`, `.exe` |
+| Platform | Architecture          | Artifacts                   |
+| -------- | --------------------- | --------------------------- |
+| Linux    | x86_64                | `.deb`, `.rpm`, `.AppImage` |
+| Linux    | ARM64                 | `.deb`, `.AppImage`         |
+| macOS    | x86_64                | `.dmg`                      |
+| macOS    | ARM64 (Apple Silicon) | `.dmg`                      |
+| Windows  | x86_64                | `.msi`, `.exe`              |
 
 ## Troubleshooting
 

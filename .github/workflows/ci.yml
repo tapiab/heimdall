@@ -389,7 +389,14 @@ jobs:
   release:
     name: Release
     runs-on: ubuntu-latest
-    needs: [build-linux-x86_64, build-linux-arm64, build-macos-arm64, build-macos-x86_64, build-windows-x86_64]
+    needs:
+      [
+        build-linux-x86_64,
+        build-linux-arm64,
+        build-macos-arm64,
+        build-macos-x86_64,
+        build-windows-x86_64,
+      ]
     if: startsWith(github.ref, 'refs/tags/')
     permissions:
       contents: write
@@ -453,16 +460,16 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           PREVIOUS_TAG=$(git describe --tags --abbrev=0 ${{ github.ref_name }}^ 2>/dev/null || echo "")
-          
+
           if [ -n "$PREVIOUS_TAG" ]; then
             RANGE="${PREVIOUS_TAG}..${{ github.ref_name }}"
           else
             RANGE="${{ github.ref_name }}"
           fi
-          
+
           # Generate changelog with commit messages
           CHANGELOG=$(git log $RANGE --pretty=format:"- %s ([%h](https://github.com/${{ github.repository }}/commit/%H))" --no-merges | head -50)
-          
+
           # Get unique contributors (using git author email to find GitHub usernames via API)
           CONTRIBUTORS=""
           for email in $(git log $RANGE --pretty=format:"%ae" --no-merges | sort | uniq); do
@@ -473,16 +480,16 @@ jobs:
             fi
           done
           CONTRIBUTORS=$(echo -e "$CONTRIBUTORS" | sort | uniq | grep -v '^$')
-          
+
           echo "PREVIOUS_TAG=$PREVIOUS_TAG" >> $GITHUB_OUTPUT
-          
+
           # Use heredoc for multiline changelog
           {
             echo "changelog<<EOF_CHANGELOG"
             echo "$CHANGELOG"
             echo "EOF_CHANGELOG"
           } >> $GITHUB_OUTPUT
-          
+
           # Use heredoc for multiline contributors
           {
             echo "contributors<<EOF_CONTRIBUTORS"
