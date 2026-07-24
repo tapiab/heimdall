@@ -340,7 +340,7 @@ pub async fn get_tile_stretched(
         let path = state.get_path(&id).unwrap_or_default();
         println!(
             "[TILE] First tile request: z={} x={} y={} path={}",
-            z, x, y, &path
+            z, x, y, path
         );
     }
     let pool = state.get_pool(&id).ok_or("Dataset not found")?;
@@ -385,7 +385,7 @@ pub async fn get_rgb_tile(
         let path = state.get_path(&id).unwrap_or_default();
         println!("[TILE] First RGB tile request: z={} x={} y={} bands=({},{},{}) stretch=({}-{},{}-{},{}-{}) path={}",
             z, x, y, red_band, green_band, blue_band,
-            red_min, red_max, green_min, green_max, blue_min, blue_max, &path);
+            red_min, red_max, green_min, green_max, blue_min, blue_max, path);
     }
     let pool = state.get_pool(&id).ok_or("Dataset not found")?;
     let bytes = tokio::task::spawn_blocking(move || {
