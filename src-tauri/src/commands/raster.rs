@@ -8,38 +8,10 @@ use gdal::spatial_ref::{CoordTransform, SpatialRef};
 use gdal::Dataset;
 use serde::{Deserialize, Serialize};
 use std::sync::atomic::{AtomicBool, Ordering};
+use tauri::ipc::Response;
 use tauri::State;
 
 static FIRST_TILE_LOGGED: AtomicBool = AtomicBool::new(false);
-
-/// Open dataset with appropriate overview level for the given zoom
-fn open_dataset_for_zoom(path: &str, _z: u8) -> Result<Dataset, String> {
-    // For remote COGs (vsicurl), set GDAL config for proper access
-    let is_remote = path.starts_with("/vsicurl/");
-
-    if is_remote {
-        // Ensure GDAL config is set for remote access in this thread
-        // GDAL config options are thread-local, so we need to set them here
-        gdal::config::set_config_option("GDAL_DISABLE_READDIR_ON_OPEN", "EMPTY_DIR").ok();
-
-        // Longer timeout and retries for slow connections (e.g., Wyvern data)
-        gdal::config::set_config_option("GDAL_HTTP_TIMEOUT", "300").ok();
-        gdal::config::set_config_option("GDAL_HTTP_MAX_RETRY", "5").ok();
-        gdal::config::set_config_option("GDAL_HTTP_RETRY_DELAY", "2").ok();
-
-        // Enable caching with larger buffer for pixel-interleaved COGs
-        gdal::config::set_config_option("VSI_CACHE", "TRUE").ok();
-        gdal::config::set_config_option("VSI_CACHE_SIZE", "100000000").ok(); // 100MB cache
-        gdal::config::set_config_option("CPL_VSIL_CURL_CACHE_SIZE", "100000000").ok();
-
-        // For COGs, GDAL automatically uses appropriate overviews during read operations
-        // based on the requested window size. No need to explicitly select overview level.
-        Dataset::open(path).map_err(|e| format!("Failed to open remote: {}", e))
-    } else {
-        // Local files - just open normally
-        Dataset::open(path).map_err(|e| format!("Failed to open: {}", e))
-    }
-}
 
 #[derive(Clone, Serialize, Deserialize)]
 pub struct RasterMetadata {
@@ -319,8 +291,7 @@ pub async fn open_raster(
         is_georeferenced: georeferenced,
     };
 
-    // Store only the path, not the dataset (GDAL Dataset is not thread-safe)
-    state.add(id, path);
+    state.add(id, path, dataset);
 
     Ok(metadata)
 }
@@ -334,21 +305,22 @@ pub async fn get_tile(
     z: u8,
     band: Option<i32>,
     state: State<'_, DatasetCache>,
-) -> Result<Vec<u8>, String> {
-    let path = state.get_path(&id).ok_or("Dataset not found")?;
-
-    // Open dataset with appropriate overview level for this zoom
-    let dataset = open_dataset_for_zoom(&path, z)?;
-
-    let request = TileRequest {
-        x,
-        y,
-        z,
-        band: band.unwrap_or(1),
-        tile_size: 256,
-    };
-
-    extract_tile(&dataset, &request)
+) -> Result<Response, String> {
+    let pool = state.get_pool(&id).ok_or("Dataset not found")?;
+    let bytes = tokio::task::spawn_blocking(move || {
+        let guard = pool.checkout();
+        let request = TileRequest {
+            x,
+            y,
+            z,
+            band: band.unwrap_or(1),
+            tile_size: 256,
+        };
+        extract_tile(&guard.0, &request)
+    })
+    .await
+    .map_err(|e| e.to_string())??;
+    Ok(Response::new(bytes))
 }
 
 /// Get a tile with custom stretch parameters
@@ -363,29 +335,29 @@ pub async fn get_tile_stretched(
     max: f64,
     gamma: f64,
     state: State<'_, DatasetCache>,
-) -> Result<Vec<u8>, String> {
-    let path = state.get_path(&id).ok_or("Dataset not found")?;
-
+) -> Result<Response, String> {
     if !FIRST_TILE_LOGGED.swap(true, Ordering::Relaxed) {
+        let path = state.get_path(&id).unwrap_or_default();
         println!(
             "[TILE] First tile request: z={} x={} y={} path={}",
-            z, x, y, &path
+            z, x, y, path
         );
     }
-
-    let dataset = open_dataset_for_zoom(&path, z)?;
-
-    let request = TileRequest {
-        x,
-        y,
-        z,
-        band: band.unwrap_or(1),
-        tile_size: 256,
-    };
-
-    let stretch = StretchParams { min, max, gamma };
-
-    extract_tile_with_stretch(&dataset, &request, &stretch)
+    let pool = state.get_pool(&id).ok_or("Dataset not found")?;
+    let bytes = tokio::task::spawn_blocking(move || {
+        let guard = pool.checkout();
+        let request = TileRequest {
+            x,
+            y,
+            z,
+            band: band.unwrap_or(1),
+            tile_size: 256,
+        };
+        extract_tile_with_stretch(&guard.0, &request, &StretchParams { min, max, gamma })
+    })
+    .await
+    .map_err(|e| e.to_string())??;
+    Ok(Response::new(bytes))
 }
 
 /// Get an RGB composite tile
@@ -408,51 +380,45 @@ pub async fn get_rgb_tile(
     blue_max: f64,
     blue_gamma: f64,
     state: State<'_, DatasetCache>,
-) -> Result<Vec<u8>, String> {
-    let path = state.get_path(&id).ok_or("Dataset not found")?;
-
+) -> Result<Response, String> {
     if !FIRST_TILE_LOGGED.swap(true, Ordering::Relaxed) {
+        let path = state.get_path(&id).unwrap_or_default();
         println!("[TILE] First RGB tile request: z={} x={} y={} bands=({},{},{}) stretch=({}-{},{}-{},{}-{}) path={}",
             z, x, y, red_band, green_band, blue_band,
-            red_min, red_max, green_min, green_max, blue_min, blue_max, &path);
+            red_min, red_max, green_min, green_max, blue_min, blue_max, path);
     }
-
-    let dataset = open_dataset_for_zoom(&path, z)?;
-
-    let request = TileRequest {
-        x,
-        y,
-        z,
-        band: 1, // Not used directly
-        tile_size: 256,
-    };
-
-    let red_stretch = StretchParams {
-        min: red_min,
-        max: red_max,
-        gamma: red_gamma,
-    };
-    let green_stretch = StretchParams {
-        min: green_min,
-        max: green_max,
-        gamma: green_gamma,
-    };
-    let blue_stretch = StretchParams {
-        min: blue_min,
-        max: blue_max,
-        gamma: blue_gamma,
-    };
-
-    extract_rgb_tile(
-        &dataset,
-        &request,
-        red_band,
-        green_band,
-        blue_band,
-        &red_stretch,
-        &green_stretch,
-        &blue_stretch,
-    )
+    let pool = state.get_pool(&id).ok_or("Dataset not found")?;
+    let bytes = tokio::task::spawn_blocking(move || {
+        let guard = pool.checkout();
+        let request = TileRequest {
+            x,
+            y,
+            z,
+            band: 1,
+            tile_size: 256,
+        };
+        let rs = StretchParams {
+            min: red_min,
+            max: red_max,
+            gamma: red_gamma,
+        };
+        let gs = StretchParams {
+            min: green_min,
+            max: green_max,
+            gamma: green_gamma,
+        };
+        let bs = StretchParams {
+            min: blue_min,
+            max: blue_max,
+            gamma: blue_gamma,
+        };
+        extract_rgb_tile(
+            &guard.0, &request, red_band, green_band, blue_band, &rs, &gs, &bs,
+        )
+    })
+    .await
+    .map_err(|e| e.to_string())??;
+    Ok(Response::new(bytes))
 }
 
 /// Get statistics for a band
@@ -462,8 +428,9 @@ pub async fn get_raster_stats(
     band: i32,
     state: State<'_, DatasetCache>,
 ) -> Result<BandStats, String> {
-    let path = state.get_path(&id).ok_or("Dataset not found")?;
-    let dataset = Dataset::open(&path).map_err(|e| format!("Failed to open raster: {}", e))?;
+    let ds_pool = state.get_pool(&id).ok_or("Dataset not found")?;
+    let ds_guard = ds_pool.checkout();
+    let dataset = &ds_guard.0;
 
     let rasterband = dataset
         .rasterband(band as usize)
@@ -499,8 +466,9 @@ pub async fn get_histogram(
 ) -> Result<HistogramData, String> {
     use gdal::raster::ResampleAlg;
 
-    let path = state.get_path(&id).ok_or("Dataset not found")?;
-    let dataset = Dataset::open(&path).map_err(|e| format!("Failed to open raster: {}", e))?;
+    let ds_pool = state.get_pool(&id).ok_or("Dataset not found")?;
+    let ds_guard = ds_pool.checkout();
+    let dataset = &ds_guard.0;
 
     let rasterband = dataset
         .rasterband(band as usize)
@@ -576,56 +544,44 @@ pub async fn get_cross_layer_rgb_tile(
     blue_max: f64,
     blue_gamma: f64,
     state: State<'_, DatasetCache>,
-) -> Result<Vec<u8>, String> {
+) -> Result<Response, String> {
     use crate::gdal::tile_extractor::{extract_cross_layer_rgb_tile, StretchParams, TileRequest};
-
-    let red_path = state.get_path(&red_id).ok_or("Red dataset not found")?;
-    let green_path = state.get_path(&green_id).ok_or("Green dataset not found")?;
-    let blue_path = state.get_path(&blue_id).ok_or("Blue dataset not found")?;
-
-    let red_ds =
-        Dataset::open(&red_path).map_err(|e| format!("Failed to open red raster: {}", e))?;
-    let green_ds =
-        Dataset::open(&green_path).map_err(|e| format!("Failed to open green raster: {}", e))?;
-    let blue_ds =
-        Dataset::open(&blue_path).map_err(|e| format!("Failed to open blue raster: {}", e))?;
-
-    let request = TileRequest {
-        x,
-        y,
-        z,
-        band: 1,
-        tile_size: 256,
-    };
-
-    let red_stretch = StretchParams {
-        min: red_min,
-        max: red_max,
-        gamma: red_gamma,
-    };
-    let green_stretch = StretchParams {
-        min: green_min,
-        max: green_max,
-        gamma: green_gamma,
-    };
-    let blue_stretch = StretchParams {
-        min: blue_min,
-        max: blue_max,
-        gamma: blue_gamma,
-    };
-
-    extract_cross_layer_rgb_tile(
-        &red_ds,
-        red_band,
-        &green_ds,
-        green_band,
-        &blue_ds,
-        blue_band,
-        &request,
-        &red_stretch,
-        &green_stretch,
-        &blue_stretch,
-    )
+    let r_pool = state.get_pool(&red_id).ok_or("Red dataset not found")?;
+    let g_pool = state.get_pool(&green_id).ok_or("Green dataset not found")?;
+    let b_pool = state.get_pool(&blue_id).ok_or("Blue dataset not found")?;
+    let bytes = tokio::task::spawn_blocking(move || {
+        let rg = r_pool.checkout();
+        let gg = g_pool.checkout();
+        let bg = b_pool.checkout();
+        let request = TileRequest {
+            x,
+            y,
+            z,
+            band: 1,
+            tile_size: 256,
+        };
+        let rs = StretchParams {
+            min: red_min,
+            max: red_max,
+            gamma: red_gamma,
+        };
+        let gs = StretchParams {
+            min: green_min,
+            max: green_max,
+            gamma: green_gamma,
+        };
+        let bs = StretchParams {
+            min: blue_min,
+            max: blue_max,
+            gamma: blue_gamma,
+        };
+        extract_cross_layer_rgb_tile(
+            &rg.0, red_band, &gg.0, green_band, &bg.0, blue_band, &request, &rs, &gs, &bs,
+        )
+    })
+    .await
+    .map_err(|e| e.to_string())??;
+    Ok(Response::new(bytes))
 }
 
 /// Get a tile for non-georeferenced images (using pixel coordinates)
@@ -640,23 +596,23 @@ pub async fn get_pixel_tile(
     max: f64,
     gamma: f64,
     state: State<'_, DatasetCache>,
-) -> Result<Vec<u8>, String> {
+) -> Result<Response, String> {
     use crate::gdal::tile_extractor::{extract_pixel_tile, StretchParams, TileRequest};
-
-    let path = state.get_path(&id).ok_or("Dataset not found")?;
-    let dataset = Dataset::open(&path).map_err(|e| format!("Failed to open raster: {}", e))?;
-
-    let request = TileRequest {
-        x,
-        y,
-        z,
-        band: band.unwrap_or(1),
-        tile_size: 256,
-    };
-
-    let stretch = StretchParams { min, max, gamma };
-
-    extract_pixel_tile(&dataset, &request, &stretch)
+    let pool = state.get_pool(&id).ok_or("Dataset not found")?;
+    let bytes = tokio::task::spawn_blocking(move || {
+        let guard = pool.checkout();
+        let request = TileRequest {
+            x,
+            y,
+            z,
+            band: band.unwrap_or(1),
+            tile_size: 256,
+        };
+        extract_pixel_tile(&guard.0, &request, &StretchParams { min, max, gamma })
+    })
+    .await
+    .map_err(|e| e.to_string())??;
+    Ok(Response::new(bytes))
 }
 
 /// Get an RGB tile for non-georeferenced images (using pixel coordinates)
@@ -679,46 +635,40 @@ pub async fn get_pixel_rgb_tile(
     blue_max: f64,
     blue_gamma: f64,
     state: State<'_, DatasetCache>,
-) -> Result<Vec<u8>, String> {
+) -> Result<Response, String> {
     use crate::gdal::tile_extractor::{extract_pixel_rgb_tile, StretchParams, TileRequest};
-
-    let path = state.get_path(&id).ok_or("Dataset not found")?;
-    let dataset = Dataset::open(&path).map_err(|e| format!("Failed to open raster: {}", e))?;
-
-    let request = TileRequest {
-        x,
-        y,
-        z,
-        band: 1, // Not used directly
-        tile_size: 256,
-    };
-
-    let red_stretch = StretchParams {
-        min: red_min,
-        max: red_max,
-        gamma: red_gamma,
-    };
-    let green_stretch = StretchParams {
-        min: green_min,
-        max: green_max,
-        gamma: green_gamma,
-    };
-    let blue_stretch = StretchParams {
-        min: blue_min,
-        max: blue_max,
-        gamma: blue_gamma,
-    };
-
-    extract_pixel_rgb_tile(
-        &dataset,
-        &request,
-        red_band,
-        green_band,
-        blue_band,
-        &red_stretch,
-        &green_stretch,
-        &blue_stretch,
-    )
+    let pool = state.get_pool(&id).ok_or("Dataset not found")?;
+    let bytes = tokio::task::spawn_blocking(move || {
+        let guard = pool.checkout();
+        let request = TileRequest {
+            x,
+            y,
+            z,
+            band: 1,
+            tile_size: 256,
+        };
+        let rs = StretchParams {
+            min: red_min,
+            max: red_max,
+            gamma: red_gamma,
+        };
+        let gs = StretchParams {
+            min: green_min,
+            max: green_max,
+            gamma: green_gamma,
+        };
+        let bs = StretchParams {
+            min: blue_min,
+            max: blue_max,
+            gamma: blue_gamma,
+        };
+        extract_pixel_rgb_tile(
+            &guard.0, &request, red_band, green_band, blue_band, &rs, &gs, &bs,
+        )
+    })
+    .await
+    .map_err(|e| e.to_string())??;
+    Ok(Response::new(bytes))
 }
 
 /// Get a cross-layer RGB tile for non-georeferenced images (using pixel coordinates)
@@ -743,58 +693,46 @@ pub async fn get_cross_layer_pixel_rgb_tile(
     blue_max: f64,
     blue_gamma: f64,
     state: State<'_, DatasetCache>,
-) -> Result<Vec<u8>, String> {
+) -> Result<Response, String> {
     use crate::gdal::tile_extractor::{
         extract_cross_layer_pixel_rgb_tile, StretchParams, TileRequest,
     };
-
-    let red_path = state.get_path(&red_id).ok_or("Red dataset not found")?;
-    let green_path = state.get_path(&green_id).ok_or("Green dataset not found")?;
-    let blue_path = state.get_path(&blue_id).ok_or("Blue dataset not found")?;
-
-    let red_ds =
-        Dataset::open(&red_path).map_err(|e| format!("Failed to open red raster: {}", e))?;
-    let green_ds =
-        Dataset::open(&green_path).map_err(|e| format!("Failed to open green raster: {}", e))?;
-    let blue_ds =
-        Dataset::open(&blue_path).map_err(|e| format!("Failed to open blue raster: {}", e))?;
-
-    let request = TileRequest {
-        x,
-        y,
-        z,
-        band: 1,
-        tile_size: 256,
-    };
-
-    let red_stretch = StretchParams {
-        min: red_min,
-        max: red_max,
-        gamma: red_gamma,
-    };
-    let green_stretch = StretchParams {
-        min: green_min,
-        max: green_max,
-        gamma: green_gamma,
-    };
-    let blue_stretch = StretchParams {
-        min: blue_min,
-        max: blue_max,
-        gamma: blue_gamma,
-    };
-
-    extract_cross_layer_pixel_rgb_tile(
-        &red_ds,
-        red_band,
-        &green_ds,
-        green_band,
-        &blue_ds,
-        blue_band,
-        &request,
-        &red_stretch,
-        &green_stretch,
-        &blue_stretch,
-    )
+    let r_pool = state.get_pool(&red_id).ok_or("Red dataset not found")?;
+    let g_pool = state.get_pool(&green_id).ok_or("Green dataset not found")?;
+    let b_pool = state.get_pool(&blue_id).ok_or("Blue dataset not found")?;
+    let bytes = tokio::task::spawn_blocking(move || {
+        let rg = r_pool.checkout();
+        let gg = g_pool.checkout();
+        let bg = b_pool.checkout();
+        let request = TileRequest {
+            x,
+            y,
+            z,
+            band: 1,
+            tile_size: 256,
+        };
+        let rs = StretchParams {
+            min: red_min,
+            max: red_max,
+            gamma: red_gamma,
+        };
+        let gs = StretchParams {
+            min: green_min,
+            max: green_max,
+            gamma: green_gamma,
+        };
+        let bs = StretchParams {
+            min: blue_min,
+            max: blue_max,
+            gamma: blue_gamma,
+        };
+        extract_cross_layer_pixel_rgb_tile(
+            &rg.0, red_band, &gg.0, green_band, &bg.0, blue_band, &request, &rs, &gs, &bs,
+        )
+    })
+    .await
+    .map_err(|e| e.to_string())??;
+    Ok(Response::new(bytes))
 }
 
 /// Close a dataset and remove from cache
@@ -828,8 +766,9 @@ pub async fn query_pixel_value(
     lat: f64,
     state: State<'_, DatasetCache>,
 ) -> Result<PixelValueResult, String> {
-    let path = state.get_path(&id).ok_or("Dataset not found")?;
-    let dataset = Dataset::open(&path).map_err(|e| format!("Failed to open raster: {}", e))?;
+    let ds_pool = state.get_pool(&id).ok_or("Dataset not found")?;
+    let ds_guard = ds_pool.checkout();
+    let dataset = &ds_guard.0;
 
     let gt = dataset
         .geo_transform()
@@ -952,8 +891,9 @@ pub async fn get_elevation_profile(
     num_samples: Option<usize>,
     state: State<'_, DatasetCache>,
 ) -> Result<ProfileResult, String> {
-    let path = state.get_path(&id).ok_or("Dataset not found")?;
-    let dataset = Dataset::open(&path).map_err(|e| format!("Failed to open raster: {}", e))?;
+    let ds_pool = state.get_pool(&id).ok_or("Dataset not found")?;
+    let ds_guard = ds_pool.checkout();
+    let dataset = &ds_guard.0;
 
     let gt = dataset
         .geo_transform()
@@ -1144,8 +1084,9 @@ pub async fn get_elevation_profile_pixels(
     num_samples: Option<usize>,
     state: State<'_, DatasetCache>,
 ) -> Result<ProfileResult, String> {
-    let path = state.get_path(&id).ok_or("Dataset not found")?;
-    let dataset = Dataset::open(&path).map_err(|e| format!("Failed to open raster: {}", e))?;
+    let ds_pool = state.get_pool(&id).ok_or("Dataset not found")?;
+    let ds_guard = ds_pool.checkout();
+    let dataset = &ds_guard.0;
 
     let (width, height) = dataset.raster_size();
     let band = dataset
@@ -1275,8 +1216,9 @@ pub async fn query_pixel_value_at_pixel(
     pixel_y: i32,
     state: State<'_, DatasetCache>,
 ) -> Result<PixelValueResult, String> {
-    let path = state.get_path(&id).ok_or("Dataset not found")?;
-    let dataset = Dataset::open(&path).map_err(|e| format!("Failed to open raster: {}", e))?;
+    let ds_pool = state.get_pool(&id).ok_or("Dataset not found")?;
+    let ds_guard = ds_pool.checkout();
+    let dataset = &ds_guard.0;
 
     let (width, height) = dataset.raster_size();
 

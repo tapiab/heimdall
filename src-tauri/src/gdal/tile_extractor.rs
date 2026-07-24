@@ -1,10 +1,15 @@
 #![allow(clippy::too_many_arguments)]
 
-use gdal::raster::reproject;
 use gdal::raster::ColorInterpretation;
 use gdal::spatial_ref::SpatialRef;
 use gdal::{Dataset, DriverManager};
-use image::ImageBuffer;
+use gdal_sys::{
+    CPLErr, GDALChunkAndWarpImage, GDALCreateGenImgProjTransformer, GDALCreateWarpOperation,
+    GDALCreateWarpOptions, GDALDestroyGenImgProjTransformer, GDALDestroyWarpOperation,
+    GDALDestroyWarpOptions, GDALGenImgProjTransform, GDALResampleAlg,
+};
+use image::codecs::png::{CompressionType, FilterType, PngEncoder};
+use image::ImageEncoder;
 use std::f64::consts::PI;
 use std::io::Cursor;
 
@@ -207,25 +212,29 @@ fn compute_tile_coverage_mask(
     Ok(mask)
 }
 
-/// Extract raw tile data (f64 values) for a single band
-fn extract_raw_tile(dataset: &Dataset, request: &TileRequest) -> Result<Vec<f64>, String> {
-    // Get tile bounds in Web Mercator (EPSG:3857)
+/// Warp specific bands from `dataset` into a 256×256 Web Mercator tile in one pass.
+///
+/// `bands` is a list of 1-indexed source band numbers. Returns one `Vec<f64>` per
+/// requested band in the same order. Using a single warp for N bands avoids the
+/// N× overhead of calling the old per-band helper (especially bad for 32-band
+/// hyperspectral data where the old code warped all bands but read only one).
+fn warp_bands(
+    dataset: &Dataset,
+    request: &TileRequest,
+    bands: &[i32],
+) -> Result<Vec<Vec<f64>>, String> {
     let tile_bounds = tile_to_web_mercator_bounds(request.x, request.y, request.z);
     let tile_size = request.tile_size;
-    let band_count = dataset.raster_count();
+    let n_bands = bands.len();
 
-    // Create in-memory output dataset in Web Mercator with same number of bands
-    let mem_driver = DriverManager::get_driver_by_name("MEM")
-        .map_err(|e| format!("Failed to get MEM driver: {}", e))?;
-
+    let mem_driver =
+        DriverManager::get_driver_by_name("MEM").map_err(|e| format!("MEM driver: {}", e))?;
     let mut output_ds = mem_driver
-        .create_with_band_type::<f64, _>("", tile_size, tile_size, band_count)
-        .map_err(|e| format!("Failed to create output dataset: {}", e))?;
+        .create_with_band_type::<f64, _>("", tile_size, tile_size, n_bands)
+        .map_err(|e| format!("create output dataset: {}", e))?;
 
-    // Set output geotransform for Web Mercator tile
     let pixel_size_x = (tile_bounds[2] - tile_bounds[0]) / tile_size as f64;
     let pixel_size_y = (tile_bounds[1] - tile_bounds[3]) / tile_size as f64;
-
     output_ds
         .set_geo_transform(&[
             tile_bounds[0],
@@ -235,28 +244,78 @@ fn extract_raw_tile(dataset: &Dataset, request: &TileRequest) -> Result<Vec<f64>
             0.0,
             pixel_size_y,
         ])
-        .map_err(|e| format!("Failed to set geotransform: {}", e))?;
-
-    // Set output projection to Web Mercator
-    let web_mercator =
-        SpatialRef::from_epsg(3857).map_err(|e| format!("Failed to create EPSG:3857: {}", e))?;
+        .map_err(|e| format!("set geotransform: {}", e))?;
+    let web_mercator = SpatialRef::from_epsg(3857).map_err(|e| format!("EPSG:3857: {}", e))?;
     output_ds
         .set_projection(&web_mercator.to_wkt().unwrap_or_default())
-        .map_err(|e| format!("Failed to set projection: {}", e))?;
+        .map_err(|e| format!("set projection: {}", e))?;
 
-    // Use GDAL's warp to reproject all bands
-    reproject(dataset, &output_ds).map_err(|e| format!("Failed to reproject: {}", e))?;
+    // src_bands: which source bands to read; dst_bands: corresponding 1-indexed output bands.
+    let mut src_bands: Vec<i32> = bands.to_vec();
+    let mut dst_bands: Vec<i32> = (1..=(n_bands as i32)).collect();
 
-    // Read the requested band from the reprojected output
-    let output_band = output_ds
-        .rasterband(request.band as usize)
-        .map_err(|e| format!("Failed to get output band {}: {}", request.band, e))?;
+    unsafe {
+        let transformer = GDALCreateGenImgProjTransformer(
+            dataset.c_dataset(),
+            std::ptr::null(),
+            output_ds.c_dataset(),
+            std::ptr::null(),
+            0, // no GCP fallback
+            0.0,
+            0,
+        );
+        if transformer.is_null() {
+            return Err("Failed to create warp transformer".to_string());
+        }
 
-    let buffer = output_band
-        .read_as::<f64>((0, 0), (tile_size, tile_size), (tile_size, tile_size), None)
-        .map_err(|e| format!("Failed to read output: {}", e))?;
+        let warp_opts = GDALCreateWarpOptions();
+        (*warp_opts).hSrcDS = dataset.c_dataset();
+        (*warp_opts).hDstDS = output_ds.c_dataset();
+        (*warp_opts).nBandCount = n_bands as i32;
+        (*warp_opts).panSrcBands = src_bands.as_mut_ptr();
+        (*warp_opts).panDstBands = dst_bands.as_mut_ptr();
+        (*warp_opts).eResampleAlg = GDALResampleAlg::GRA_Bilinear;
+        (*warp_opts).pfnTransformer = Some(GDALGenImgProjTransform);
+        (*warp_opts).pTransformerArg = transformer;
 
-    Ok(buffer.data().to_vec())
+        // GDALCreateWarpOperation deep-copies the options (including band arrays),
+        // so null our Rust-owned pointers before GDALDestroyWarpOptions to prevent
+        // it from calling CPLFree on Rust-managed memory.
+        let warp_op = GDALCreateWarpOperation(warp_opts);
+        (*warp_opts).panSrcBands = std::ptr::null_mut();
+        (*warp_opts).panDstBands = std::ptr::null_mut();
+        (*warp_opts).pfnTransformer = None;
+        (*warp_opts).pTransformerArg = std::ptr::null_mut();
+        GDALDestroyWarpOptions(warp_opts);
+
+        if warp_op.is_null() {
+            GDALDestroyGenImgProjTransformer(transformer);
+            return Err("Failed to create warp operation".to_string());
+        }
+
+        let rv = GDALChunkAndWarpImage(warp_op, 0, 0, tile_size as i32, tile_size as i32);
+
+        // Destroy op first; transformer is NOT freed by DestroyWarpOperation.
+        GDALDestroyWarpOperation(warp_op);
+        GDALDestroyGenImgProjTransformer(transformer);
+
+        if rv != CPLErr::CE_None {
+            return Err("Warp failed".to_string());
+        }
+    }
+
+    let mut results = Vec::with_capacity(n_bands);
+    for i in 1..=(n_bands) {
+        let band = output_ds
+            .rasterband(i)
+            .map_err(|e| format!("get output band {}: {}", i, e))?;
+        let buffer = band
+            .read_as::<f64>((0, 0), (tile_size, tile_size), (tile_size, tile_size), None)
+            .map_err(|e| format!("read band {}: {}", i, e))?;
+        results.push(buffer.data().to_vec());
+    }
+
+    Ok(results)
 }
 
 /// Apply stretch and gamma to a value
@@ -382,8 +441,7 @@ pub fn extract_tile_with_stretch(
         .map_err(|e| format!("Failed to get band: {}", e))?;
     let nodata = band.no_data_value();
 
-    // Extract raw tile data
-    let data = extract_raw_tile(dataset, request)?;
+    let data = warp_bands(dataset, request, &[request.band])?.remove(0);
     let tile_size = request.tile_size;
 
     // Create RGBA output
@@ -446,23 +504,11 @@ pub fn extract_rgb_tile(
 
     let nd = resolve_rgb_nodata(dataset, red_band, green_band, blue_band);
 
-    // Extract raw data for each band
-    let r_request = TileRequest {
-        band: red_band,
-        ..*request
-    };
-    let g_request = TileRequest {
-        band: green_band,
-        ..*request
-    };
-    let b_request = TileRequest {
-        band: blue_band,
-        ..*request
-    };
-
-    let r_data = extract_raw_tile(dataset, &r_request)?;
-    let g_data = extract_raw_tile(dataset, &g_request)?;
-    let b_data = extract_raw_tile(dataset, &b_request)?;
+    // Single warp pass for all 3 bands — avoids warping all N source bands 3 times.
+    let mut rgb = warp_bands(dataset, request, &[red_band, green_band, blue_band])?;
+    let b_data = rgb.remove(2);
+    let g_data = rgb.remove(1);
+    let r_data = rgb.remove(0);
 
     let tile_size = request.tile_size;
     let mut tile_data = vec![0u8; tile_size * tile_size * 4];
@@ -511,16 +557,20 @@ fn create_empty_tile(size: usize) -> Result<Vec<u8>, String> {
 }
 
 fn encode_png(rgba_data: &[u8], size: usize) -> Result<Vec<u8>, String> {
-    let img: ImageBuffer<image::Rgba<u8>, Vec<u8>> =
-        ImageBuffer::from_raw(size as u32, size as u32, rgba_data.to_vec())
-            .ok_or("Failed to create image buffer")?;
-
     let mut bytes: Vec<u8> = Vec::new();
-    let mut cursor = Cursor::new(&mut bytes);
-
-    img.write_to(&mut cursor, image::ImageFormat::Png)
+    let encoder = PngEncoder::new_with_quality(
+        Cursor::new(&mut bytes),
+        CompressionType::Fast,
+        FilterType::NoFilter,
+    );
+    encoder
+        .write_image(
+            rgba_data,
+            size as u32,
+            size as u32,
+            image::ExtendedColorType::Rgba8,
+        )
         .map_err(|e| format!("Failed to encode PNG: {}", e))?;
-
     Ok(bytes)
 }
 
@@ -671,22 +721,10 @@ pub fn extract_cross_layer_rgb_tile(
     let tile_size = request.tile_size;
 
     // Extract raw data from each dataset
-    let r_request = TileRequest {
-        band: red_band,
-        ..*request
-    };
-    let g_request = TileRequest {
-        band: green_band,
-        ..*request
-    };
-    let b_request = TileRequest {
-        band: blue_band,
-        ..*request
-    };
-
-    let r_data = extract_raw_tile(red_ds, &r_request)?;
-    let g_data = extract_raw_tile(green_ds, &g_request)?;
-    let b_data = extract_raw_tile(blue_ds, &b_request)?;
+    // 3 different datasets — one warp each, but each warp touches only 1 band.
+    let r_data = warp_bands(red_ds, request, &[red_band])?.remove(0);
+    let g_data = warp_bands(green_ds, request, &[green_band])?.remove(0);
+    let b_data = warp_bands(blue_ds, request, &[blue_band])?.remove(0);
 
     // Get nodata values
     let r_nodata = red_ds

@@ -896,13 +896,13 @@ pub async fn browse_static_collection(
         );
 
         for (i, link) in item_links.iter().take(max_items).enumerate() {
-            println!("[STAC] Raw href from link: {}", &link.href);
+            println!("[STAC] Raw href from link: {}", link.href);
             let item_url = resolve_url(&collection_url, &link.href);
             println!(
                 "[STAC] Fetching item {}/{}: {}",
                 i + 1,
                 max_items.min(item_links.len()),
-                &item_url
+                item_url
             );
             match fetch_single_item(&client, &item_url).await {
                 Ok(item) => {
@@ -1206,7 +1206,7 @@ pub async fn open_stac_asset(
     // Try streaming via /vsicurl/ first (efficient for COGs on servers with Range support)
     let (dataset_path, dataset) = if supports_range {
         println!("[GDAL] Server supports Range requests, using /vsicurl/");
-        println!("[GDAL] Attempting to open: {}", &vsicurl_path);
+        println!("[GDAL] Attempting to open: {}", vsicurl_path);
         match Dataset::open_ex(&vsicurl_path, make_options()) {
             Ok(ds) => (vsicurl_path.clone(), ds),
             Err(e) => {
@@ -1305,7 +1305,9 @@ pub async fn open_stac_asset(
         is_georeferenced,
     };
 
-    state.add(id, final_path);
+    let final_dataset = Dataset::open(&final_path)
+        .map_err(|e| format!("Failed to open dataset for cache: {}", e))?;
+    state.add(id, final_path, final_dataset);
 
     Ok(metadata)
 }

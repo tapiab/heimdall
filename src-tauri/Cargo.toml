@@ -1,6 +1,6 @@
 [package]
 name = "heimdall"
-version = "0.5.5-dev1"
+version = "0.5.6"
 edition = "2021"
 
 [build-dependencies]
@@ -30,9 +30,11 @@ dirs = "6"
 # Use bindgen on non-Windows; pre-built bindings on Windows.
 [target.'cfg(not(target_os = "windows"))'.dependencies]
 gdal = { git = "https://github.com/AlexanderWillner/gdal", rev = "bc255dce662300a70d64b64be7c641912f48e780", features = ["bindgen"] }
+gdal-sys = { git = "https://github.com/AlexanderWillner/gdal", rev = "bc255dce662300a70d64b64be7c641912f48e780", features = ["bindgen"] }
 
 [target.'cfg(target_os = "windows")'.dependencies]
 gdal = { git = "https://github.com/AlexanderWillner/gdal", rev = "bc255dce662300a70d64b64be7c641912f48e780" }
+gdal-sys = { git = "https://github.com/AlexanderWillner/gdal", rev = "bc255dce662300a70d64b64be7c641912f48e780" }
 
 [profile.release]
 # Use "debuginfo" instead of true to keep symbols needed by Tauri bundler
