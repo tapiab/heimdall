@@ -64,7 +64,7 @@ export function setupTileProtocol(
       }
 
       try {
-        let tileData: number[];
+        let tileData: ArrayBuffer;
 
         if (layer.displayMode === 'crossLayerRgb' && layer.crossLayerRgb) {
           // Cross-layer RGB: get bands from different datasets
@@ -81,7 +81,7 @@ export function setupTileProtocol(
               ? 'get_cross_layer_pixel_rgb_tile'
               : 'get_cross_layer_rgb_tile';
 
-            tileData = await invoke<number[]>(command, {
+            tileData = await invoke<ArrayBuffer>(command, {
               redId: cross.rLayerId,
               redBand: cross.rBand,
               greenId: cross.gLayerId,
@@ -114,7 +114,7 @@ export function setupTileProtocol(
             isGeoreferenced: layer.is_georeferenced,
           });
           const command = layer.is_georeferenced ? 'get_rgb_tile' : 'get_pixel_rgb_tile';
-          tileData = await invoke<number[]>(command, {
+          tileData = await invoke<ArrayBuffer>(command, {
             id: datasetId,
             x: parseInt(x, 10),
             y: parseInt(y, 10),
@@ -136,7 +136,7 @@ export function setupTileProtocol(
           // Grayscale mode with stretch
           // Use pixel tile for non-georeferenced images
           if (!layer.is_georeferenced) {
-            tileData = await invoke<number[]>('get_pixel_tile', {
+            tileData = await invoke<ArrayBuffer>('get_pixel_tile', {
               id: datasetId,
               x: parseInt(x, 10),
               y: parseInt(y, 10),
@@ -147,7 +147,7 @@ export function setupTileProtocol(
               gamma: layer.stretch.gamma,
             });
           } else {
-            tileData = await invoke<number[]>('get_tile_stretched', {
+            tileData = await invoke<ArrayBuffer>('get_tile_stretched', {
               id: datasetId,
               x: parseInt(x, 10),
               y: parseInt(y, 10),
@@ -160,7 +160,7 @@ export function setupTileProtocol(
           }
         }
 
-        return { data: new Uint8Array(tileData) };
+        return { data: new Uint8Array(tileData as ArrayBuffer) };
       } catch (error) {
         log.error('Failed to load tile', { error: String(error) });
         throw error;
@@ -213,7 +213,7 @@ export function setupCompositionTileProtocol(
 
       try {
         // Always use RGB mode for composition layers
-        const tileData = await invoke<number[]>('get_rgb_tile', {
+        const tileData = await invoke<ArrayBuffer>('get_rgb_tile', {
           id: sourceLayerId,
           x: parseInt(x, 10),
           y: parseInt(y, 10),
@@ -232,7 +232,7 @@ export function setupCompositionTileProtocol(
           blueGamma: layer.rgbStretch.b.gamma,
         });
 
-        return { data: new Uint8Array(tileData) };
+        return { data: new Uint8Array(tileData as ArrayBuffer) };
       } catch (error) {
         log.error('Failed to load composition tile', { error: String(error) });
         throw error;
@@ -298,7 +298,7 @@ export function setupCrossLayerCompositionTileProtocol(
           ? 'get_cross_layer_pixel_rgb_tile'
           : 'get_cross_layer_rgb_tile';
 
-        const tileData = await invoke<number[]>(command, {
+        const tileData = await invoke<ArrayBuffer>(command, {
           redId: rLayerId,
           redBand: rBand || 1,
           greenId: gLayerId,
@@ -319,7 +319,7 @@ export function setupCrossLayerCompositionTileProtocol(
           blueGamma: layer.rgbStretch?.b?.gamma ?? 1.0,
         });
 
-        return { data: new Uint8Array(tileData) };
+        return { data: new Uint8Array(tileData as ArrayBuffer) };
       } catch (error) {
         log.error('Failed to load cross-layer composition tile', { error: String(error) });
         throw error;

@@ -1305,7 +1305,9 @@ pub async fn open_stac_asset(
         is_georeferenced,
     };
 
-    state.add(id, final_path);
+    let final_dataset = Dataset::open(&final_path)
+        .map_err(|e| format!("Failed to open dataset for cache: {}", e))?;
+    state.add(id, final_path, final_dataset);
 
     Ok(metadata)
 }

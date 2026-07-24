@@ -74,7 +74,10 @@ fn init_gdal_for_remote_access() {
     std::env::set_var("GDAL_HTTP_CONNECTTIMEOUT", "60");
     std::env::set_var("GDAL_HTTP_TIMEOUT", "120");
     std::env::set_var("VSI_CACHE", "TRUE");
-    std::env::set_var("VSI_CACHE_SIZE", "50000000"); // 50MB cache
+    std::env::set_var("VSI_CACHE_SIZE", "200000000");
+    std::env::set_var("GDAL_CACHEMAX", "512");
+    std::env::set_var("GDAL_HTTP_MERGE_CONSECUTIVE_REQUESTS", "YES");
+    std::env::set_var("CPL_VSIL_CURL_CHUNK_SIZE", "524288");
     std::env::set_var(
         "CPL_VSIL_CURL_ALLOWED_EXTENSIONS",
         ".tif,.tiff,.TIF,.TIFF,.vrt,.VRT,.jp2,.JP2,.j2k,.J2K",
@@ -89,7 +92,10 @@ fn init_gdal_for_remote_access() {
     let _ = config::set_config_option("GDAL_HTTP_CONNECTTIMEOUT", "60");
     let _ = config::set_config_option("GDAL_HTTP_TIMEOUT", "120");
     let _ = config::set_config_option("VSI_CACHE", "TRUE");
-    let _ = config::set_config_option("VSI_CACHE_SIZE", "50000000");
+    let _ = config::set_config_option("VSI_CACHE_SIZE", "200000000"); // 200MB raw HTTP byte cache
+    let _ = config::set_config_option("GDAL_CACHEMAX", "512"); // 512MB decoded block cache
+    let _ = config::set_config_option("GDAL_HTTP_MERGE_CONSECUTIVE_REQUESTS", "YES");
+    let _ = config::set_config_option("CPL_VSIL_CURL_CHUNK_SIZE", "524288"); // 512KB vs 16KB default
     let _ = config::set_config_option(
         "CPL_VSIL_CURL_ALLOWED_EXTENSIONS",
         ".tif,.tiff,.TIF,.TIFF,.vrt,.VRT,.jp2,.JP2,.j2k,.J2K",
