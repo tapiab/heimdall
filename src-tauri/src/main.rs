@@ -10,7 +10,7 @@ use commands::raster::{
     close_dataset, get_cross_layer_pixel_rgb_tile, get_cross_layer_rgb_tile, get_elevation_profile,
     get_elevation_profile_pixels, get_histogram, get_pixel_rgb_tile, get_pixel_tile,
     get_raster_stats, get_rgb_tile, get_tile, get_tile_stretched, open_raster, query_pixel_value,
-    query_pixel_value_at_pixel,
+    query_pixel_value_at_pixel, set_rpc_elevation,
 };
 use commands::stac::{
     browse_static_collection, connect_stac_api, fetch_stac_resource, fetch_stac_thumbnail,
@@ -133,6 +133,7 @@ fn main() {
             get_tile,
             get_tile_stretched,
             get_rgb_tile,
+            set_rpc_elevation,
             get_cross_layer_rgb_tile,
             get_cross_layer_pixel_rgb_tile,
             get_pixel_tile,

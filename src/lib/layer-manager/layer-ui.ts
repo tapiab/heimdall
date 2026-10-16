@@ -3,12 +3,14 @@
  * @module layer-manager/layer-ui
  */
 
+import { open } from '@tauri-apps/plugin-dialog';
 import type {
   LayerManagerInterface,
   RasterLayer,
   VectorLayer,
   CrossLayerRgbConfig,
   LayerManagerOptions,
+  RpcElevation,
 } from './types';
 import { computeFilterableFields, type FilterableField } from './vector-handler';
 
@@ -24,6 +26,7 @@ interface LayerManagerWithUI extends LayerManagerInterface {
   setLayerDisplayMode: (id: string, mode: string) => void;
   setLayerBand: (id: string, band: number) => void;
   setLayerStretch: (id: string, min: number, max: number, gamma: number) => void;
+  setRpcElevation: (id: string, elevation: RpcElevation) => Promise<void>;
   setRgbBands: (id: string, r: number, g: number, b: number) => void;
   setRgbStretch: (
     id: string,
@@ -745,10 +748,86 @@ function renderRasterControls(
     controlsHtml += renderRgbControls(layer);
   }
 
+  if (layer.georef_method === 'rpc') {
+    controlsHtml += renderRpcElevationControls(layer);
+  }
+
   controlsPanel.innerHTML = controlsHtml;
 
   // Attach event listeners
   attachRasterEventListeners(manager, layer);
+  if (layer.georef_method === 'rpc') {
+    attachRpcElevationListeners(manager, layer);
+  }
+}
+
+function escapeHtml(text: string): string {
+  return text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+/**
+ * Render RPC terrain controls: DEM picker and constant height fallback
+ */
+function renderRpcElevationControls(layer: RasterLayer): string {
+  const elevation = layer.rpcElevation ?? { demPath: null, height: null };
+  const demName = elevation.demPath?.split('/').pop()?.split('\\').pop();
+  const defaultHeight = layer.rpc_default_height ?? 0;
+  const heightLabel = elevation.demPath ? 'Height outside DEM (m)' : 'Height (m)';
+  return `
+    <div class="control-section">
+      <label>RPC Elevation</label>
+      <div class="value-display" id="rpc-dem-name" title="${escapeHtml(elevation.demPath ?? '')}">
+        ${demName ? `DEM: ${escapeHtml(demName)}` : 'No DEM (constant height)'}
+      </div>
+      <button id="rpc-dem-choose" class="control-btn">${demName ? 'Change DEM...' : 'Choose DEM...'}</button>
+      ${demName ? '<button id="rpc-dem-clear" class="control-btn">Remove DEM</button>' : ''}
+    </div>
+    <div class="control-section">
+      <label for="rpc-height">${heightLabel}</label>
+      <input type="number" id="rpc-height" step="1" placeholder="${defaultHeight} (model default)"
+        value="${elevation.height ?? ''}">
+    </div>
+  `;
+}
+
+/**
+ * Attach RPC terrain control listeners
+ */
+function attachRpcElevationListeners(manager: LayerManagerWithUI, layer: RasterLayer): void {
+  const current = (): RpcElevation => layer.rpcElevation ?? { demPath: null, height: null };
+
+  document.getElementById('rpc-dem-choose')?.addEventListener('click', async () => {
+    const selected = await open({
+      multiple: false,
+      title: 'Select DEM',
+      filters: [
+        {
+          name: 'Elevation rasters',
+          extensions: ['tif', 'tiff', 'vrt', 'dt0', 'dt1', 'dt2', 'hgt', 'img'],
+        },
+        { name: 'All files', extensions: ['*'] },
+      ],
+    });
+    if (typeof selected === 'string') {
+      await manager.setRpcElevation(layer.id, { ...current(), demPath: selected });
+    }
+  });
+
+  document.getElementById('rpc-dem-clear')?.addEventListener('click', () => {
+    void manager.setRpcElevation(layer.id, { ...current(), demPath: null });
+  });
+
+  const heightInput = document.getElementById('rpc-height') as HTMLInputElement | null;
+  heightInput?.addEventListener('change', () => {
+    const raw = heightInput.value.trim();
+    const height = raw === '' ? null : Number(raw);
+    if (height !== null && !Number.isFinite(height)) return;
+    void manager.setRpcElevation(layer.id, { ...current(), height });
+  });
 }
 
 /**

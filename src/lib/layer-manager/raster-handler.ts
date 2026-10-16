@@ -7,7 +7,13 @@ import { invoke } from '@tauri-apps/api/core';
 import { showToast, showError, showLoading, hideLoading } from '../notifications';
 import { setupTileProtocol } from './tile-protocol';
 import { logger } from '../logger';
-import type { LayerManagerInterface, RasterLayer, BandStats, DisplayMode } from './types';
+import type {
+  LayerManagerInterface,
+  RasterLayer,
+  BandStats,
+  DisplayMode,
+  RpcElevation,
+} from './types';
 
 const log = logger.child('LayerManager:Raster');
 
@@ -21,6 +27,29 @@ interface RasterMetadata {
   bounds: [number, number, number, number];
   band_stats: BandStats[];
   is_georeferenced: boolean;
+  georef_method?: 'geotransform' | 'rpc' | 'none';
+  rpc_default_height?: number | null;
+}
+
+/**
+ * Margin added around an RPC footprint for the map source bounds. Picking a
+ * DEM or height shifts the footprint; tiles outside source bounds are never
+ * requested, so leave room rather than rebuilding the source.
+ */
+const RPC_BOUNDS_MARGIN = 0.1;
+
+function padBounds(
+  bounds: [number, number, number, number],
+  ratio: number
+): [number, number, number, number] {
+  const dx = (bounds[2] - bounds[0]) * ratio;
+  const dy = (bounds[3] - bounds[1]) * ratio;
+  return [
+    Math.max(bounds[0] - dx, -180),
+    Math.max(bounds[1] - dy, -85.0511),
+    Math.min(bounds[2] + dx, 180),
+    Math.min(bounds[3] + dy, 85.0511),
+  ];
 }
 
 /**
@@ -108,7 +137,9 @@ export async function addRasterLayer(
 
     // For non-georeferenced images, use pseudo-geographic bounds
     let mapBounds = metadata.bounds;
-    if (!metadata.is_georeferenced) {
+    if (metadata.georef_method === 'rpc') {
+      mapBounds = padBounds(metadata.bounds, RPC_BOUNDS_MARGIN);
+    } else if (!metadata.is_georeferenced) {
       // Scale image to fit within valid lat/lon bounds
       const scale = 0.01;
       const halfWidth = (metadata.width * scale) / 2;
@@ -199,6 +230,49 @@ export function setLayerStretch(
 
   layer.stretch = { min, max, gamma };
   manager.refreshLayerTiles(id);
+}
+
+/**
+ * Set the terrain used to project an RPC layer and redraw it (and any
+ * composition built on it, since they share the backend dataset).
+ * @param manager - The LayerManager instance
+ * @param id - Layer ID
+ * @param elevation - DEM path and/or constant height; nulls restore the model default
+ */
+export async function setRpcElevation(
+  manager: LayerManagerInterface,
+  id: string,
+  elevation: RpcElevation
+): Promise<void> {
+  const layer = manager.layers.get(id) as RasterLayer | undefined;
+  if (!layer || layer.georef_method !== 'rpc') return;
+
+  showLoading(elevation.demPath ? 'Projecting with DEM...' : 'Updating projection...');
+  try {
+    const bounds = await invoke<[number, number, number, number]>('set_rpc_elevation', {
+      id,
+      demPath: elevation.demPath,
+      height: elevation.height,
+    });
+    layer.rpcElevation = { ...elevation };
+    layer.bounds = bounds;
+    log.debug('RPC elevation set', { id, ...elevation, bounds });
+
+    for (const [otherId, other] of manager.layers) {
+      if (other.type !== 'raster') continue;
+      const rgb = other.crossLayerRgb;
+      const dependsOnLayer =
+        otherId === id ||
+        other.sourceLayerId === id ||
+        (rgb && [rgb.rLayerId, rgb.gLayerId, rgb.bLayerId].includes(id));
+      if (dependsOnLayer) manager.refreshLayerTiles(otherId);
+    }
+    manager.updateDynamicControls();
+  } catch (error) {
+    showError('Failed to set elevation', error as Error);
+  } finally {
+    hideLoading();
+  }
 }
 
 /**

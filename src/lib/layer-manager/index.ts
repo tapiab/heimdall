@@ -26,6 +26,7 @@ import type {
   DisplayMode,
   VectorStyle,
   LayerManagerOptions,
+  RpcElevation,
 } from './types';
 
 /** Value for a single band from pixel query */
@@ -52,6 +53,7 @@ import {
   setRgbBands,
   setRgbStretch,
   refreshLayerTiles,
+  setRpcElevation,
 } from './raster-handler';
 import {
   addVectorLayer,
@@ -504,6 +506,15 @@ export class LayerManager {
     gamma: number
   ): void {
     setRgbStretch(this, id, channel, min, max, gamma);
+  }
+
+  /**
+   * Set the terrain (DEM and/or constant height) used to project an RPC layer.
+   * @param id - Layer ID
+   * @param elevation - DEM path and height; nulls restore the RPC model default
+   */
+  setRpcElevation(id: string, elevation: RpcElevation): Promise<void> {
+    return setRpcElevation(this, id, elevation);
   }
 
   /**

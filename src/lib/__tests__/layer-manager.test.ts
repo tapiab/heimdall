@@ -495,6 +495,68 @@ describe('LayerManager', () => {
       await expect(layerManager.removeLayer('non-existent')).resolves.not.toThrow();
     });
   });
+
+  describe('setRpcElevation', () => {
+    const newBounds = [9.4, 44.4, 10.6, 45.6];
+
+    beforeEach(() => {
+      layerManager.layers.set('rpc-layer', {
+        id: 'rpc-layer',
+        type: 'raster',
+        path: '/path/to/scene.tif',
+        visible: true,
+        georef_method: 'rpc',
+        bounds: [9.5, 44.5, 10.5, 45.5],
+      });
+      layerManager.layers.set('rpc-comp', {
+        id: 'rpc-comp',
+        type: 'raster',
+        isComposition: true,
+        sourceLayerId: 'rpc-layer',
+      });
+      layerManager.layers.set('other', { id: 'other', type: 'raster' });
+      layerManager.refreshLayerTiles = vi.fn();
+      layerManager.updateDynamicControls = vi.fn();
+      invoke.mockResolvedValue(newBounds);
+    });
+
+    it('should send DEM and height to the backend', async () => {
+      await layerManager.setRpcElevation('rpc-layer', { demPath: '/dem.tif', height: 120 });
+      expect(invoke).toHaveBeenCalledWith('set_rpc_elevation', {
+        id: 'rpc-layer',
+        demPath: '/dem.tif',
+        height: 120,
+      });
+    });
+
+    it('should store elevation and updated footprint on the layer', async () => {
+      await layerManager.setRpcElevation('rpc-layer', { demPath: '/dem.tif', height: null });
+      const layer = layerManager.layers.get('rpc-layer');
+      expect(layer.rpcElevation).toEqual({ demPath: '/dem.tif', height: null });
+      expect(layer.bounds).toEqual(newBounds);
+    });
+
+    it('should refresh the layer and compositions built on it only', async () => {
+      await layerManager.setRpcElevation('rpc-layer', { demPath: null, height: 50 });
+      expect(layerManager.refreshLayerTiles).toHaveBeenCalledWith('rpc-layer');
+      expect(layerManager.refreshLayerTiles).toHaveBeenCalledWith('rpc-comp');
+      expect(layerManager.refreshLayerTiles).not.toHaveBeenCalledWith('other');
+    });
+
+    it('should keep previous settings when the backend rejects', async () => {
+      invoke.mockRejectedValue(new Error('Failed to open DEM'));
+      await layerManager.setRpcElevation('rpc-layer', { demPath: '/bad.tif', height: null });
+      const layer = layerManager.layers.get('rpc-layer');
+      expect(layer.rpcElevation).toBeUndefined();
+      expect(layer.bounds).toEqual([9.5, 44.5, 10.5, 45.5]);
+      expect(layerManager.refreshLayerTiles).not.toHaveBeenCalled();
+    });
+
+    it('should ignore non-RPC layers', async () => {
+      await layerManager.setRpcElevation('other', { demPath: '/dem.tif', height: null });
+      expect(invoke).not.toHaveBeenCalledWith('set_rpc_elevation', expect.anything());
+    });
+  });
 });
 
 describe('LayerManager - Layer Panel', () => {

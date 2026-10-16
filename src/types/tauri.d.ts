@@ -37,6 +37,8 @@ export interface RasterMetadata {
   nodata?: number;
   band_stats: BandStats[];
   is_georeferenced: boolean;
+  georef_method: 'geotransform' | 'rpc' | 'none'; // how pixels are placed on the map
+  rpc_default_height?: number | null; // RPC HEIGHT_OFF (m), used when no DEM/override is set
 }
 
 // Vector field definition

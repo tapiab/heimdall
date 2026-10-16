@@ -1,6 +1,7 @@
 #![allow(clippy::too_many_arguments)]
 
 use crate::gdal::dataset_cache::DatasetCache;
+use crate::gdal::georef::{self, GeorefMethod};
 use crate::gdal::tile_extractor::{
     extract_rgb_tile, extract_tile, extract_tile_with_stretch, StretchParams, TileRequest,
 };
@@ -26,7 +27,11 @@ pub struct RasterMetadata {
     pub pixel_size: [f64; 2],
     pub nodata: Option<f64>,
     pub band_stats: Vec<BandStats>, // Stats for each band
-    pub is_georeferenced: bool,     // true if image has valid geotransform/projection
+    pub is_georeferenced: bool,     // true if image has valid geotransform/projection or RPC
+    #[serde(default)]
+    pub georef_method: GeorefMethod, // how pixels are placed on the map
+    #[serde(default)]
+    pub rpc_default_height: Option<f64>, // RPC HEIGHT_OFF, used when no DEM/override is set
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -92,28 +97,6 @@ pub fn compute_histogram_bins(
         .collect();
 
     (counts, bin_edges)
-}
-
-/// Check if a dataset has valid georeferencing
-fn is_georeferenced(dataset: &Dataset) -> bool {
-    // Check if there's a projection
-    let has_projection = !dataset.projection().is_empty();
-
-    // Check geotransform - identity would be [0, 1, 0, 0, 0, -1] or [0, 1, 0, 0, 0, 1]
-    let gt = match dataset.geo_transform() {
-        Ok(gt) => gt,
-        Err(_) => return false,
-    };
-
-    // Identity geotransform means no real georeferencing
-    let is_identity = (gt[0].abs() < 1e-10)
-        && ((gt[1] - 1.0).abs() < 1e-10)
-        && (gt[2].abs() < 1e-10)
-        && (gt[3].abs() < 1e-10)
-        && (gt[4].abs() < 1e-10)
-        && ((gt[5] + 1.0).abs() < 1e-10 || (gt[5] - 1.0).abs() < 1e-10);
-
-    has_projection || !is_identity
 }
 
 /// Calculate bounds in native CRS.
@@ -252,9 +235,18 @@ pub async fn open_raster(
 
     let (width, height) = dataset.raster_size();
     let bands = dataset.raster_count();
-    let georeferenced = is_georeferenced(&dataset);
+    let method = georef::georef_method(&dataset);
+    let georeferenced = method != GeorefMethod::None;
 
-    let (bounds, native_bounds, pixel_size) = if georeferenced {
+    let (bounds, native_bounds, pixel_size) = if method == GeorefMethod::Rpc {
+        // RPC footprint is already lon/lat; pixel size is an approximate GSD in degrees.
+        let bounds = georef::rpc_geo_bounds(&dataset)?;
+        let pixel_size = [
+            (bounds[2] - bounds[0]) / width as f64,
+            (bounds[3] - bounds[1]) / height as f64,
+        ];
+        (bounds, bounds, pixel_size)
+    } else if georeferenced {
         let native_bounds = calculate_native_bounds(&dataset)?;
         let bounds = transform_bounds_to_4326(&dataset, native_bounds)?;
         let gt = dataset
@@ -289,11 +281,52 @@ pub async fn open_raster(
         nodata,
         band_stats,
         is_georeferenced: georeferenced,
+        georef_method: method,
+        rpc_default_height: georef::rpc_default_height(&dataset),
     };
 
     state.add(id, path, dataset);
 
     Ok(metadata)
+}
+
+/// Set the terrain used to project an RPC raster: a DEM file, a constant
+/// height override, or neither (back to the model's HEIGHT_OFF). Returns the
+/// recomputed EPSG:4326 footprint, which moves with the terrain.
+#[tauri::command]
+pub async fn set_rpc_elevation(
+    id: String,
+    dem_path: Option<String>,
+    height: Option<f64>,
+    state: State<'_, DatasetCache>,
+) -> Result<[f64; 4], String> {
+    let pool = state.get_pool(&id).ok_or("Dataset not found")?;
+    tokio::task::spawn_blocking(move || {
+        if height.is_some_and(|h| !h.is_finite()) {
+            return Err("Height must be a finite number".to_string());
+        }
+        let dem_path = dem_path.filter(|p| !p.trim().is_empty());
+        if let Some(dem) = &dem_path {
+            let dem_ds = Dataset::open(dem).map_err(|e| format!("Failed to open DEM: {}", e))?;
+            if !georef::has_geotransform(&dem_ds) {
+                return Err("DEM has no georeferencing".to_string());
+            }
+        }
+
+        let guard = pool.checkout();
+        if georef::georef_method(&guard.0) != GeorefMethod::Rpc {
+            return Err("Layer is not projected with RPC".to_string());
+        }
+
+        let path = pool.path().to_string();
+        let previous = georef::get_rpc_elevation(&path);
+        georef::set_rpc_elevation(&path, georef::RpcElevation { dem_path, height });
+        georef::rpc_geo_bounds(&guard.0).inspect_err(|_| {
+            georef::set_rpc_elevation(&path, previous);
+        })
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 /// Get a tile from a raster dataset with auto stretch
@@ -738,7 +771,13 @@ pub async fn get_cross_layer_pixel_rgb_tile(
 /// Close a dataset and remove from cache
 #[tauri::command]
 pub async fn close_dataset(id: String, state: State<'_, DatasetCache>) -> Result<(), String> {
-    state.remove(&id);
+    if let Some(path) = state.remove(&id) {
+        // Elevation settings are keyed by path; drop them with the last layer
+        // so reopening the file starts from the model's default height.
+        if !state.has_path(&path) {
+            georef::set_rpc_elevation(&path, georef::RpcElevation::default());
+        }
+    }
     Ok(())
 }
 
@@ -758,24 +797,14 @@ pub struct PixelBandValue {
     pub is_nodata: bool,
 }
 
-/// Query pixel values at a specific geographic coordinate
-#[tauri::command]
-pub async fn query_pixel_value(
-    id: String,
-    lng: f64,
-    lat: f64,
-    state: State<'_, DatasetCache>,
-) -> Result<PixelValueResult, String> {
-    let ds_pool = state.get_pool(&id).ok_or("Dataset not found")?;
-    let ds_guard = ds_pool.checkout();
-    let dataset = &ds_guard.0;
-
+/// Map a lon/lat (EPSG:4326) point to integer pixel/line through the dataset's
+/// geotransform, reprojecting into its native CRS first when needed.
+fn geo_to_pixel(dataset: &Dataset, lng: f64, lat: f64) -> Result<(i32, i32), String> {
     let gt = dataset
         .geo_transform()
         .map_err(|e| format!("Failed to get geotransform: {}", e))?;
 
     let projection = dataset.projection();
-    let (width, height) = dataset.raster_size();
 
     // Transform coordinates from EPSG:4326 to native CRS if needed
     let (native_x, native_y) = if !projection.is_empty() {
@@ -817,6 +846,30 @@ pub async fn query_pixel_value(
     //                       pixel_y = (geo_y - gt[3]) / gt[5]
     let pixel_x = ((native_x - gt[0]) / gt[1]).floor() as i32;
     let pixel_y = ((native_y - gt[3]) / gt[5]).floor() as i32;
+    Ok((pixel_x, pixel_y))
+}
+
+/// Query pixel values at a specific geographic coordinate
+#[tauri::command]
+pub async fn query_pixel_value(
+    id: String,
+    lng: f64,
+    lat: f64,
+    state: State<'_, DatasetCache>,
+) -> Result<PixelValueResult, String> {
+    let ds_pool = state.get_pool(&id).ok_or("Dataset not found")?;
+    let ds_guard = ds_pool.checkout();
+    let dataset = &ds_guard.0;
+
+    let (width, height) = dataset.raster_size();
+
+    let (pixel_x, pixel_y) = if georef::georef_method(dataset) == GeorefMethod::Rpc {
+        let (mut xs, mut ys) = ([lng], [lat]);
+        georef::rpc_lonlat_to_pixel(dataset, &mut xs, &mut ys)?;
+        (xs[0].floor() as i32, ys[0].floor() as i32)
+    } else {
+        geo_to_pixel(dataset, lng, lat)?
+    };
 
     // Check if pixel is within bounds
     if pixel_x < 0 || pixel_x >= width as i32 || pixel_y < 0 || pixel_y >= height as i32 {
@@ -895,9 +948,15 @@ pub async fn get_elevation_profile(
     let ds_guard = ds_pool.checkout();
     let dataset = &ds_guard.0;
 
-    let gt = dataset
-        .geo_transform()
-        .map_err(|e| format!("Failed to get geotransform: {}", e))?;
+    let is_rpc = georef::georef_method(dataset) == GeorefMethod::Rpc;
+    // RPC rasters have no geotransform; it's only read on the affine path.
+    let gt = if is_rpc {
+        [0.0, 1.0, 0.0, 0.0, 0.0, 1.0]
+    } else {
+        dataset
+            .geo_transform()
+            .map_err(|e| format!("Failed to get geotransform: {}", e))?
+    };
 
     let projection = dataset.projection();
     let (width, height) = dataset.raster_size();
@@ -907,7 +966,7 @@ pub async fn get_elevation_profile(
     let nodata = band.no_data_value();
 
     // Create coordinate transform if needed
-    let needs_transform = !projection.is_empty() && {
+    let needs_transform = !is_rpc && !projection.is_empty() && {
         let srs = SpatialRef::from_wkt(&projection).ok();
         srs.is_some_and(|s| !s.is_geographic())
     };
@@ -1001,8 +1060,16 @@ pub async fn get_elevation_profile(
         };
 
         // Convert to pixel coordinates
-        let pixel_x = ((native_x - gt[0]) / gt[1]).floor() as i32;
-        let pixel_y = ((native_y - gt[3]) / gt[5]).floor() as i32;
+        let (pixel_x, pixel_y) = if is_rpc {
+            let (mut xs, mut ys) = ([lng], [lat]);
+            georef::rpc_lonlat_to_pixel(dataset, &mut xs, &mut ys)?;
+            (xs[0].floor() as i32, ys[0].floor() as i32)
+        } else {
+            (
+                ((native_x - gt[0]) / gt[1]).floor() as i32,
+                ((native_y - gt[3]) / gt[5]).floor() as i32,
+            )
+        };
 
         let (elevation, is_valid) =
             if pixel_x >= 0 && pixel_x < width as i32 && pixel_y >= 0 && pixel_y < height as i32 {
