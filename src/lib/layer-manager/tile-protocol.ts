@@ -12,6 +12,7 @@ import {
   type Layer,
 } from './types';
 import { logger } from '../logger';
+import { scheduleTile } from './tile-queue';
 
 const log = logger.child('LayerManager:TileProtocol');
 
@@ -45,10 +46,7 @@ export function setupTileProtocol(
 
   maplibregl.addProtocol(
     protocolName,
-    async (
-      params: ProtocolParams,
-      _abortController: AbortController
-    ): Promise<ProtocolResponse> => {
+    async (params: ProtocolParams, abortController: AbortController): Promise<ProtocolResponse> => {
       const { url } = params;
       const match = url.match(/raster-[^:]+:\/\/(\d+)\/(\d+)\/(\d+)/);
 
@@ -81,26 +79,28 @@ export function setupTileProtocol(
               ? 'get_cross_layer_pixel_rgb_tile'
               : 'get_cross_layer_rgb_tile';
 
-            tileData = await invoke<ArrayBuffer>(command, {
-              redId: cross.rLayerId,
-              redBand: cross.rBand,
-              greenId: cross.gLayerId,
-              greenBand: cross.gBand,
-              blueId: cross.bLayerId,
-              blueBand: cross.bBand,
-              x: parseInt(x, 10),
-              y: parseInt(y, 10),
-              z: parseInt(z, 10),
-              redMin: rLayer.band_stats[0]?.min || 0,
-              redMax: rLayer.band_stats[0]?.max || 255,
-              redGamma: 1.0,
-              greenMin: gLayer.band_stats[0]?.min || 0,
-              greenMax: gLayer.band_stats[0]?.max || 255,
-              greenGamma: 1.0,
-              blueMin: bLayer.band_stats[0]?.min || 0,
-              blueMax: bLayer.band_stats[0]?.max || 255,
-              blueGamma: 1.0,
-            });
+            tileData = await scheduleTile(abortController.signal, () =>
+              invoke<ArrayBuffer>(command, {
+                redId: cross.rLayerId,
+                redBand: cross.rBand,
+                greenId: cross.gLayerId,
+                greenBand: cross.gBand,
+                blueId: cross.bLayerId,
+                blueBand: cross.bBand,
+                x: parseInt(x, 10),
+                y: parseInt(y, 10),
+                z: parseInt(z, 10),
+                redMin: rLayer.band_stats[0]?.min || 0,
+                redMax: rLayer.band_stats[0]?.max || 255,
+                redGamma: 1.0,
+                greenMin: gLayer.band_stats[0]?.min || 0,
+                greenMax: gLayer.band_stats[0]?.max || 255,
+                greenGamma: 1.0,
+                blueMin: bLayer.band_stats[0]?.min || 0,
+                blueMax: bLayer.band_stats[0]?.max || 255,
+                blueGamma: 1.0,
+              })
+            );
           } else {
             // Missing layer, return empty
             return { data: new Uint8Array(0) };
@@ -114,55 +114,63 @@ export function setupTileProtocol(
             isGeoreferenced: layer.is_georeferenced,
           });
           const command = layer.is_georeferenced ? 'get_rgb_tile' : 'get_pixel_rgb_tile';
-          tileData = await invoke<ArrayBuffer>(command, {
-            id: datasetId,
-            x: parseInt(x, 10),
-            y: parseInt(y, 10),
-            z: parseInt(z, 10),
-            redBand: layer.rgbBands.r,
-            greenBand: layer.rgbBands.g,
-            blueBand: layer.rgbBands.b,
-            redMin: layer.rgbStretch.r.min,
-            redMax: layer.rgbStretch.r.max,
-            redGamma: layer.rgbStretch.r.gamma,
-            greenMin: layer.rgbStretch.g.min,
-            greenMax: layer.rgbStretch.g.max,
-            greenGamma: layer.rgbStretch.g.gamma,
-            blueMin: layer.rgbStretch.b.min,
-            blueMax: layer.rgbStretch.b.max,
-            blueGamma: layer.rgbStretch.b.gamma,
-          });
+          tileData = await scheduleTile(abortController.signal, () =>
+            invoke<ArrayBuffer>(command, {
+              id: datasetId,
+              x: parseInt(x, 10),
+              y: parseInt(y, 10),
+              z: parseInt(z, 10),
+              redBand: layer.rgbBands.r,
+              greenBand: layer.rgbBands.g,
+              blueBand: layer.rgbBands.b,
+              redMin: layer.rgbStretch.r.min,
+              redMax: layer.rgbStretch.r.max,
+              redGamma: layer.rgbStretch.r.gamma,
+              greenMin: layer.rgbStretch.g.min,
+              greenMax: layer.rgbStretch.g.max,
+              greenGamma: layer.rgbStretch.g.gamma,
+              blueMin: layer.rgbStretch.b.min,
+              blueMax: layer.rgbStretch.b.max,
+              blueGamma: layer.rgbStretch.b.gamma,
+            })
+          );
         } else {
           // Grayscale mode with stretch
           // Use pixel tile for non-georeferenced images
           if (!layer.is_georeferenced) {
-            tileData = await invoke<ArrayBuffer>('get_pixel_tile', {
-              id: datasetId,
-              x: parseInt(x, 10),
-              y: parseInt(y, 10),
-              z: parseInt(z, 10),
-              band: layer.band,
-              min: layer.stretch.min,
-              max: layer.stretch.max,
-              gamma: layer.stretch.gamma,
-            });
+            tileData = await scheduleTile(abortController.signal, () =>
+              invoke<ArrayBuffer>('get_pixel_tile', {
+                id: datasetId,
+                x: parseInt(x, 10),
+                y: parseInt(y, 10),
+                z: parseInt(z, 10),
+                band: layer.band,
+                min: layer.stretch.min,
+                max: layer.stretch.max,
+                gamma: layer.stretch.gamma,
+              })
+            );
           } else {
-            tileData = await invoke<ArrayBuffer>('get_tile_stretched', {
-              id: datasetId,
-              x: parseInt(x, 10),
-              y: parseInt(y, 10),
-              z: parseInt(z, 10),
-              band: layer.band,
-              min: layer.stretch.min,
-              max: layer.stretch.max,
-              gamma: layer.stretch.gamma,
-            });
+            tileData = await scheduleTile(abortController.signal, () =>
+              invoke<ArrayBuffer>('get_tile_stretched', {
+                id: datasetId,
+                x: parseInt(x, 10),
+                y: parseInt(y, 10),
+                z: parseInt(z, 10),
+                band: layer.band,
+                min: layer.stretch.min,
+                max: layer.stretch.max,
+                gamma: layer.stretch.gamma,
+              })
+            );
           }
         }
 
         return { data: new Uint8Array(tileData as ArrayBuffer) };
       } catch (error) {
-        log.error('Failed to load tile', { error: String(error) });
+        if ((error as Error)?.name !== 'AbortError') {
+          log.error('Failed to load tile', { error: String(error) });
+        }
         throw error;
       }
     }
@@ -191,10 +199,7 @@ export function setupCompositionTileProtocol(
 
   maplibregl.addProtocol(
     protocolName,
-    async (
-      params: ProtocolParams,
-      _abortController: AbortController
-    ): Promise<ProtocolResponse> => {
+    async (params: ProtocolParams, abortController: AbortController): Promise<ProtocolResponse> => {
       const { url } = params;
       const match = url.match(/raster-[^:]+:\/\/(\d+)\/(\d+)\/(\d+)/);
 
@@ -213,28 +218,32 @@ export function setupCompositionTileProtocol(
 
       try {
         // Always use RGB mode for composition layers
-        const tileData = await invoke<ArrayBuffer>('get_rgb_tile', {
-          id: sourceLayerId,
-          x: parseInt(x, 10),
-          y: parseInt(y, 10),
-          z: parseInt(z, 10),
-          redBand: layer.rgbBands.r,
-          greenBand: layer.rgbBands.g,
-          blueBand: layer.rgbBands.b,
-          redMin: layer.rgbStretch.r.min,
-          redMax: layer.rgbStretch.r.max,
-          redGamma: layer.rgbStretch.r.gamma,
-          greenMin: layer.rgbStretch.g.min,
-          greenMax: layer.rgbStretch.g.max,
-          greenGamma: layer.rgbStretch.g.gamma,
-          blueMin: layer.rgbStretch.b.min,
-          blueMax: layer.rgbStretch.b.max,
-          blueGamma: layer.rgbStretch.b.gamma,
-        });
+        const tileData = await scheduleTile(abortController.signal, () =>
+          invoke<ArrayBuffer>('get_rgb_tile', {
+            id: sourceLayerId,
+            x: parseInt(x, 10),
+            y: parseInt(y, 10),
+            z: parseInt(z, 10),
+            redBand: layer.rgbBands.r,
+            greenBand: layer.rgbBands.g,
+            blueBand: layer.rgbBands.b,
+            redMin: layer.rgbStretch.r.min,
+            redMax: layer.rgbStretch.r.max,
+            redGamma: layer.rgbStretch.r.gamma,
+            greenMin: layer.rgbStretch.g.min,
+            greenMax: layer.rgbStretch.g.max,
+            greenGamma: layer.rgbStretch.g.gamma,
+            blueMin: layer.rgbStretch.b.min,
+            blueMax: layer.rgbStretch.b.max,
+            blueGamma: layer.rgbStretch.b.gamma,
+          })
+        );
 
         return { data: new Uint8Array(tileData as ArrayBuffer) };
       } catch (error) {
-        log.error('Failed to load composition tile', { error: String(error) });
+        if ((error as Error)?.name !== 'AbortError') {
+          log.error('Failed to load composition tile', { error: String(error) });
+        }
         throw error;
       }
     }
@@ -263,10 +272,7 @@ export function setupCrossLayerCompositionTileProtocol(
 
   maplibregl.addProtocol(
     protocolName,
-    async (
-      params: ProtocolParams,
-      _abortController: AbortController
-    ): Promise<ProtocolResponse> => {
+    async (params: ProtocolParams, abortController: AbortController): Promise<ProtocolResponse> => {
       const { url } = params;
       const match = url.match(/raster-[^:]+:\/\/(\d+)\/(\d+)\/(\d+)/);
 
@@ -298,30 +304,34 @@ export function setupCrossLayerCompositionTileProtocol(
           ? 'get_cross_layer_pixel_rgb_tile'
           : 'get_cross_layer_rgb_tile';
 
-        const tileData = await invoke<ArrayBuffer>(command, {
-          redId: rLayerId,
-          redBand: rBand || 1,
-          greenId: gLayerId,
-          greenBand: gBand || 1,
-          blueId: bLayerId,
-          blueBand: bBand || 1,
-          x: parseInt(x, 10),
-          y: parseInt(y, 10),
-          z: parseInt(z, 10),
-          redMin: layer.rgbStretch?.r?.min ?? rLayer.band_stats[0]?.min ?? 0,
-          redMax: layer.rgbStretch?.r?.max ?? rLayer.band_stats[0]?.max ?? 255,
-          redGamma: layer.rgbStretch?.r?.gamma ?? 1.0,
-          greenMin: layer.rgbStretch?.g?.min ?? gLayer.band_stats[0]?.min ?? 0,
-          greenMax: layer.rgbStretch?.g?.max ?? gLayer.band_stats[0]?.max ?? 255,
-          greenGamma: layer.rgbStretch?.g?.gamma ?? 1.0,
-          blueMin: layer.rgbStretch?.b?.min ?? bLayer.band_stats[0]?.min ?? 0,
-          blueMax: layer.rgbStretch?.b?.max ?? bLayer.band_stats[0]?.max ?? 255,
-          blueGamma: layer.rgbStretch?.b?.gamma ?? 1.0,
-        });
+        const tileData = await scheduleTile(abortController.signal, () =>
+          invoke<ArrayBuffer>(command, {
+            redId: rLayerId,
+            redBand: rBand || 1,
+            greenId: gLayerId,
+            greenBand: gBand || 1,
+            blueId: bLayerId,
+            blueBand: bBand || 1,
+            x: parseInt(x, 10),
+            y: parseInt(y, 10),
+            z: parseInt(z, 10),
+            redMin: layer.rgbStretch?.r?.min ?? rLayer.band_stats[0]?.min ?? 0,
+            redMax: layer.rgbStretch?.r?.max ?? rLayer.band_stats[0]?.max ?? 255,
+            redGamma: layer.rgbStretch?.r?.gamma ?? 1.0,
+            greenMin: layer.rgbStretch?.g?.min ?? gLayer.band_stats[0]?.min ?? 0,
+            greenMax: layer.rgbStretch?.g?.max ?? gLayer.band_stats[0]?.max ?? 255,
+            greenGamma: layer.rgbStretch?.g?.gamma ?? 1.0,
+            blueMin: layer.rgbStretch?.b?.min ?? bLayer.band_stats[0]?.min ?? 0,
+            blueMax: layer.rgbStretch?.b?.max ?? bLayer.band_stats[0]?.max ?? 255,
+            blueGamma: layer.rgbStretch?.b?.gamma ?? 1.0,
+          })
+        );
 
         return { data: new Uint8Array(tileData as ArrayBuffer) };
       } catch (error) {
-        log.error('Failed to load cross-layer composition tile', { error: String(error) });
+        if ((error as Error)?.name !== 'AbortError') {
+          log.error('Failed to load cross-layer composition tile', { error: String(error) });
+        }
         throw error;
       }
     }

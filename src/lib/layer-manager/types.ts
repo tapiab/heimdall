@@ -83,6 +83,22 @@ export interface RgbBands {
 // ==================== Cross-Layer RGB ====================
 
 /** Configuration for cross-layer RGB composition */
+/** Where RPC projection takes terrain heights from */
+export type RpcElevationSource = 'online' | 'file' | 'none';
+
+/**
+ * Terrain for RPC projection: the online Copernicus DEM, a local DEM file, or
+ * only a constant height. `height` is the constant (or the fill outside the
+ * DEM); null means the RPC model's mean height.
+ */
+export interface RpcElevation {
+  source: RpcElevationSource;
+  demPath: string | null;
+  height: number | null;
+  /** Added to DEM heights (geoid undulation for the online DEM) */
+  demHeightOffset?: number | null;
+}
+
 export interface CrossLayerRgbConfig {
   rLayerId: string;
   rBand: number;
@@ -132,6 +148,14 @@ export interface RasterLayer extends BaseLayer {
   sourceLayerId?: string;
   /** Cross-layer RGB configuration */
   crossLayerRgb?: CrossLayerRgbConfig;
+  /** How pixels are placed on the map */
+  georef_method?: 'geotransform' | 'rpc' | 'none';
+  /** RPC model's mean height (m), the default projection height */
+  rpc_default_height?: number | null;
+  /** Terrain used to project an RPC layer */
+  rpcElevation?: RpcElevation;
+  /** Large local raster without overviews: offer to build them */
+  suggest_overviews?: boolean;
   /** Pixel scale for non-georeferenced images */
   pixelScale?: number;
   /** Pixel offset for non-georeferenced images */

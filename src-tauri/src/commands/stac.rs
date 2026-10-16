@@ -23,6 +23,7 @@
 //! which enables efficient tile-based streaming without downloading entire files.
 
 use crate::gdal::dataset_cache::DatasetCache;
+use crate::gdal::georef::{self, GeorefMethod};
 use gdal::spatial_ref::{CoordTransform, SpatialRef};
 use gdal::{Dataset, Metadata};
 use serde::{Deserialize, Serialize};
@@ -1288,6 +1289,12 @@ pub async fn open_stac_asset(
             .collect::<Vec<_>>()
     );
 
+    let georef_method = if final_path != dataset_path {
+        GeorefMethod::GeoTransform
+    } else {
+        georef::georef_method(&dataset)
+    };
+
     let id = uuid::Uuid::new_v4().to_string();
 
     let metadata = RasterMetadata {
@@ -1303,6 +1310,9 @@ pub async fn open_stac_asset(
         nodata,
         band_stats,
         is_georeferenced,
+        georef_method,
+        rpc_default_height: georef::rpc_default_height(&dataset),
+        suggest_overviews: false,
     };
 
     let final_dataset = Dataset::open(&final_path)
@@ -1496,6 +1506,14 @@ fn get_georef_info(dataset: &Dataset) -> Result<([f64; 4], [f64; 4], [f64; 2], b
         let pixel_size = [gt[1].abs(), gt[5].abs()];
 
         Ok((bounds, native_bounds, pixel_size, true))
+    } else if georef::georef_method(dataset) == GeorefMethod::Rpc {
+        // RPC is more accurate than a VRT stretched over the STAC bbox.
+        let bounds = georef::rpc_geo_bounds(dataset)?;
+        let pixel_size = [
+            (bounds[2] - bounds[0]) / width as f64,
+            (bounds[3] - bounds[1]) / height as f64,
+        ];
+        Ok((bounds, bounds, pixel_size, true))
     } else {
         // Non-georeferenced
         let pixel_bounds = [0.0, 0.0, width as f64, height as f64];
@@ -1998,6 +2016,9 @@ mod tests {
             band_stats: vec![],
             nodata: None,
             is_georeferenced: true,
+            georef_method: GeorefMethod::GeoTransform,
+            rpc_default_height: None,
+            suggest_overviews: false,
         };
 
         assert_eq!(metadata.id, "test-id");

@@ -1,12 +1,14 @@
 #![allow(clippy::too_many_arguments)]
 
+use crate::gdal::georef::{self, GenImgTransformer, GeorefMethod};
+use crate::gdal::overview;
 use gdal::raster::ColorInterpretation;
 use gdal::spatial_ref::SpatialRef;
 use gdal::{Dataset, DriverManager};
 use gdal_sys::{
-    CPLErr, GDALChunkAndWarpImage, GDALCreateGenImgProjTransformer, GDALCreateWarpOperation,
-    GDALCreateWarpOptions, GDALDestroyGenImgProjTransformer, GDALDestroyWarpOperation,
-    GDALDestroyWarpOptions, GDALGenImgProjTransform, GDALResampleAlg,
+    CPLErr, GDALApproxTransform, GDALChunkAndWarpImage, GDALCreateApproxTransformer,
+    GDALCreateWarpOperation, GDALCreateWarpOptions, GDALDestroyApproxTransformer,
+    GDALDestroyWarpOperation, GDALDestroyWarpOptions, GDALGenImgProjTransform, GDALResampleAlg,
 };
 use image::codecs::png::{CompressionType, FilterType, PngEncoder};
 use image::ImageEncoder;
@@ -78,6 +80,10 @@ fn tile_to_geo_bounds(x: i32, y: i32, z: u8) -> [f64; 4] {
 /// this, tiles overlapping a rotated raster's corner triangles get rejected by
 /// the bounds_intersect early-out and never rendered.
 fn get_dataset_geo_bounds(dataset: &Dataset) -> Result<[f64; 4], String> {
+    if georef::georef_method(dataset) == GeorefMethod::Rpc {
+        return georef::rpc_geo_bounds(dataset);
+    }
+
     let gt = dataset
         .geo_transform()
         .map_err(|e| format!("Failed to get geotransform: {}", e))?;
@@ -156,6 +162,10 @@ fn compute_tile_coverage_mask(
     let (img_w, img_h) = dataset.raster_size();
     let (img_w, img_h) = (img_w as f64, img_h as f64);
 
+    if georef::georef_method(dataset) == GeorefMethod::Rpc {
+        return rpc_tile_coverage_mask(dataset, tile_bounds, tile_size, img_w, img_h);
+    }
+
     let gt = dataset
         .geo_transform()
         .map_err(|e| format!("Failed to get geotransform: {}", e))?;
@@ -212,6 +222,127 @@ fn compute_tile_coverage_mask(
     Ok(mask)
 }
 
+/// RPC flavour of `compute_tile_coverage_mask`: map each tile pixel center from
+/// Web Mercator straight to source pixel/line through the RPC model.
+fn rpc_tile_coverage_mask(
+    dataset: &Dataset,
+    tile_bounds: [f64; 4],
+    tile_size: usize,
+    img_w: f64,
+    img_h: f64,
+) -> Result<Vec<bool>, String> {
+    let pixel_size_x = (tile_bounds[2] - tile_bounds[0]) / tile_size as f64;
+    let pixel_size_y = (tile_bounds[1] - tile_bounds[3]) / tile_size as f64;
+    let mut xs = Vec::with_capacity(tile_size * tile_size);
+    let mut ys = Vec::with_capacity(tile_size * tile_size);
+    for j in 0..tile_size {
+        let cy = tile_bounds[3] + (j as f64 + 0.5) * pixel_size_y;
+        for i in 0..tile_size {
+            xs.push(tile_bounds[0] + (i as f64 + 0.5) * pixel_size_x);
+            ys.push(cy);
+        }
+    }
+
+    // Cached model's destination is EPSG:3857 when targeted at the identity.
+    georef::with_rpc_model(dataset, |model| {
+        model
+            .transformer_for(&[0.0, 1.0, 0.0, 0.0, 0.0, 1.0])
+            .transform(true, &mut xs, &mut ys);
+        Ok(())
+    })?;
+
+    Ok(xs
+        .iter()
+        .zip(&ys)
+        .map(|(&i, &j)| i >= 0.0 && i < img_w && j >= 0.0 && j < img_h)
+        .collect())
+}
+
+/// Max error, in output pixels, for the approximate transformer used when
+/// warping (gdalwarp's default). It transforms points exactly only along
+/// scanline ends/midpoints and interpolates linearly between them, recursing
+/// where that would exceed this error, instead of running the full
+/// reprojection/RPC/DEM chain for every one of a tile's 65k pixels.
+const WARP_MAX_ERROR: f64 = 0.125;
+
+/// Warp `src_bands` of `dataset` into `dst_bands` of `output_ds` through
+/// `transformer`, approximated within `max_error` pixels (0 = exact).
+fn run_warp(
+    dataset: &Dataset,
+    output_ds: &Dataset,
+    transformer: &GenImgTransformer,
+    src_bands: &mut [i32],
+    dst_bands: &mut [i32],
+    tile_size: usize,
+    max_error: f64,
+) -> Result<(), String> {
+    unsafe {
+        // Doesn't own the wrapped transformer; destroyed below, before it.
+        let approx = if max_error > 0.0 {
+            let arg = GDALCreateApproxTransformer(
+                Some(GDALGenImgProjTransform),
+                transformer.as_ptr(),
+                max_error,
+            );
+            if arg.is_null() {
+                return Err("Failed to create approximate transformer".to_string());
+            }
+            Some(arg)
+        } else {
+            None
+        };
+
+        let warp_opts = GDALCreateWarpOptions();
+        (*warp_opts).hSrcDS = dataset.c_dataset();
+        (*warp_opts).hDstDS = output_ds.c_dataset();
+        (*warp_opts).nBandCount = src_bands.len() as i32;
+        (*warp_opts).panSrcBands = src_bands.as_mut_ptr();
+        (*warp_opts).panDstBands = dst_bands.as_mut_ptr();
+        (*warp_opts).eResampleAlg = GDALResampleAlg::GRA_Bilinear;
+        match approx {
+            Some(arg) => {
+                (*warp_opts).pfnTransformer = Some(GDALApproxTransform);
+                (*warp_opts).pTransformerArg = arg;
+            }
+            None => {
+                (*warp_opts).pfnTransformer = Some(GDALGenImgProjTransform);
+                (*warp_opts).pTransformerArg = transformer.as_ptr();
+            }
+        }
+
+        // GDALCreateWarpOperation deep-copies the options (including band arrays),
+        // so null our Rust-owned pointers before GDALDestroyWarpOptions to prevent
+        // it from calling CPLFree on Rust-managed memory.
+        let warp_op = GDALCreateWarpOperation(warp_opts);
+        (*warp_opts).panSrcBands = std::ptr::null_mut();
+        (*warp_opts).panDstBands = std::ptr::null_mut();
+        (*warp_opts).pfnTransformer = None;
+        (*warp_opts).pTransformerArg = std::ptr::null_mut();
+        GDALDestroyWarpOptions(warp_opts);
+
+        let rv = if warp_op.is_null() {
+            None
+        } else {
+            let rv = GDALChunkAndWarpImage(warp_op, 0, 0, tile_size as i32, tile_size as i32);
+            // DestroyWarpOperation doesn't free the transformers; their owners do.
+            GDALDestroyWarpOperation(warp_op);
+            Some(rv)
+        };
+        if let Some(arg) = approx {
+            GDALDestroyApproxTransformer(arg);
+        }
+
+        let Some(rv) = rv else {
+            return Err("Failed to create warp operation".to_string());
+        };
+
+        if rv != CPLErr::CE_None {
+            return Err("Warp failed".to_string());
+        }
+    }
+    Ok(())
+}
+
 /// Warp specific bands from `dataset` into a 256×256 Web Mercator tile in one pass.
 ///
 /// `bands` is a list of 1-indexed source band numbers. Returns one `Vec<f64>` per
@@ -222,6 +353,60 @@ fn warp_bands(
     dataset: &Dataset,
     request: &TileRequest,
     bands: &[i32],
+) -> Result<Vec<Vec<f64>>, String> {
+    warp_bands_with_error(dataset, request, bands, WARP_MAX_ERROR)
+}
+
+/// `warp_bands` with an explicit approximation error (0 = exact transform).
+/// Reads from the overview level matching the tile resolution, if any.
+fn warp_bands_with_error(
+    dataset: &Dataset,
+    request: &TileRequest,
+    bands: &[i32],
+    max_error: f64,
+) -> Result<Vec<Vec<f64>>, String> {
+    let level = tile_downsample_factor(dataset, request)
+        .and_then(|factor| overview::pick_overview_level(dataset, factor));
+    match level {
+        Some(level) => overview::with_overview(dataset, level, |ovr| {
+            warp_source_bands(ovr, request, bands, max_error)
+        }),
+        None => warp_source_bands(dataset, request, bands, max_error),
+    }
+}
+
+/// How many full-resolution source pixels fall on one tile pixel, estimated
+/// from the footprint's lon/lat bbox. Takes the finer axis, and a rotated or
+/// skewed footprint's bbox only overstates the extent, so the estimate errs
+/// toward finer overviews (sharper, never blurrier than needed).
+fn tile_downsample_factor(dataset: &Dataset, request: &TileRequest) -> Option<f64> {
+    let geo = get_dataset_geo_bounds(dataset).ok()?;
+    let (w, h) = dataset.raster_size();
+    let tile = tile_to_web_mercator_bounds(request.x, request.y, request.z);
+    let tile_px_m = (tile[2] - tile[0]) / request.tile_size as f64;
+
+    let lon_to_m = |lon: f64| 6378137.0 * lon.to_radians();
+    let lat_to_m = |lat: f64| {
+        let lat = lat.clamp(-85.0511, 85.0511).to_radians();
+        6378137.0 * (PI / 4.0 + lat / 2.0).tan().ln()
+    };
+    let extent_x = lon_to_m(geo[2]) - lon_to_m(geo[0]);
+    let extent_y = lat_to_m(geo[3]) - lat_to_m(geo[1]);
+    if extent_x <= 0.0 || extent_y <= 0.0 {
+        return None;
+    }
+
+    let fx = tile_px_m * w as f64 / extent_x;
+    let fy = tile_px_m * h as f64 / extent_y;
+    Some(fx.min(fy))
+}
+
+/// Warp from exactly `dataset` (no overview selection).
+fn warp_source_bands(
+    dataset: &Dataset,
+    request: &TileRequest,
+    bands: &[i32],
+    max_error: f64,
 ) -> Result<Vec<Vec<f64>>, String> {
     let tile_bounds = tile_to_web_mercator_bounds(request.x, request.y, request.z);
     let tile_size = request.tile_size;
@@ -254,54 +439,39 @@ fn warp_bands(
     let mut src_bands: Vec<i32> = bands.to_vec();
     let mut dst_bands: Vec<i32> = (1..=(n_bands as i32)).collect();
 
-    unsafe {
-        let transformer = GDALCreateGenImgProjTransformer(
-            dataset.c_dataset(),
-            std::ptr::null(),
-            output_ds.c_dataset(),
-            std::ptr::null(),
-            0, // no GCP fallback
-            0.0,
-            0,
-        );
-        if transformer.is_null() {
-            return Err("Failed to create warp transformer".to_string());
-        }
-
-        let warp_opts = GDALCreateWarpOptions();
-        (*warp_opts).hSrcDS = dataset.c_dataset();
-        (*warp_opts).hDstDS = output_ds.c_dataset();
-        (*warp_opts).nBandCount = n_bands as i32;
-        (*warp_opts).panSrcBands = src_bands.as_mut_ptr();
-        (*warp_opts).panDstBands = dst_bands.as_mut_ptr();
-        (*warp_opts).eResampleAlg = GDALResampleAlg::GRA_Bilinear;
-        (*warp_opts).pfnTransformer = Some(GDALGenImgProjTransform);
-        (*warp_opts).pTransformerArg = transformer;
-
-        // GDALCreateWarpOperation deep-copies the options (including band arrays),
-        // so null our Rust-owned pointers before GDALDestroyWarpOptions to prevent
-        // it from calling CPLFree on Rust-managed memory.
-        let warp_op = GDALCreateWarpOperation(warp_opts);
-        (*warp_opts).panSrcBands = std::ptr::null_mut();
-        (*warp_opts).panDstBands = std::ptr::null_mut();
-        (*warp_opts).pfnTransformer = None;
-        (*warp_opts).pTransformerArg = std::ptr::null_mut();
-        GDALDestroyWarpOptions(warp_opts);
-
-        if warp_op.is_null() {
-            GDALDestroyGenImgProjTransformer(transformer);
-            return Err("Failed to create warp operation".to_string());
-        }
-
-        let rv = GDALChunkAndWarpImage(warp_op, 0, 0, tile_size as i32, tile_size as i32);
-
-        // Destroy op first; transformer is NOT freed by DestroyWarpOperation.
-        GDALDestroyWarpOperation(warp_op);
-        GDALDestroyGenImgProjTransformer(transformer);
-
-        if rv != CPLErr::CE_None {
-            return Err("Warp failed".to_string());
-        }
+    if georef::georef_method(dataset) == GeorefMethod::Rpc {
+        // Reuse the cached RPC model (and its open DEM), re-targeted at this tile.
+        let tile_gt = output_ds
+            .geo_transform()
+            .map_err(|e| format!("get geotransform: {}", e))?;
+        georef::with_rpc_model(dataset, |model| {
+            let transformer = model.transformer_for(&tile_gt);
+            run_warp(
+                dataset,
+                &output_ds,
+                transformer,
+                &mut src_bands,
+                &mut dst_bands,
+                tile_size,
+                max_error,
+            )
+        })?;
+    } else {
+        let transformer = GenImgTransformer::new(
+            dataset,
+            Some(&output_ds),
+            georef::georef_method(dataset),
+            None,
+        )?;
+        run_warp(
+            dataset,
+            &output_ds,
+            &transformer,
+            &mut src_bands,
+            &mut dst_bands,
+            tile_size,
+            max_error,
+        )?;
     }
 
     let mut results = Vec::with_capacity(n_bands);
@@ -1324,5 +1494,186 @@ mod tests {
         assert_eq!(copy.x, 10);
         assert_eq!(copy.y, 20);
         assert_eq!(copy.z, 5);
+    }
+
+    // ==================== Approximate Warp Tests ====================
+
+    /// Fill band 1 with its column index so a warped value reads as the source
+    /// x position it was sampled from.
+    fn fill_with_column_index(ds: &mut Dataset) {
+        let (w, h) = ds.raster_size();
+        let data: Vec<f64> = (0..w * h).map(|i| (i % w) as f64 + 1.0).collect();
+        let mut buf = gdal::raster::Buffer::new((w, h), data);
+        ds.rasterband(1)
+            .unwrap()
+            .write((0, 0), (w, h), &mut buf)
+            .unwrap();
+    }
+
+    /// Largest difference between the approximate and the exact warp.
+    fn max_approx_error(ds: &Dataset) -> f64 {
+        let req = rpc_tile_request();
+        let approx = warp_bands(ds, &req, &[1]).unwrap().remove(0);
+        let exact = warp_bands_with_error(ds, &req, &[1], 0.0)
+            .unwrap()
+            .remove(0);
+        approx
+            .iter()
+            .zip(&exact)
+            .filter(|(a, e)| **a != 0.0 && **e != 0.0)
+            .map(|(a, e)| (a - e).abs())
+            .fold(0.0, f64::max)
+    }
+
+    #[test]
+    fn test_approx_warp_matches_exact_utm() {
+        // UTM 32N, 1000x1000 @ 100 m around lon 10 / lat 45.
+        let driver = DriverManager::get_driver_by_name("MEM").unwrap();
+        let mut ds = driver
+            .create_with_band_type::<f64, _>("", 1000, 1000, 1)
+            .unwrap();
+        ds.set_geo_transform(&[528800.0, 100.0, 0.0, 5033600.0, 0.0, -100.0])
+            .unwrap();
+        ds.set_spatial_ref(&SpatialRef::from_epsg(32632).unwrap())
+            .unwrap();
+        fill_with_column_index(&mut ds);
+
+        let err = max_approx_error(&ds);
+        assert!(err < 0.2, "approx warp off by {} source px", err);
+    }
+
+    #[test]
+    fn test_approx_warp_matches_exact_rpc() {
+        let mut ds = crate::gdal::georef::named_synthetic_rpc_dataset("rpc-approx");
+        fill_with_column_index(&mut ds);
+        crate::gdal::georef::set_rpc_elevation(
+            "rpc-approx",
+            crate::gdal::georef::RpcElevation {
+                dem_path: None,
+                height: Some(800.0),
+                dem_height_offset: None,
+            },
+        );
+
+        let err = max_approx_error(&ds);
+        crate::gdal::georef::set_rpc_elevation("rpc-approx", Default::default());
+        assert!(err < 0.2, "approx warp off by {} source px", err);
+    }
+
+    // ==================== Overview Tests ====================
+
+    /// GTiff in /vsimem (so it can be reopened at an overview level) with the
+    /// synthetic RPC model, a column-index gradient and 2x/4x overviews.
+    fn rpc_gtiff_with_overviews(path: &str) -> crate::gdal::dataset_cache::SendDataset {
+        let mut mem = crate::gdal::georef::synthetic_rpc_dataset();
+        fill_with_column_index(&mut mem);
+        let driver = DriverManager::get_driver_by_name("GTiff").unwrap();
+        let mut ds = mem.create_copy(&driver, path, &Default::default()).unwrap();
+        ds.build_overviews("AVERAGE", &[2, 4], &[]).unwrap();
+        drop(ds);
+        crate::gdal::dataset_cache::SendDataset::new(Dataset::open(path).unwrap())
+    }
+
+    #[test]
+    fn test_pick_overview_level() {
+        let path = "/vsimem/ovr_pick.tif";
+        let handle = rpc_gtiff_with_overviews(path);
+        let ds = &handle.0;
+        assert_eq!(overview::pick_overview_level(ds, 0.5), None);
+        assert_eq!(overview::pick_overview_level(ds, 1.9), None);
+        assert_eq!(overview::pick_overview_level(ds, 2.0), Some(0));
+        assert_eq!(overview::pick_overview_level(ds, 3.9), Some(0));
+        assert_eq!(overview::pick_overview_level(ds, 4.0), Some(1));
+        assert_eq!(overview::pick_overview_level(ds, 100.0), Some(1));
+        drop(handle);
+        gdal::vsi::unlink_mem_file(path).unwrap();
+    }
+
+    #[test]
+    fn test_rpc_overview_warp_matches_full_resolution() {
+        let path = "/vsimem/ovr_rpc_warp.tif";
+        let handle = rpc_gtiff_with_overviews(path);
+        let ds = &handle.0;
+
+        // z4 tile: ~6 source px per tile px on the finer (y) axis, so the 4x overview is used.
+        let z = 4u8;
+        let n = 2_f64.powi(z as i32);
+        let lat = 45_f64.to_radians();
+        let req = TileRequest {
+            x: ((10.0 + 180.0) / 360.0 * n).floor() as i32,
+            y: ((1.0 - (lat.tan() + 1.0 / lat.cos()).ln() / PI) / 2.0 * n).floor() as i32,
+            z,
+            band: 1,
+            tile_size: 256,
+        };
+        let factor = tile_downsample_factor(ds, &req).unwrap();
+        assert_eq!(overview::pick_overview_level(ds, factor), Some(1));
+
+        let full = warp_source_bands(ds, &req, &[1], 0.0).unwrap().remove(0);
+        let ovr = warp_bands(ds, &req, &[1]).unwrap().remove(0);
+        let diffs: Vec<f64> = full
+            .iter()
+            .zip(&ovr)
+            .filter(|(a, b)| **a > 0.0 && **b > 0.0)
+            .map(|(a, b)| (a - b).abs())
+            .collect();
+        assert!(diffs.len() > 100, "tile should overlap the footprint");
+        // Values are source column indices: a misplaced overview (e.g. RPC not
+        // rescaled) would be off by tens of columns, averaging by ~1-2.
+        let mean = diffs.iter().sum::<f64>() / diffs.len() as f64;
+        assert!(mean < 2.5, "overview tile off by {} source columns", mean);
+
+        drop(handle);
+        gdal::vsi::unlink_mem_file(path).unwrap();
+    }
+
+    // ==================== RPC Tests ====================
+
+    /// z=10 tile containing lon 10, lat 45 (inside the synthetic RPC footprint).
+    fn rpc_tile_request() -> TileRequest {
+        let z = 10u8;
+        let n = 2_f64.powi(z as i32);
+        let x = ((10.0 + 180.0) / 360.0 * n).floor() as i32;
+        let lat = 45_f64.to_radians();
+        let y = ((1.0 - (lat.tan() + 1.0 / lat.cos()).ln() / PI) / 2.0 * n).floor() as i32;
+        TileRequest {
+            x,
+            y,
+            z,
+            band: 1,
+            tile_size: 256,
+        }
+    }
+
+    #[test]
+    fn test_rpc_dataset_geo_bounds() {
+        let ds = crate::gdal::georef::synthetic_rpc_dataset();
+        let b = get_dataset_geo_bounds(&ds).unwrap();
+        assert!((b[0] - 9.495).abs() < 1e-3 && (b[3] - 45.505).abs() < 1e-3);
+    }
+
+    #[test]
+    fn test_rpc_warp_fills_tile() {
+        let ds = crate::gdal::georef::synthetic_rpc_dataset();
+        let data = warp_bands(&ds, &rpc_tile_request(), &[1])
+            .unwrap()
+            .remove(0);
+        let valid = data.iter().filter(|&&v| (v - 7.0).abs() < 1e-6).count();
+        assert_eq!(valid, data.len(), "tile fully inside footprint");
+    }
+
+    #[test]
+    fn test_rpc_coverage_mask() {
+        let ds = crate::gdal::georef::synthetic_rpc_dataset();
+        let inside = compute_tile_coverage_mask(&ds, &rpc_tile_request()).unwrap();
+        assert!(inside.iter().all(|&m| m));
+
+        let outside = TileRequest {
+            x: 0,
+            y: 0,
+            ..rpc_tile_request()
+        };
+        let mask = compute_tile_coverage_mask(&ds, &outside).unwrap();
+        assert!(mask.iter().all(|&m| !m));
     }
 }

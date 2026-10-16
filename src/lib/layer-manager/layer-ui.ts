@@ -3,12 +3,14 @@
  * @module layer-manager/layer-ui
  */
 
+import { open } from '@tauri-apps/plugin-dialog';
 import type {
   LayerManagerInterface,
   RasterLayer,
   VectorLayer,
   CrossLayerRgbConfig,
   LayerManagerOptions,
+  RpcElevation,
 } from './types';
 import { computeFilterableFields, type FilterableField } from './vector-handler';
 
@@ -24,6 +26,8 @@ interface LayerManagerWithUI extends LayerManagerInterface {
   setLayerDisplayMode: (id: string, mode: string) => void;
   setLayerBand: (id: string, band: number) => void;
   setLayerStretch: (id: string, min: number, max: number, gamma: number) => void;
+  setRpcElevation: (id: string, elevation: RpcElevation) => Promise<boolean>;
+  buildOverviews: (id: string) => Promise<void>;
   setRgbBands: (id: string, r: number, g: number, b: number) => void;
   setRgbStretch: (
     id: string,
@@ -737,6 +741,20 @@ function renderRasterControls(
     </div>
   `;
 
+  // Above the (long) stretch controls so these are visible without scrolling.
+  if (layer.suggest_overviews) {
+    controlsHtml += `
+    <div class="control-section">
+      <label>Overviews</label>
+      <div class="value-display">None: slow when zoomed out</div>
+      <button id="build-overviews" class="control-btn">Build Overviews</button>
+    </div>
+  `;
+  }
+  if (layer.georef_method === 'rpc') {
+    controlsHtml += renderRpcElevationControls(layer);
+  }
+
   if (layer.displayMode === 'grayscale') {
     controlsHtml += renderGrayscaleControls(layer, bandOptions);
   } else if (layer.displayMode === 'crossLayerRgb') {
@@ -749,6 +767,116 @@ function renderRasterControls(
 
   // Attach event listeners
   attachRasterEventListeners(manager, layer);
+  document.getElementById('build-overviews')?.addEventListener('click', () => {
+    void manager.buildOverviews(layer.id);
+  });
+  if (layer.georef_method === 'rpc') {
+    attachRpcElevationListeners(manager, layer);
+  }
+}
+
+function escapeHtml(text: string): string {
+  return text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+/** Elevation of a layer that hasn't had one applied yet: the model's height. */
+const MODEL_HEIGHT: RpcElevation = { source: 'none', demPath: null, height: null };
+
+/**
+ * Render RPC terrain controls: elevation source (online DEM, local DEM file,
+ * constant height) and the constant/fallback height
+ */
+function renderRpcElevationControls(layer: RasterLayer): string {
+  const elevation = layer.rpcElevation ?? MODEL_HEIGHT;
+  const demName = elevation.demPath?.split('/').pop()?.split('\\').pop();
+  const defaultHeight = layer.rpc_default_height ?? 0;
+  const option = (value: RpcElevation['source'], label: string) =>
+    `<option value="${value}" ${elevation.source === value ? 'selected' : ''}>${label}</option>`;
+
+  let detail = '';
+  if (elevation.source === 'online') {
+    detail =
+      elevation.demHeightOffset != null
+        ? `Copernicus GLO-30 · geoid N = ${elevation.demHeightOffset.toFixed(1)} m`
+        : 'Copernicus GLO-30 · no geoid correction';
+  } else if (elevation.source === 'file' && demName) {
+    detail = `DEM: ${escapeHtml(demName)}`;
+  }
+
+  return `
+    <div class="control-section">
+      <label for="rpc-source">RPC Elevation</label>
+      <select id="rpc-source">
+        ${option('online', 'Copernicus 30 m (online)')}
+        ${option('file', 'Local DEM file...')}
+        ${option('none', 'Constant height')}
+      </select>
+      ${detail ? `<div class="value-display" id="rpc-dem-name" title="${escapeHtml(elevation.demPath ?? '')}">${detail}</div>` : ''}
+      ${elevation.source === 'file' ? '<button id="rpc-dem-choose" class="control-btn">Change DEM...</button>' : ''}
+    </div>
+    <div class="control-section">
+      <label for="rpc-height">${elevation.source === 'none' ? 'Height (m)' : 'Height outside DEM (m)'}</label>
+      <input type="number" id="rpc-height" step="1" placeholder="${defaultHeight} (model default)"
+        value="${elevation.height ?? ''}">
+    </div>
+  `;
+}
+
+/** Ask for a local DEM file; null if cancelled. */
+async function pickDemFile(): Promise<string | null> {
+  const selected = await open({
+    multiple: false,
+    title: 'Select DEM',
+    filters: [
+      {
+        name: 'Elevation rasters',
+        extensions: ['tif', 'tiff', 'vrt', 'dt0', 'dt1', 'dt2', 'hgt', 'img'],
+      },
+      { name: 'All files', extensions: ['*'] },
+    ],
+  });
+  return typeof selected === 'string' ? selected : null;
+}
+
+/**
+ * Attach RPC terrain control listeners
+ */
+function attachRpcElevationListeners(manager: LayerManagerWithUI, layer: RasterLayer): void {
+  const current = (): RpcElevation => layer.rpcElevation ?? MODEL_HEIGHT;
+
+  const sourceSelect = document.getElementById('rpc-source') as HTMLSelectElement | null;
+  sourceSelect?.addEventListener('change', async () => {
+    const source = sourceSelect.value as RpcElevation['source'];
+    if (source === 'file') {
+      const demPath = await pickDemFile();
+      if (!demPath) {
+        sourceSelect.value = current().source; // cancelled: keep what's applied
+        return;
+      }
+      await manager.setRpcElevation(layer.id, { ...current(), source, demPath });
+    } else {
+      await manager.setRpcElevation(layer.id, { ...current(), source });
+    }
+  });
+
+  document.getElementById('rpc-dem-choose')?.addEventListener('click', async () => {
+    const demPath = await pickDemFile();
+    if (demPath) {
+      await manager.setRpcElevation(layer.id, { ...current(), source: 'file', demPath });
+    }
+  });
+
+  const heightInput = document.getElementById('rpc-height') as HTMLInputElement | null;
+  heightInput?.addEventListener('change', () => {
+    const raw = heightInput.value.trim();
+    const height = raw === '' ? null : Number(raw);
+    if (height !== null && !Number.isFinite(height)) return;
+    void manager.setRpcElevation(layer.id, { ...current(), height });
+  });
 }
 
 /**
