@@ -1,6 +1,7 @@
 #![allow(clippy::too_many_arguments)]
 
 use crate::gdal::georef::{self, GenImgTransformer, GeorefMethod};
+use crate::gdal::overview;
 use gdal::raster::ColorInterpretation;
 use gdal::spatial_ref::SpatialRef;
 use gdal::{Dataset, DriverManager};
@@ -357,7 +358,51 @@ fn warp_bands(
 }
 
 /// `warp_bands` with an explicit approximation error (0 = exact transform).
+/// Reads from the overview level matching the tile resolution, if any.
 fn warp_bands_with_error(
+    dataset: &Dataset,
+    request: &TileRequest,
+    bands: &[i32],
+    max_error: f64,
+) -> Result<Vec<Vec<f64>>, String> {
+    let level = tile_downsample_factor(dataset, request)
+        .and_then(|factor| overview::pick_overview_level(dataset, factor));
+    match level {
+        Some(level) => overview::with_overview(dataset, level, |ovr| {
+            warp_source_bands(ovr, request, bands, max_error)
+        }),
+        None => warp_source_bands(dataset, request, bands, max_error),
+    }
+}
+
+/// How many full-resolution source pixels fall on one tile pixel, estimated
+/// from the footprint's lon/lat bbox. Takes the finer axis, and a rotated or
+/// skewed footprint's bbox only overstates the extent, so the estimate errs
+/// toward finer overviews (sharper, never blurrier than needed).
+fn tile_downsample_factor(dataset: &Dataset, request: &TileRequest) -> Option<f64> {
+    let geo = get_dataset_geo_bounds(dataset).ok()?;
+    let (w, h) = dataset.raster_size();
+    let tile = tile_to_web_mercator_bounds(request.x, request.y, request.z);
+    let tile_px_m = (tile[2] - tile[0]) / request.tile_size as f64;
+
+    let lon_to_m = |lon: f64| 6378137.0 * lon.to_radians();
+    let lat_to_m = |lat: f64| {
+        let lat = lat.clamp(-85.0511, 85.0511).to_radians();
+        6378137.0 * (PI / 4.0 + lat / 2.0).tan().ln()
+    };
+    let extent_x = lon_to_m(geo[2]) - lon_to_m(geo[0]);
+    let extent_y = lat_to_m(geo[3]) - lat_to_m(geo[1]);
+    if extent_x <= 0.0 || extent_y <= 0.0 {
+        return None;
+    }
+
+    let fx = tile_px_m * w as f64 / extent_x;
+    let fy = tile_px_m * h as f64 / extent_y;
+    Some(fx.min(fy))
+}
+
+/// Warp from exactly `dataset` (no overview selection).
+fn warp_source_bands(
     dataset: &Dataset,
     request: &TileRequest,
     bands: &[i32],
@@ -1506,12 +1551,80 @@ mod tests {
             crate::gdal::georef::RpcElevation {
                 dem_path: None,
                 height: Some(800.0),
+                dem_height_offset: None,
             },
         );
 
         let err = max_approx_error(&ds);
         crate::gdal::georef::set_rpc_elevation("rpc-approx", Default::default());
         assert!(err < 0.2, "approx warp off by {} source px", err);
+    }
+
+    // ==================== Overview Tests ====================
+
+    /// GTiff in /vsimem (so it can be reopened at an overview level) with the
+    /// synthetic RPC model, a column-index gradient and 2x/4x overviews.
+    fn rpc_gtiff_with_overviews(path: &str) -> crate::gdal::dataset_cache::SendDataset {
+        let mut mem = crate::gdal::georef::synthetic_rpc_dataset();
+        fill_with_column_index(&mut mem);
+        let driver = DriverManager::get_driver_by_name("GTiff").unwrap();
+        let mut ds = mem.create_copy(&driver, path, &Default::default()).unwrap();
+        ds.build_overviews("AVERAGE", &[2, 4], &[]).unwrap();
+        drop(ds);
+        crate::gdal::dataset_cache::SendDataset::new(Dataset::open(path).unwrap())
+    }
+
+    #[test]
+    fn test_pick_overview_level() {
+        let path = "/vsimem/ovr_pick.tif";
+        let handle = rpc_gtiff_with_overviews(path);
+        let ds = &handle.0;
+        assert_eq!(overview::pick_overview_level(ds, 0.5), None);
+        assert_eq!(overview::pick_overview_level(ds, 1.9), None);
+        assert_eq!(overview::pick_overview_level(ds, 2.0), Some(0));
+        assert_eq!(overview::pick_overview_level(ds, 3.9), Some(0));
+        assert_eq!(overview::pick_overview_level(ds, 4.0), Some(1));
+        assert_eq!(overview::pick_overview_level(ds, 100.0), Some(1));
+        drop(handle);
+        gdal::vsi::unlink_mem_file(path).unwrap();
+    }
+
+    #[test]
+    fn test_rpc_overview_warp_matches_full_resolution() {
+        let path = "/vsimem/ovr_rpc_warp.tif";
+        let handle = rpc_gtiff_with_overviews(path);
+        let ds = &handle.0;
+
+        // z4 tile: ~6 source px per tile px on the finer (y) axis, so the 4x overview is used.
+        let z = 4u8;
+        let n = 2_f64.powi(z as i32);
+        let lat = 45_f64.to_radians();
+        let req = TileRequest {
+            x: ((10.0 + 180.0) / 360.0 * n).floor() as i32,
+            y: ((1.0 - (lat.tan() + 1.0 / lat.cos()).ln() / PI) / 2.0 * n).floor() as i32,
+            z,
+            band: 1,
+            tile_size: 256,
+        };
+        let factor = tile_downsample_factor(ds, &req).unwrap();
+        assert_eq!(overview::pick_overview_level(ds, factor), Some(1));
+
+        let full = warp_source_bands(ds, &req, &[1], 0.0).unwrap().remove(0);
+        let ovr = warp_bands(ds, &req, &[1]).unwrap().remove(0);
+        let diffs: Vec<f64> = full
+            .iter()
+            .zip(&ovr)
+            .filter(|(a, b)| **a > 0.0 && **b > 0.0)
+            .map(|(a, b)| (a - b).abs())
+            .collect();
+        assert!(diffs.len() > 100, "tile should overlap the footprint");
+        // Values are source column indices: a misplaced overview (e.g. RPC not
+        // rescaled) would be off by tens of columns, averaging by ~1-2.
+        let mean = diffs.iter().sum::<f64>() / diffs.len() as f64;
+        assert!(mean < 2.5, "overview tile off by {} source columns", mean);
+
+        drop(handle);
+        gdal::vsi::unlink_mem_file(path).unwrap();
     }
 
     // ==================== RPC Tests ====================

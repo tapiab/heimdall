@@ -54,6 +54,7 @@ import {
   setRgbStretch,
   refreshLayerTiles,
   setRpcElevation,
+  buildOverviews,
 } from './raster-handler';
 import {
   addVectorLayer,
@@ -513,8 +514,16 @@ export class LayerManager {
    * @param id - Layer ID
    * @param elevation - DEM path and height; nulls restore the RPC model default
    */
-  setRpcElevation(id: string, elevation: RpcElevation): Promise<void> {
+  setRpcElevation(id: string, elevation: RpcElevation): Promise<boolean> {
     return setRpcElevation(this, id, elevation);
+  }
+
+  /**
+   * Build external overviews (.ovr) for a raster layer and redraw it.
+   * @param id - Layer ID
+   */
+  buildOverviews(id: string): Promise<void> {
+    return buildOverviews(this, id);
   }
 
   /**

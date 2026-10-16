@@ -5,12 +5,13 @@ use crate::gdal::georef::{self, GeorefMethod};
 use crate::gdal::tile_extractor::{
     extract_rgb_tile, extract_tile, extract_tile_with_stretch, StretchParams, TileRequest,
 };
+use crate::gdal::{online_dem, overview};
 use gdal::spatial_ref::{CoordTransform, SpatialRef};
 use gdal::Dataset;
 use serde::{Deserialize, Serialize};
 use std::sync::atomic::{AtomicBool, Ordering};
 use tauri::ipc::Response;
-use tauri::State;
+use tauri::{AppHandle, Emitter, State};
 
 static FIRST_TILE_LOGGED: AtomicBool = AtomicBool::new(false);
 
@@ -32,6 +33,8 @@ pub struct RasterMetadata {
     pub georef_method: GeorefMethod, // how pixels are placed on the map
     #[serde(default)]
     pub rpc_default_height: Option<f64>, // RPC HEIGHT_OFF, used when no DEM/override is set
+    #[serde(default)]
+    pub suggest_overviews: bool, // large local raster without overviews: offer to build them
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -283,6 +286,7 @@ pub async fn open_raster(
         is_georeferenced: georeferenced,
         georef_method: method,
         rpc_default_height: georef::rpc_default_height(&dataset),
+        suggest_overviews: overview::should_suggest_overviews(&dataset, &path),
     };
 
     state.add(id, path, dataset);
@@ -298,12 +302,17 @@ pub async fn set_rpc_elevation(
     id: String,
     dem_path: Option<String>,
     height: Option<f64>,
+    dem_height_offset: Option<f64>,
     state: State<'_, DatasetCache>,
 ) -> Result<[f64; 4], String> {
     let pool = state.get_pool(&id).ok_or("Dataset not found")?;
     tokio::task::spawn_blocking(move || {
-        if height.is_some_and(|h| !h.is_finite()) {
-            return Err("Height must be a finite number".to_string());
+        if height
+            .into_iter()
+            .chain(dem_height_offset)
+            .any(|h| !h.is_finite())
+        {
+            return Err("Heights must be finite numbers".to_string());
         }
         let dem_path = dem_path.filter(|p| !p.trim().is_empty());
         if let Some(dem) = &dem_path {
@@ -320,13 +329,122 @@ pub async fn set_rpc_elevation(
 
         let path = pool.path().to_string();
         let previous = georef::get_rpc_elevation(&path);
-        georef::set_rpc_elevation(&path, georef::RpcElevation { dem_path, height });
+        georef::set_rpc_elevation(
+            &path,
+            georef::RpcElevation {
+                dem_path,
+                height,
+                dem_height_offset,
+            },
+        );
         georef::rpc_geo_bounds(&guard.0).inspect_err(|_| {
             georef::set_rpc_elevation(&path, previous);
         })
     })
     .await
     .map_err(|e| e.to_string())?
+}
+
+/// Online DEM applied to an RPC layer.
+#[derive(Clone, Serialize)]
+pub struct OnlineDem {
+    /// Local VRT mosaicking the remote tiles; pass back as `dem_path`.
+    pub dem_path: String,
+    /// Geoid undulation added to DEM heights; `None` if it couldn't be looked
+    /// up (offline PROJ grid), leaving heights ~tens of meters low/high.
+    pub dem_height_offset: Option<f64>,
+    /// EPSG:4326 footprint with the DEM applied.
+    pub bounds: [f64; 4],
+}
+
+/// Project an RPC layer against Copernicus GLO-30, fetched on demand. Keeps the
+/// layer's constant height (if any) as the fill outside DEM coverage.
+#[tauri::command]
+pub async fn use_online_dem(
+    id: String,
+    height: Option<f64>,
+    state: State<'_, DatasetCache>,
+) -> Result<OnlineDem, String> {
+    let pool = state.get_pool(&id).ok_or("Dataset not found")?;
+    tokio::task::spawn_blocking(move || {
+        let path = pool.path().to_string();
+        let guard = pool.checkout();
+        if georef::georef_method(&guard.0) != GeorefMethod::Rpc {
+            return Err("Layer is not projected with RPC".to_string());
+        }
+
+        // Footprint at the model's mean height: good enough to pick DEM tiles.
+        let previous = georef::get_rpc_elevation(&path);
+        georef::set_rpc_elevation(&path, georef::RpcElevation::default());
+        let flat = georef::rpc_geo_bounds(&guard.0);
+        georef::set_rpc_elevation(&path, previous.clone());
+        let flat = flat?;
+
+        let dem_path = online_dem::copernicus_vrt_for(flat)?;
+        let center = ((flat[0] + flat[2]) / 2.0, (flat[1] + flat[3]) / 2.0);
+        let dem_height_offset = online_dem::egm2008_undulation(center.0, center.1)
+            .inspect_err(|e| eprintln!("[RPC] {}; DEM heights left geoid-relative", e))
+            .ok();
+
+        georef::set_rpc_elevation(
+            &path,
+            georef::RpcElevation {
+                dem_path: Some(dem_path.clone()),
+                height,
+                dem_height_offset,
+            },
+        );
+        match georef::rpc_geo_bounds(&guard.0) {
+            Ok(bounds) => Ok(OnlineDem {
+                dem_path,
+                dem_height_offset,
+                bounds,
+            }),
+            Err(e) => {
+                georef::set_rpc_elevation(&path, previous);
+                Err(e)
+            }
+        }
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[derive(Clone, Serialize)]
+struct OverviewProgress {
+    id: String,
+    progress: f64,
+}
+
+/// Build external overviews (`.ovr` next to the file) for a raster layer, then
+/// reopen its handles so tiles start reading them. Emits `overview-progress`.
+#[tauri::command]
+pub async fn build_overviews(
+    id: String,
+    app: AppHandle,
+    state: State<'_, DatasetCache>,
+) -> Result<(), String> {
+    let path = state.get_path(&id).ok_or("Dataset not found")?;
+    let event_id = id.clone();
+    tokio::task::spawn_blocking(move || {
+        let mut last = -1.0;
+        overview::build_external_overviews(&path, |progress| {
+            // GDAL reports per block; ~100 events is plenty for a progress bar.
+            if progress - last >= 0.01 || progress >= 1.0 {
+                last = progress;
+                let _ = app.emit(
+                    "overview-progress",
+                    OverviewProgress {
+                        id: event_id.clone(),
+                        progress,
+                    },
+                );
+            }
+        })
+    })
+    .await
+    .map_err(|e| e.to_string())??;
+    state.reopen(&id)
 }
 
 /// Get a tile from a raster dataset with auto stretch

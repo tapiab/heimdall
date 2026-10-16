@@ -9,6 +9,20 @@ vi.mock('@tauri-apps/api/core', () => ({
   invoke: vi.fn(),
 }));
 
+// Mock Tauri events and dialogs
+const eventHandlers: Record<string, (event: { payload: unknown }) => void> = {};
+const unlistenSpy = vi.fn();
+vi.mock('@tauri-apps/api/event', () => ({
+  listen: vi.fn(async (name: string, handler: (event: { payload: unknown }) => void) => {
+    eventHandlers[name] = handler;
+    return unlistenSpy;
+  }),
+}));
+vi.mock('@tauri-apps/plugin-dialog', () => ({
+  ask: vi.fn(),
+  open: vi.fn(),
+}));
+
 // Mock maplibre-gl
 vi.mock('maplibre-gl', () => ({
   default: {
@@ -80,6 +94,9 @@ function createMockMapManager() {
 // Import after mocks are set up
 import { LayerManager } from '../layer-manager/index.js';
 import { invoke } from '@tauri-apps/api/core';
+import { ask } from '@tauri-apps/plugin-dialog';
+import { offerOverviews, applyDefaultRpcElevation } from '../layer-manager/raster-handler.js';
+import { showToast, showError } from '../notifications.js';
 
 describe('LayerManager', () => {
   let mockMapManager;
@@ -496,6 +513,134 @@ describe('LayerManager', () => {
     });
   });
 
+  describe('display controls for an RPC scene', () => {
+    it('should render overview and RPC elevation sections above the stretch controls', () => {
+      layerManager.layers.set('scene', {
+        id: 'scene',
+        type: 'raster',
+        path: '/data/scene.tif',
+        bands: 3,
+        band: 1,
+        displayMode: 'rgb',
+        is_georeferenced: true,
+        georef_method: 'rpc',
+        rpc_default_height: 178.5,
+        suggest_overviews: true,
+        band_stats: [
+          { band: 1, min: 0, max: 4000 },
+          { band: 2, min: 0, max: 4000 },
+          { band: 3, min: 0, max: 4000 },
+        ],
+        stretch: { min: 0, max: 4000, gamma: 1 },
+        rgbBands: { r: 1, g: 2, b: 3 },
+        rgbStretch: {
+          r: { min: 0, max: 4000, gamma: 1 },
+          g: { min: 0, max: 4000, gamma: 1 },
+          b: { min: 0, max: 4000, gamma: 1 },
+        },
+      });
+      layerManager.selectedLayerId = 'scene';
+      layerManager.updateDynamicControls();
+
+      const panel = document.getElementById('dynamic-controls');
+      const html = panel.innerHTML;
+      expect(panel.querySelector('#build-overviews')).not.toBeNull();
+      const source = panel.querySelector('#rpc-source');
+      expect(source).not.toBeNull();
+      // Nothing applied yet (the online DEM is applied asynchronously after open).
+      expect(source.value).toBe('none');
+      expect([...source.options].map(o => o.value)).toEqual(['online', 'file', 'none']);
+      expect(panel.querySelector('#rpc-height').getAttribute('placeholder')).toContain('178.5');
+      expect(html.indexOf('rpc-source')).toBeLessThan(html.indexOf('id="rgb-r"'));
+    });
+  });
+
+  describe('overviews', () => {
+    beforeEach(() => {
+      layerManager.layers.set('big', {
+        id: 'big',
+        type: 'raster',
+        path: '/data/big.tif',
+        suggest_overviews: true,
+      });
+      layerManager.layers.set('big-comp', {
+        id: 'big-comp',
+        type: 'raster',
+        isComposition: true,
+        sourceLayerId: 'big',
+      });
+      layerManager.refreshLayerTiles = vi.fn();
+      layerManager.updateDynamicControls = vi.fn();
+      const indicator = document.createElement('div');
+      indicator.id = 'loading-indicator';
+      indicator.appendChild(document.createElement('span'));
+      document.body.appendChild(indicator);
+    });
+
+    afterEach(() => {
+      document.getElementById('loading-indicator')?.remove();
+    });
+
+    it('should build overviews and redraw the layer and its compositions', async () => {
+      invoke.mockImplementation(async () => {
+        eventHandlers['overview-progress']({ payload: { id: 'big', progress: 0.42 } });
+        expect(document.querySelector('#loading-indicator span').textContent).toBe(
+          'Building overviews... 42%'
+        );
+      });
+      await layerManager.buildOverviews('big');
+
+      expect(invoke).toHaveBeenCalledWith('build_overviews', { id: 'big' });
+      expect(layerManager.layers.get('big').suggest_overviews).toBe(false);
+      expect(layerManager.refreshLayerTiles).toHaveBeenCalledWith('big');
+      expect(layerManager.refreshLayerTiles).toHaveBeenCalledWith('big-comp');
+      expect(unlistenSpy).toHaveBeenCalled();
+    });
+
+    it('should ignore progress events for other layers', async () => {
+      invoke.mockImplementation(async () => {
+        eventHandlers['overview-progress']({ payload: { id: 'other', progress: 0.9 } });
+      });
+      await layerManager.buildOverviews('big');
+      expect(document.querySelector('#loading-indicator span').textContent).not.toContain('90%');
+    });
+
+    it('should keep the suggestion when building fails', async () => {
+      invoke.mockRejectedValue(new Error('Permission denied'));
+      await layerManager.buildOverviews('big');
+      expect(layerManager.layers.get('big').suggest_overviews).toBe(true);
+      expect(layerManager.refreshLayerTiles).not.toHaveBeenCalled();
+      expect(unlistenSpy).toHaveBeenCalled();
+    });
+
+    it('should build when the prompt is accepted', async () => {
+      ask.mockResolvedValue(true);
+      invoke.mockResolvedValue(undefined);
+      await offerOverviews(layerManager, 'big');
+      expect(invoke).toHaveBeenCalledWith('build_overviews', { id: 'big' });
+    });
+
+    it('should not ask again for a declined file', async () => {
+      layerManager.layers.set('declined', {
+        id: 'declined',
+        type: 'raster',
+        path: '/data/declined.tif',
+        suggest_overviews: true,
+      });
+      ask.mockResolvedValue(false);
+      await offerOverviews(layerManager, 'declined');
+      await offerOverviews(layerManager, 'declined');
+      expect(ask).toHaveBeenCalledTimes(1);
+      expect(invoke).not.toHaveBeenCalledWith('build_overviews', expect.anything());
+    });
+
+    it('should not ask when overviews are not suggested', async () => {
+      layerManager.layers.get('big').suggest_overviews = false;
+      await offerOverviews(layerManager, 'big');
+      expect(ask).not.toHaveBeenCalled();
+    });
+  });
+
   describe('setRpcElevation', () => {
     const newBounds = [9.4, 44.4, 10.6, 45.6];
 
@@ -518,42 +663,172 @@ describe('LayerManager', () => {
       layerManager.refreshLayerTiles = vi.fn();
       layerManager.updateDynamicControls = vi.fn();
       invoke.mockResolvedValue(newBounds);
+
+      // Map state: rpc-layer sits below rpc-comp, half transparent, hidden.
+      const { map } = mockMapManager;
+      map.getSource.mockImplementation(id => ({
+        tiles: [`${id.replace('raster-source-', 'raster-')}://{z}/{x}/{y}?v=1`],
+      }));
+      map.getLayer.mockReturnValue({});
+      map.getStyle = vi.fn(() => ({
+        layers: [
+          { id: 'basemap' },
+          { id: 'raster-layer-rpc-layer' },
+          { id: 'raster-layer-rpc-comp' },
+        ],
+      }));
+      map.getPaintProperty = vi.fn(() => 0.5);
+      map.getLayoutProperty = vi.fn(() => 'none');
+      map.triggerRepaint = vi.fn();
     });
 
-    it('should send DEM and height to the backend', async () => {
-      await layerManager.setRpcElevation('rpc-layer', { demPath: '/dem.tif', height: 120 });
+    it('should send a local DEM and height to the backend', async () => {
+      await layerManager.setRpcElevation('rpc-layer', {
+        source: 'file',
+        demPath: '/dem.tif',
+        height: 120,
+      });
       expect(invoke).toHaveBeenCalledWith('set_rpc_elevation', {
         id: 'rpc-layer',
         demPath: '/dem.tif',
         height: 120,
+        demHeightOffset: null,
+      });
+    });
+
+    it('should drop the DEM path for constant height', async () => {
+      await layerManager.setRpcElevation('rpc-layer', {
+        source: 'none',
+        demPath: '/stale.tif',
+        height: 50,
+      });
+      expect(invoke).toHaveBeenCalledWith('set_rpc_elevation', {
+        id: 'rpc-layer',
+        demPath: null,
+        height: 50,
+        demHeightOffset: null,
       });
     });
 
     it('should store elevation and updated footprint on the layer', async () => {
-      await layerManager.setRpcElevation('rpc-layer', { demPath: '/dem.tif', height: null });
+      await layerManager.setRpcElevation('rpc-layer', {
+        source: 'file',
+        demPath: '/dem.tif',
+        height: null,
+      });
       const layer = layerManager.layers.get('rpc-layer');
-      expect(layer.rpcElevation).toEqual({ demPath: '/dem.tif', height: null });
+      expect(layer.rpcElevation).toEqual({
+        source: 'file',
+        demPath: '/dem.tif',
+        height: null,
+        demHeightOffset: null,
+      });
       expect(layer.bounds).toEqual(newBounds);
     });
 
-    it('should refresh the layer and compositions built on it only', async () => {
-      await layerManager.setRpcElevation('rpc-layer', { demPath: null, height: 50 });
-      expect(layerManager.refreshLayerTiles).toHaveBeenCalledWith('rpc-layer');
-      expect(layerManager.refreshLayerTiles).toHaveBeenCalledWith('rpc-comp');
-      expect(layerManager.refreshLayerTiles).not.toHaveBeenCalledWith('other');
+    it('should apply the online DEM with its geoid offset', async () => {
+      invoke.mockResolvedValue({
+        dem_path: '/cache/copernicus_glo30_-98_32.vrt',
+        dem_height_offset: -28.8,
+        bounds: newBounds,
+      });
+      const ok = await layerManager.setRpcElevation('rpc-layer', {
+        source: 'online',
+        demPath: null,
+        height: 150,
+      });
+      expect(ok).toBe(true);
+      expect(invoke).toHaveBeenCalledWith('use_online_dem', { id: 'rpc-layer', height: 150 });
+      const layer = layerManager.layers.get('rpc-layer');
+      expect(layer.rpcElevation).toEqual({
+        source: 'online',
+        demPath: '/cache/copernicus_glo30_-98_32.vrt',
+        height: 150,
+        demHeightOffset: -28.8,
+      });
+      expect(layer.bounds).toEqual(newBounds);
+    });
+
+    it('should warn when the online DEM has no geoid correction', async () => {
+      invoke.mockResolvedValue({ dem_path: '/c.vrt', dem_height_offset: null, bounds: newBounds });
+      await layerManager.setRpcElevation('rpc-layer', {
+        source: 'online',
+        demPath: null,
+        height: null,
+      });
+      expect(showToast).toHaveBeenCalledWith(
+        expect.stringContaining('Geoid correction unavailable'),
+        'info',
+        5000
+      );
+    });
+
+    it('should rebuild the map sources of the layer and its compositions with the new footprint', async () => {
+      await layerManager.setRpcElevation('rpc-layer', {
+        source: 'none',
+        demPath: null,
+        height: 50,
+      });
+      const { map } = mockMapManager;
+
+      expect(map.removeSource).toHaveBeenCalledWith('raster-source-rpc-layer');
+      expect(map.removeSource).toHaveBeenCalledWith('raster-source-rpc-comp');
+      expect(map.removeSource).not.toHaveBeenCalledWith('raster-source-other');
+
+      const [, layerSource] = map.addSource.mock.calls.find(
+        ([id]) => id === 'raster-source-rpc-layer'
+      );
+      expect(layerSource.tiles[0]).toMatch(/^raster-rpc-layer:\/\/\{z\}\/\{x\}\/\{y\}\?v=\d+$/);
+      // New footprint, padded so a further terrain change stays inside.
+      expect(layerSource.bounds[0]).toBeLessThan(newBounds[0]);
+      expect(layerSource.bounds[2]).toBeGreaterThan(newBounds[2]);
+
+      const [layerSpec, beforeId] = map.addLayer.mock.calls.find(
+        ([spec]) => spec.id === 'raster-layer-rpc-layer'
+      );
+      expect(beforeId).toBe('raster-layer-rpc-comp');
+      expect(layerSpec.paint['raster-opacity']).toBe(0.5);
+      expect(layerSpec.layout.visibility).toBe('none');
+
+      expect(layerManager.layers.get('rpc-comp').bounds).toEqual(newBounds);
+      expect(map.triggerRepaint).toHaveBeenCalled();
+      expect(showToast).toHaveBeenCalledWith('Re-projected with constant height', 'success', 2000);
     });
 
     it('should keep previous settings when the backend rejects', async () => {
       invoke.mockRejectedValue(new Error('Failed to open DEM'));
-      await layerManager.setRpcElevation('rpc-layer', { demPath: '/bad.tif', height: null });
+      const ok = await layerManager.setRpcElevation('rpc-layer', {
+        source: 'file',
+        demPath: '/bad.tif',
+        height: null,
+      });
+      expect(ok).toBe(false);
       const layer = layerManager.layers.get('rpc-layer');
       expect(layer.rpcElevation).toBeUndefined();
       expect(layer.bounds).toEqual([9.5, 44.5, 10.5, 45.5]);
-      expect(layerManager.refreshLayerTiles).not.toHaveBeenCalled();
+      expect(mockMapManager.map.removeSource).not.toHaveBeenCalled();
+      expect(showError).toHaveBeenCalled();
+    });
+
+    it('should fall back quietly to constant height when the online DEM is unreachable', async () => {
+      invoke.mockRejectedValue(new Error('No Copernicus DEM tiles for this area'));
+      await applyDefaultRpcElevation(layerManager, 'rpc-layer');
+      expect(invoke).toHaveBeenCalledWith('use_online_dem', { id: 'rpc-layer', height: null });
+      expect(showError).not.toHaveBeenCalled();
+      expect(showToast).toHaveBeenCalledWith(
+        expect.stringContaining('Online DEM unavailable'),
+        'info',
+        5000
+      );
+      expect(layerManager.layers.get('rpc-layer').rpcElevation).toBeUndefined();
     });
 
     it('should ignore non-RPC layers', async () => {
-      await layerManager.setRpcElevation('other', { demPath: '/dem.tif', height: null });
+      await layerManager.setRpcElevation('other', {
+        source: 'file',
+        demPath: '/dem.tif',
+        height: null,
+      });
       expect(invoke).not.toHaveBeenCalledWith('set_rpc_elevation', expect.anything());
     });
   });

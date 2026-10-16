@@ -86,6 +86,10 @@ pub struct RpcElevation {
     pub dem_path: Option<String>,
     /// Constant height override in meters; replaces HEIGHT_OFF.
     pub height: Option<f64>,
+    /// Added to every DEM height, e.g. the geoid undulation for DEMs whose
+    /// heights are above the geoid (RPC expects ellipsoidal heights).
+    #[serde(default)]
+    pub dem_height_offset: Option<f64>,
 }
 
 /// Elevation settings keyed by dataset path. Tile code only sees a pooled
@@ -129,8 +133,12 @@ fn rpc_transformer_options(dataset: &Dataset) -> Vec<(&'static str, String)> {
         Some(dem) => {
             pairs.push(("RPC_DEM", dem));
             pairs.push(("RPC_DEMINTERPOLATION", "BILINEAR".to_string()));
-            // RPC_HEIGHT would be added on top of DEM heights, so it only
-            // serves as the fill value outside the DEM.
+            // With a DEM, GDAL adds RPC_HEIGHT to every DEM height, so it
+            // carries only the DEM's datum offset; the constant height is
+            // just the fill value outside the DEM.
+            if let Some(offset) = elevation.dem_height_offset {
+                pairs.push(("RPC_HEIGHT", offset.to_string()));
+            }
             if let Some(h) = height {
                 pairs.push(("RPC_DEM_MISSING_VALUE", h.to_string()));
             }
@@ -550,6 +558,7 @@ mod tests {
             RpcElevation {
                 dem_path: None,
                 height: Some(1000.0),
+                dem_height_offset: None,
             },
         );
         let (x, y) = center_pixel(&ds);
@@ -585,6 +594,7 @@ mod tests {
             RpcElevation {
                 dem_path: Some(dem_path.to_string()),
                 height: Some(1000.0),
+                dem_height_offset: None,
             },
         );
 
@@ -621,6 +631,7 @@ mod tests {
             RpcElevation {
                 dem_path: None,
                 height: Some(1000.0),
+                dem_height_offset: None,
             },
         );
         assert!((center_pixel(&ds).0 - 55.5).abs() < 1e-3);

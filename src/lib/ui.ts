@@ -220,6 +220,10 @@ export function setupUI(options: SetupUIOptions): void {
   const addLayerBtn = document.getElementById('add-layer-btn');
   const addLayerDropdown = document.getElementById('add-layer-dropdown');
   if (addLayerBtn && addLayerDropdown) {
+    // The dropdown is position: fixed, but #layer-panel's backdrop-filter makes
+    // the panel its containing block, so viewport coordinates land offset and
+    // the panel's overflow clips it. Living under <body> keeps it viewport-relative.
+    document.body.appendChild(addLayerDropdown);
     addLayerBtn.addEventListener('click', e => {
       e.stopPropagation();
       // Close other dropdowns first

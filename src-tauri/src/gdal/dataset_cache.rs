@@ -1,4 +1,4 @@
-use crate::gdal::georef;
+use crate::gdal::{georef, overview};
 use gdal::Dataset;
 use lru::LruCache;
 use std::num::NonZeroUsize;
@@ -11,9 +11,11 @@ pub struct SendDataset(pub Dataset);
 unsafe impl Send for SendDataset {}
 
 impl SendDataset {
-    /// Wrap a long-lived handle, letting it cache its RPC model (and DEM).
-    fn new(dataset: Dataset) -> Self {
+    /// Wrap a long-lived handle, letting it cache its RPC model (and DEM) and
+    /// the overview levels it opens.
+    pub(crate) fn new(dataset: Dataset) -> Self {
         georef::register_rpc_cache(&dataset);
+        overview::register_overview_cache(&dataset);
         Self(dataset)
     }
 }
@@ -22,6 +24,7 @@ impl Drop for SendDataset {
     fn drop(&mut self) {
         // Before the handle closes, so a reused handle address never hits a
         // stale model.
+        overview::unregister_overview_cache(&self.0);
         georef::unregister_rpc_cache(&self.0);
     }
 }
@@ -99,6 +102,16 @@ impl DatasetCache {
     pub fn get_pool(&self, id: &str) -> Option<Arc<DatasetPool>> {
         let mut cache = self.inner.lock().unwrap();
         cache.get(id).map(Arc::clone)
+    }
+
+    /// Replace a dataset's handles with freshly opened ones, e.g. so they pick
+    /// up a newly built `.ovr`. Tiles in flight keep their old pool alive.
+    pub fn reopen(&self, id: &str) -> Result<(), String> {
+        let path = self.get_path(id).ok_or("Dataset not found")?;
+        let dataset = Dataset::open(&path).map_err(|e| format!("reopen: {}", e))?;
+        let pool = Arc::new(DatasetPool::new(path, dataset)?);
+        self.inner.lock().unwrap().put(id.to_string(), pool);
+        Ok(())
     }
 
     /// Remove a dataset, returning its path.

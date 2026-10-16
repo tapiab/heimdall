@@ -1312,6 +1312,7 @@ pub async fn open_stac_asset(
         is_georeferenced,
         georef_method,
         rpc_default_height: georef::rpc_default_height(&dataset),
+        suggest_overviews: false,
     };
 
     let final_dataset = Dataset::open(&final_path)
@@ -2017,6 +2018,7 @@ mod tests {
             is_georeferenced: true,
             georef_method: GeorefMethod::GeoTransform,
             rpc_default_height: None,
+            suggest_overviews: false,
         };
 
         assert_eq!(metadata.id, "test-id");
