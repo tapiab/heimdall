@@ -8,6 +8,8 @@ import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { ask } from '@tauri-apps/plugin-dialog';
 import { showToast, showError, showLoading, hideLoading } from '../notifications';
 import { setupTileProtocol } from './tile-protocol';
+import { invalidateRawTiles } from './raw-tiles';
+import type { ColormapName } from './colormaps';
 import { logger } from '../logger';
 import type {
   LayerManagerInterface,
@@ -247,6 +249,24 @@ export function setLayerStretch(
 }
 
 /**
+ * Set the colormap used for grayscale display
+ * @param manager - The LayerManager instance
+ * @param id - Layer ID
+ * @param colormap - Colormap name
+ */
+export function setLayerColormap(
+  manager: LayerManagerInterface,
+  id: string,
+  colormap: ColormapName
+): void {
+  const layer = manager.layers.get(id) as RasterLayer | undefined;
+  if (!layer || layer.type !== 'raster') return;
+
+  layer.colormap = colormap;
+  manager.refreshLayerTiles(id);
+}
+
+/**
  * Ask whether to build overviews for a large raster that has none, unless
  * already declined for this file this session.
  */
@@ -286,6 +306,8 @@ export async function buildOverviews(manager: LayerManagerInterface, id: string)
     });
     await invoke('build_overviews', { id });
     layer.suggest_overviews = false;
+    // Zoomed-out tiles now read the overviews: drop the ones read without them
+    invalidateRawTiles(id);
     refreshDependentTiles(manager, id);
     manager.updateDynamicControls();
     showToast('Overviews built', 'success', 2000);
@@ -365,6 +387,7 @@ function redrawReprojectedLayer(
   bounds: [number, number, number, number]
 ): void {
   const mapBounds = padBounds(bounds, RPC_BOUNDS_MARGIN);
+  invalidateRawTiles(id);
   for (const [otherId, other] of manager.layers) {
     if (other.type !== 'raster') continue;
     if (otherId === id || other.sourceLayerId === id) {

@@ -1171,6 +1171,13 @@ button:disabled {
   width: 100%;
 }
 
+.colormap-preview {
+  height: 8px;
+  margin-top: var(--space-2);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-sm);
+}
+
 .control-btn {
   width: 100%;
   padding: var(--space-2) var(--space-3);

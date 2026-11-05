@@ -1,18 +1,30 @@
 /**
- * MapLibre tile protocol handlers for raster layers
+ * MapLibre tile protocol handlers for raster layers.
+ *
+ * Each handler fetches raw samples (`raw-tiles`) and renders them with the
+ * layer's current stretch and colormap, handing MapLibre an ImageBitmap.
+ * Display changes reload tiles through the same handlers, which hit the raw
+ * tile cache instead of the backend.
  * @module layer-manager/tile-protocol
  */
 
-import { invoke } from '@tauri-apps/api/core';
 import maplibregl from 'maplibre-gl';
 import {
   registeredProtocols,
   type LayerManagerInterface,
   type RasterLayer,
   type Layer,
+  type StretchSettings,
 } from './types';
 import { logger } from '../logger';
-import { scheduleTile } from './tile-queue';
+import {
+  fetchRawTile,
+  renderGrayscale,
+  renderRgb,
+  toImageBitmap,
+  transparentTile,
+  type RawBand,
+} from './raw-tiles';
 
 const log = logger.child('LayerManager:TileProtocol');
 
@@ -23,7 +35,115 @@ interface ProtocolParams {
 
 /** Protocol response */
 interface ProtocolResponse {
-  data: Uint8Array;
+  data: ImageBitmap;
+}
+
+interface TileCoord {
+  z: number;
+  x: number;
+  y: number;
+}
+
+/** Renders one tile to RGBA, or null for a fully transparent tile. */
+type TileRenderer = (
+  coord: TileCoord,
+  signal: AbortSignal
+) => Promise<Uint8ClampedArray<ArrayBuffer> | null>;
+
+/** Fallback stretch from band statistics, gamma 1 */
+function statsStretch(layer: RasterLayer): StretchSettings {
+  return {
+    min: layer.band_stats[0]?.min || 0,
+    max: layer.band_stats[0]?.max || 255,
+    gamma: 1.0,
+  };
+}
+
+function registerProtocol(protocolName: string, label: string, render: TileRenderer): void {
+  if (registeredProtocols.has(protocolName)) {
+    maplibregl.removeProtocol(protocolName);
+  }
+
+  maplibregl.addProtocol(
+    protocolName,
+    async (params: ProtocolParams, abortController: AbortController): Promise<ProtocolResponse> => {
+      const match = params.url.match(/raster-[^:]+:\/\/(\d+)\/(\d+)\/(\d+)/);
+      if (!match) {
+        throw new Error('Invalid raster URL format');
+      }
+      const coord = {
+        z: parseInt(match[1], 10),
+        x: parseInt(match[2], 10),
+        y: parseInt(match[3], 10),
+      };
+
+      try {
+        const rgba = (await render(coord, abortController.signal)) ?? transparentTile();
+        return { data: await toImageBitmap(rgba) };
+      } catch (error) {
+        if ((error as Error)?.name !== 'AbortError') {
+          log.error(`Failed to load ${label}`, { error: String(error) });
+        }
+        throw error;
+      }
+    }
+  );
+
+  registeredProtocols.add(protocolName);
+}
+
+/** RGB from three bands of one dataset, read in one backend pass. */
+async function renderDatasetRgb(
+  datasetId: string,
+  layer: RasterLayer,
+  pixel: boolean,
+  coord: TileCoord,
+  signal: AbortSignal
+): Promise<Uint8ClampedArray<ArrayBuffer>> {
+  const { r, g, b } = layer.rgbBands;
+  const bands = await fetchRawTile({ datasetId, bands: [r, g, b], pixel }, coord, signal);
+  const { rgbStretch } = layer;
+  return renderRgb(bands as [RawBand, RawBand, RawBand], [
+    rgbStretch.r,
+    rgbStretch.g,
+    rgbStretch.b,
+  ]);
+}
+
+/** RGB from one band of each of three datasets. */
+async function renderCrossLayerRgb(
+  manager: LayerManagerInterface,
+  layer: RasterLayer,
+  stretches: (
+    layers: [RasterLayer, RasterLayer, RasterLayer]
+  ) => [StretchSettings, StretchSettings, StretchSettings],
+  coord: TileCoord,
+  signal: AbortSignal
+): Promise<Uint8ClampedArray<ArrayBuffer> | null> {
+  const cross = layer.crossLayerRgb;
+  if (!cross) return null;
+  const sources = [
+    manager.layers.get(cross.rLayerId),
+    manager.layers.get(cross.gLayerId),
+    manager.layers.get(cross.bLayerId),
+  ] as Array<RasterLayer | undefined>;
+  if (sources.some(s => !s)) return null;
+  const layers = sources as [RasterLayer, RasterLayer, RasterLayer];
+
+  // Synthetic pixel coordinates unless all three are georeferenced
+  const pixel = layers.some(l => !l.is_georeferenced);
+  const bandNumbers = [cross.rBand || 1, cross.gBand || 1, cross.bBand || 1];
+  const planes = await Promise.all(
+    [cross.rLayerId, cross.gLayerId, cross.bLayerId].map(async (datasetId, i) => {
+      const [plane] = await fetchRawTile(
+        { datasetId, bands: [bandNumbers[i]], pixel },
+        coord,
+        signal
+      );
+      return plane;
+    })
+  );
+  return renderRgb(planes as [RawBand, RawBand, RawBand], stretches(layers));
 }
 
 /**
@@ -39,144 +159,29 @@ export function setupTileProtocol(
   datasetId: string,
   _layerData: Layer
 ): void {
-  // Remove existing protocol if any
-  if (registeredProtocols.has(protocolName)) {
-    maplibregl.removeProtocol(protocolName);
-  }
-
-  maplibregl.addProtocol(
-    protocolName,
-    async (params: ProtocolParams, abortController: AbortController): Promise<ProtocolResponse> => {
-      const { url } = params;
-      const match = url.match(/raster-[^:]+:\/\/(\d+)\/(\d+)\/(\d+)/);
-
-      if (!match) {
-        throw new Error('Invalid raster URL format');
-      }
-
-      const [, z, x, y] = match;
-      const layer = manager.layers.get(datasetId) as RasterLayer | undefined;
-
-      if (!layer) {
-        throw new Error('Layer not found');
-      }
-
-      try {
-        let tileData: ArrayBuffer;
-
-        if (layer.displayMode === 'crossLayerRgb' && layer.crossLayerRgb) {
-          // Cross-layer RGB: get bands from different datasets
-          const cross = layer.crossLayerRgb;
-          const rLayer = manager.layers.get(cross.rLayerId) as RasterLayer | undefined;
-          const gLayer = manager.layers.get(cross.gLayerId) as RasterLayer | undefined;
-          const bLayer = manager.layers.get(cross.bLayerId) as RasterLayer | undefined;
-
-          if (rLayer && gLayer && bLayer) {
-            // Use pixel version for non-georeferenced images
-            const usePixelVersion =
-              !rLayer.is_georeferenced || !gLayer.is_georeferenced || !bLayer.is_georeferenced;
-            const command = usePixelVersion
-              ? 'get_cross_layer_pixel_rgb_tile'
-              : 'get_cross_layer_rgb_tile';
-
-            tileData = await scheduleTile(abortController.signal, () =>
-              invoke<ArrayBuffer>(command, {
-                redId: cross.rLayerId,
-                redBand: cross.rBand,
-                greenId: cross.gLayerId,
-                greenBand: cross.gBand,
-                blueId: cross.bLayerId,
-                blueBand: cross.bBand,
-                x: parseInt(x, 10),
-                y: parseInt(y, 10),
-                z: parseInt(z, 10),
-                redMin: rLayer.band_stats[0]?.min || 0,
-                redMax: rLayer.band_stats[0]?.max || 255,
-                redGamma: 1.0,
-                greenMin: gLayer.band_stats[0]?.min || 0,
-                greenMax: gLayer.band_stats[0]?.max || 255,
-                greenGamma: 1.0,
-                blueMin: bLayer.band_stats[0]?.min || 0,
-                blueMax: bLayer.band_stats[0]?.max || 255,
-                blueGamma: 1.0,
-              })
-            );
-          } else {
-            // Missing layer, return empty
-            return { data: new Uint8Array(0) };
-          }
-        } else if (layer.displayMode === 'rgb' && layer.bands >= 3) {
-          // RGB mode - use pixel version for non-georeferenced images
-          log.debug('RGB tile request', {
-            id: datasetId,
-            rgbBands: layer.rgbBands,
-            rgbStretch: layer.rgbStretch,
-            isGeoreferenced: layer.is_georeferenced,
-          });
-          const command = layer.is_georeferenced ? 'get_rgb_tile' : 'get_pixel_rgb_tile';
-          tileData = await scheduleTile(abortController.signal, () =>
-            invoke<ArrayBuffer>(command, {
-              id: datasetId,
-              x: parseInt(x, 10),
-              y: parseInt(y, 10),
-              z: parseInt(z, 10),
-              redBand: layer.rgbBands.r,
-              greenBand: layer.rgbBands.g,
-              blueBand: layer.rgbBands.b,
-              redMin: layer.rgbStretch.r.min,
-              redMax: layer.rgbStretch.r.max,
-              redGamma: layer.rgbStretch.r.gamma,
-              greenMin: layer.rgbStretch.g.min,
-              greenMax: layer.rgbStretch.g.max,
-              greenGamma: layer.rgbStretch.g.gamma,
-              blueMin: layer.rgbStretch.b.min,
-              blueMax: layer.rgbStretch.b.max,
-              blueGamma: layer.rgbStretch.b.gamma,
-            })
-          );
-        } else {
-          // Grayscale mode with stretch
-          // Use pixel tile for non-georeferenced images
-          if (!layer.is_georeferenced) {
-            tileData = await scheduleTile(abortController.signal, () =>
-              invoke<ArrayBuffer>('get_pixel_tile', {
-                id: datasetId,
-                x: parseInt(x, 10),
-                y: parseInt(y, 10),
-                z: parseInt(z, 10),
-                band: layer.band,
-                min: layer.stretch.min,
-                max: layer.stretch.max,
-                gamma: layer.stretch.gamma,
-              })
-            );
-          } else {
-            tileData = await scheduleTile(abortController.signal, () =>
-              invoke<ArrayBuffer>('get_tile_stretched', {
-                id: datasetId,
-                x: parseInt(x, 10),
-                y: parseInt(y, 10),
-                z: parseInt(z, 10),
-                band: layer.band,
-                min: layer.stretch.min,
-                max: layer.stretch.max,
-                gamma: layer.stretch.gamma,
-              })
-            );
-          }
-        }
-
-        return { data: new Uint8Array(tileData as ArrayBuffer) };
-      } catch (error) {
-        if ((error as Error)?.name !== 'AbortError') {
-          log.error('Failed to load tile', { error: String(error) });
-        }
-        throw error;
-      }
+  registerProtocol(protocolName, 'tile', async (coord, signal) => {
+    const layer = manager.layers.get(datasetId) as RasterLayer | undefined;
+    if (!layer) {
+      throw new Error('Layer not found');
     }
-  );
+    const pixel = !layer.is_georeferenced;
 
-  registeredProtocols.add(protocolName);
+    if (layer.displayMode === 'crossLayerRgb' && layer.crossLayerRgb) {
+      // Per-source band statistics, as the cross-layer controls have no stretch
+      return renderCrossLayerRgb(
+        manager,
+        layer,
+        ([r, g, b]) => [statsStretch(r), statsStretch(g), statsStretch(b)],
+        coord,
+        signal
+      );
+    }
+    if (layer.displayMode === 'rgb' && layer.bands >= 3) {
+      return renderDatasetRgb(datasetId, layer, pixel, coord, signal);
+    }
+    const [band] = await fetchRawTile({ datasetId, bands: [layer.band], pixel }, coord, signal);
+    return renderGrayscale(band, layer.stretch, layer.colormap ?? 'gray');
+  });
 }
 
 /**
@@ -192,64 +197,13 @@ export function setupCompositionTileProtocol(
   compositionId: string,
   _compositionLayer: RasterLayer
 ): void {
-  // Remove existing protocol if any
-  if (registeredProtocols.has(protocolName)) {
-    maplibregl.removeProtocol(protocolName);
-  }
-
-  maplibregl.addProtocol(
-    protocolName,
-    async (params: ProtocolParams, abortController: AbortController): Promise<ProtocolResponse> => {
-      const { url } = params;
-      const match = url.match(/raster-[^:]+:\/\/(\d+)\/(\d+)\/(\d+)/);
-
-      if (!match) {
-        throw new Error('Invalid raster URL format');
-      }
-
-      const [, z, x, y] = match;
-      const layer = manager.layers.get(compositionId) as RasterLayer | undefined;
-
-      if (!layer) {
-        throw new Error('Composition layer not found');
-      }
-
-      const { sourceLayerId } = layer;
-
-      try {
-        // Always use RGB mode for composition layers
-        const tileData = await scheduleTile(abortController.signal, () =>
-          invoke<ArrayBuffer>('get_rgb_tile', {
-            id: sourceLayerId,
-            x: parseInt(x, 10),
-            y: parseInt(y, 10),
-            z: parseInt(z, 10),
-            redBand: layer.rgbBands.r,
-            greenBand: layer.rgbBands.g,
-            blueBand: layer.rgbBands.b,
-            redMin: layer.rgbStretch.r.min,
-            redMax: layer.rgbStretch.r.max,
-            redGamma: layer.rgbStretch.r.gamma,
-            greenMin: layer.rgbStretch.g.min,
-            greenMax: layer.rgbStretch.g.max,
-            greenGamma: layer.rgbStretch.g.gamma,
-            blueMin: layer.rgbStretch.b.min,
-            blueMax: layer.rgbStretch.b.max,
-            blueGamma: layer.rgbStretch.b.gamma,
-          })
-        );
-
-        return { data: new Uint8Array(tileData as ArrayBuffer) };
-      } catch (error) {
-        if ((error as Error)?.name !== 'AbortError') {
-          log.error('Failed to load composition tile', { error: String(error) });
-        }
-        throw error;
-      }
+  registerProtocol(protocolName, 'composition tile', (coord, signal) => {
+    const layer = manager.layers.get(compositionId) as RasterLayer | undefined;
+    if (!layer?.sourceLayerId) {
+      throw new Error('Composition layer not found');
     }
-  );
-
-  registeredProtocols.add(protocolName);
+    return renderDatasetRgb(layer.sourceLayerId, layer, !layer.is_georeferenced, coord, signal);
+  });
 }
 
 /**
@@ -265,79 +219,27 @@ export function setupCrossLayerCompositionTileProtocol(
   compositionId: string,
   _compositionLayer: RasterLayer
 ): void {
-  // Remove existing protocol if any
-  if (registeredProtocols.has(protocolName)) {
-    maplibregl.removeProtocol(protocolName);
-  }
-
-  maplibregl.addProtocol(
-    protocolName,
-    async (params: ProtocolParams, abortController: AbortController): Promise<ProtocolResponse> => {
-      const { url } = params;
-      const match = url.match(/raster-[^:]+:\/\/(\d+)\/(\d+)\/(\d+)/);
-
-      if (!match) {
-        throw new Error('Invalid raster URL format');
-      }
-
-      const [, z, x, y] = match;
-      const layer = manager.layers.get(compositionId) as RasterLayer | undefined;
-
-      if (!layer || !layer.crossLayerRgb) {
-        throw new Error('Cross-layer composition not found');
-      }
-
-      const { rLayerId, gLayerId, bLayerId, rBand, gBand, bBand } = layer.crossLayerRgb;
-      const rLayer = manager.layers.get(rLayerId) as RasterLayer | undefined;
-      const gLayer = manager.layers.get(gLayerId) as RasterLayer | undefined;
-      const bLayer = manager.layers.get(bLayerId) as RasterLayer | undefined;
-
-      if (!rLayer || !gLayer || !bLayer) {
-        throw new Error('Source layers for cross-layer RGB not found');
-      }
-
-      try {
-        // Use pixel version for non-georeferenced images
-        const usePixelVersion =
-          !rLayer.is_georeferenced || !gLayer.is_georeferenced || !bLayer.is_georeferenced;
-        const command = usePixelVersion
-          ? 'get_cross_layer_pixel_rgb_tile'
-          : 'get_cross_layer_rgb_tile';
-
-        const tileData = await scheduleTile(abortController.signal, () =>
-          invoke<ArrayBuffer>(command, {
-            redId: rLayerId,
-            redBand: rBand || 1,
-            greenId: gLayerId,
-            greenBand: gBand || 1,
-            blueId: bLayerId,
-            blueBand: bBand || 1,
-            x: parseInt(x, 10),
-            y: parseInt(y, 10),
-            z: parseInt(z, 10),
-            redMin: layer.rgbStretch?.r?.min ?? rLayer.band_stats[0]?.min ?? 0,
-            redMax: layer.rgbStretch?.r?.max ?? rLayer.band_stats[0]?.max ?? 255,
-            redGamma: layer.rgbStretch?.r?.gamma ?? 1.0,
-            greenMin: layer.rgbStretch?.g?.min ?? gLayer.band_stats[0]?.min ?? 0,
-            greenMax: layer.rgbStretch?.g?.max ?? gLayer.band_stats[0]?.max ?? 255,
-            greenGamma: layer.rgbStretch?.g?.gamma ?? 1.0,
-            blueMin: layer.rgbStretch?.b?.min ?? bLayer.band_stats[0]?.min ?? 0,
-            blueMax: layer.rgbStretch?.b?.max ?? bLayer.band_stats[0]?.max ?? 255,
-            blueGamma: layer.rgbStretch?.b?.gamma ?? 1.0,
-          })
-        );
-
-        return { data: new Uint8Array(tileData as ArrayBuffer) };
-      } catch (error) {
-        if ((error as Error)?.name !== 'AbortError') {
-          log.error('Failed to load cross-layer composition tile', { error: String(error) });
-        }
-        throw error;
-      }
+  registerProtocol(protocolName, 'cross-layer composition tile', async (coord, signal) => {
+    const layer = manager.layers.get(compositionId) as RasterLayer | undefined;
+    if (!layer || !layer.crossLayerRgb) {
+      throw new Error('Cross-layer composition not found');
     }
-  );
-
-  registeredProtocols.add(protocolName);
+    const rendered = await renderCrossLayerRgb(
+      manager,
+      layer,
+      ([r, g, b]) => [
+        layer.rgbStretch?.r ?? statsStretch(r),
+        layer.rgbStretch?.g ?? statsStretch(g),
+        layer.rgbStretch?.b ?? statsStretch(b),
+      ],
+      coord,
+      signal
+    );
+    if (!rendered) {
+      throw new Error('Source layers for cross-layer RGB not found');
+    }
+    return rendered;
+  });
 }
 
 /**
