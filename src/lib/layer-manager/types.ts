@@ -4,6 +4,7 @@
  */
 
 import type { Map as MapLibreMap } from 'maplibre-gl';
+import type { ColormapName } from './colormaps';
 
 // ==================== Shared State ====================
 
@@ -136,6 +137,8 @@ export interface RasterLayer extends BaseLayer {
   band: number;
   /** Grayscale stretch settings */
   stretch: StretchSettings;
+  /** Colormap for grayscale display (default gray) */
+  colormap?: ColormapName;
   /** RGB band assignments */
   rgbBands: RgbBands;
   /** RGB stretch settings */

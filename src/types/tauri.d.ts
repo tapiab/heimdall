@@ -144,65 +144,15 @@ export interface TauriCommands {
   // Raster commands
   open_raster(path: string): Promise<RasterMetadata>;
   close_dataset(id: string): Promise<void>;
-  get_tile(id: string, z: number, x: number, y: number, band: number): Promise<Uint8Array>;
-  get_tile_stretched(
+  /** Little-endian f32, band-sequential, 256×256 per band, NaN = nodata; empty = no overlap */
+  get_raw_tile(
     id: string,
-    z: number,
     x: number,
     y: number,
-    band: number,
-    min: number,
-    max: number,
-    gamma: number
-  ): Promise<Uint8Array>;
-  get_rgb_tile(
-    id: string,
     z: number,
-    x: number,
-    y: number,
-    r: number,
-    g: number,
-    b: number,
-    r_min: number,
-    r_max: number,
-    r_gamma: number,
-    g_min: number,
-    g_max: number,
-    g_gamma: number,
-    b_min: number,
-    b_max: number,
-    b_gamma: number
-  ): Promise<Uint8Array>;
-  get_cross_layer_rgb_tile(
-    r_id: string,
-    g_id: string,
-    b_id: string,
-    z: number,
-    x: number,
-    y: number,
-    r_band: number,
-    g_band: number,
-    b_band: number,
-    r_min: number,
-    r_max: number,
-    r_gamma: number,
-    g_min: number,
-    g_max: number,
-    g_gamma: number,
-    b_min: number,
-    b_max: number,
-    b_gamma: number
-  ): Promise<Uint8Array>;
-  get_pixel_tile(
-    id: string,
-    z: number,
-    x: number,
-    y: number,
-    band: number,
-    min: number,
-    max: number,
-    gamma: number
-  ): Promise<Uint8Array>;
+    bands: number[],
+    pixel: boolean
+  ): Promise<ArrayBuffer>;
   get_raster_stats(id: string, band: number): Promise<BandStats>;
   get_histogram(id: string, band: number, bin_count: number): Promise<HistogramData>;
   query_pixel_value(id: string, lon: number, lat: number, band: number): Promise<number | null>;

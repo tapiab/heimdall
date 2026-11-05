@@ -7,10 +7,9 @@ mod gdal;
 use commands::app::{get_version, read_config, write_config};
 use commands::georef::{apply_georeference, calculate_transformation};
 use commands::raster::{
-    build_overviews, close_dataset, get_cross_layer_pixel_rgb_tile, get_cross_layer_rgb_tile,
-    get_elevation_profile, get_elevation_profile_pixels, get_histogram, get_pixel_rgb_tile,
-    get_pixel_tile, get_raster_stats, get_rgb_tile, get_tile, get_tile_stretched, open_raster,
-    query_pixel_value, query_pixel_value_at_pixel, set_rpc_elevation, use_online_dem,
+    build_overviews, close_dataset, get_elevation_profile, get_elevation_profile_pixels,
+    get_histogram, get_raster_stats, get_raw_tile, open_raster, query_pixel_value,
+    query_pixel_value_at_pixel, set_rpc_elevation, use_online_dem,
 };
 use commands::stac::{
     browse_static_collection, connect_stac_api, fetch_stac_resource, fetch_stac_thumbnail,
@@ -130,16 +129,10 @@ fn main() {
             read_config,
             write_config,
             open_raster,
-            get_tile,
-            get_tile_stretched,
-            get_rgb_tile,
+            get_raw_tile,
             set_rpc_elevation,
             build_overviews,
             use_online_dem,
-            get_cross_layer_rgb_tile,
-            get_cross_layer_pixel_rgb_tile,
-            get_pixel_tile,
-            get_pixel_rgb_tile,
             get_raster_stats,
             get_histogram,
             close_dataset,

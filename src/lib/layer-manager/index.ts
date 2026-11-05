@@ -48,6 +48,7 @@ interface PixelQueryResult {
 import {
   addRasterLayer,
   setLayerStretch,
+  setLayerColormap,
   setLayerBand,
   setLayerDisplayMode,
   setRgbBands,
@@ -78,6 +79,8 @@ import {
   setupCrossLayerCompositionTileProtocol,
   removeProtocol,
 } from './tile-protocol';
+import { invalidateRawTiles } from './raw-tiles';
+import type { ColormapName } from './colormaps';
 import { showHistogram, setupHistogramHover, drawHistogram } from './histogram';
 import { updateLayerPanel, updateDynamicControls } from './layer-ui';
 
@@ -463,6 +466,15 @@ export class LayerManager {
   }
 
   /**
+   * Set the colormap for grayscale display.
+   * @param id - Layer ID
+   * @param colormap - Colormap name
+   */
+  setLayerColormap(id: string, colormap: ColormapName): void {
+    setLayerColormap(this, id, colormap);
+  }
+
+  /**
    * Set the displayed band for a raster layer.
    * @param id - Layer ID
    * @param band - Band number (1-indexed)
@@ -787,6 +799,7 @@ export class LayerManager {
         } catch (error) {
           log.error('Failed to close dataset in backend', { error: String(error) });
         }
+        invalidateRawTiles(id);
       }
 
       // Remove protocol

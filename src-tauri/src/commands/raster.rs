@@ -2,9 +2,7 @@
 
 use crate::gdal::dataset_cache::DatasetCache;
 use crate::gdal::georef::{self, GeorefMethod};
-use crate::gdal::tile_extractor::{
-    extract_rgb_tile, extract_tile, extract_tile_with_stretch, StretchParams, TileRequest,
-};
+use crate::gdal::tile_extractor::{extract_raw_pixel_tile, extract_raw_tile, TileRequest};
 use crate::gdal::{online_dem, overview};
 use gdal::spatial_ref::{CoordTransform, SpatialRef};
 use gdal::Dataset;
@@ -447,51 +445,30 @@ pub async fn build_overviews(
     state.reopen(&id)
 }
 
-/// Get a tile from a raster dataset with auto stretch
+/// Get raw samples for one tile, for the frontend to stretch and colorize.
+///
+/// The body is little-endian `f32`, band-sequential, 256×256 per band, with
+/// `NaN` for nodata and pixels outside the raster. An empty body means the
+/// tile misses the raster. `pixel` selects the synthetic pixel coordinates used
+/// for non-georeferenced images.
 #[tauri::command]
-pub async fn get_tile(
+pub async fn get_raw_tile(
     id: String,
     x: i32,
     y: i32,
     z: u8,
-    band: Option<i32>,
+    bands: Vec<i32>,
+    pixel: bool,
     state: State<'_, DatasetCache>,
 ) -> Result<Response, String> {
-    let pool = state.get_pool(&id).ok_or("Dataset not found")?;
-    let bytes = tokio::task::spawn_blocking(move || {
-        let guard = pool.checkout();
-        let request = TileRequest {
-            x,
-            y,
-            z,
-            band: band.unwrap_or(1),
-            tile_size: 256,
-        };
-        extract_tile(&guard.0, &request)
-    })
-    .await
-    .map_err(|e| e.to_string())??;
-    Ok(Response::new(bytes))
-}
-
-/// Get a tile with custom stretch parameters
-#[tauri::command]
-pub async fn get_tile_stretched(
-    id: String,
-    x: i32,
-    y: i32,
-    z: u8,
-    band: Option<i32>,
-    min: f64,
-    max: f64,
-    gamma: f64,
-    state: State<'_, DatasetCache>,
-) -> Result<Response, String> {
+    if bands.is_empty() {
+        return Err("No bands requested".to_string());
+    }
     if !FIRST_TILE_LOGGED.swap(true, Ordering::Relaxed) {
         let path = state.get_path(&id).unwrap_or_default();
         println!(
-            "[TILE] First tile request: z={} x={} y={} path={}",
-            z, x, y, path
+            "[TILE] First tile request: z={} x={} y={} bands={:?} path={}",
+            z, x, y, bands, path
         );
     }
     let pool = state.get_pool(&id).ok_or("Dataset not found")?;
@@ -501,70 +478,17 @@ pub async fn get_tile_stretched(
             x,
             y,
             z,
-            band: band.unwrap_or(1),
             tile_size: 256,
         };
-        extract_tile_with_stretch(&guard.0, &request, &StretchParams { min, max, gamma })
-    })
-    .await
-    .map_err(|e| e.to_string())??;
-    Ok(Response::new(bytes))
-}
-
-/// Get an RGB composite tile
-#[tauri::command]
-pub async fn get_rgb_tile(
-    id: String,
-    x: i32,
-    y: i32,
-    z: u8,
-    red_band: i32,
-    green_band: i32,
-    blue_band: i32,
-    red_min: f64,
-    red_max: f64,
-    red_gamma: f64,
-    green_min: f64,
-    green_max: f64,
-    green_gamma: f64,
-    blue_min: f64,
-    blue_max: f64,
-    blue_gamma: f64,
-    state: State<'_, DatasetCache>,
-) -> Result<Response, String> {
-    if !FIRST_TILE_LOGGED.swap(true, Ordering::Relaxed) {
-        let path = state.get_path(&id).unwrap_or_default();
-        println!("[TILE] First RGB tile request: z={} x={} y={} bands=({},{},{}) stretch=({}-{},{}-{},{}-{}) path={}",
-            z, x, y, red_band, green_band, blue_band,
-            red_min, red_max, green_min, green_max, blue_min, blue_max, path);
-    }
-    let pool = state.get_pool(&id).ok_or("Dataset not found")?;
-    let bytes = tokio::task::spawn_blocking(move || {
-        let guard = pool.checkout();
-        let request = TileRequest {
-            x,
-            y,
-            z,
-            band: 1,
-            tile_size: 256,
+        let samples = if pixel {
+            extract_raw_pixel_tile(&guard.0, &request, &bands)?
+        } else {
+            extract_raw_tile(&guard.0, &request, &bands)?
         };
-        let rs = StretchParams {
-            min: red_min,
-            max: red_max,
-            gamma: red_gamma,
-        };
-        let gs = StretchParams {
-            min: green_min,
-            max: green_max,
-            gamma: green_gamma,
-        };
-        let bs = StretchParams {
-            min: blue_min,
-            max: blue_max,
-            gamma: blue_gamma,
-        };
-        extract_rgb_tile(
-            &guard.0, &request, red_band, green_band, blue_band, &rs, &gs, &bs,
+        Ok::<_, String>(
+            samples
+                .map(|s| s.iter().flat_map(|v| v.to_le_bytes()).collect::<Vec<u8>>())
+                .unwrap_or_default(),
         )
     })
     .await
@@ -671,219 +595,6 @@ pub async fn get_histogram(
         counts,
         bin_edges,
     })
-}
-
-/// Get a cross-layer RGB composite tile (bands from different datasets)
-#[tauri::command]
-pub async fn get_cross_layer_rgb_tile(
-    red_id: String,
-    red_band: i32,
-    green_id: String,
-    green_band: i32,
-    blue_id: String,
-    blue_band: i32,
-    x: i32,
-    y: i32,
-    z: u8,
-    red_min: f64,
-    red_max: f64,
-    red_gamma: f64,
-    green_min: f64,
-    green_max: f64,
-    green_gamma: f64,
-    blue_min: f64,
-    blue_max: f64,
-    blue_gamma: f64,
-    state: State<'_, DatasetCache>,
-) -> Result<Response, String> {
-    use crate::gdal::tile_extractor::{extract_cross_layer_rgb_tile, StretchParams, TileRequest};
-    let r_pool = state.get_pool(&red_id).ok_or("Red dataset not found")?;
-    let g_pool = state.get_pool(&green_id).ok_or("Green dataset not found")?;
-    let b_pool = state.get_pool(&blue_id).ok_or("Blue dataset not found")?;
-    let bytes = tokio::task::spawn_blocking(move || {
-        let rg = r_pool.checkout();
-        let gg = g_pool.checkout();
-        let bg = b_pool.checkout();
-        let request = TileRequest {
-            x,
-            y,
-            z,
-            band: 1,
-            tile_size: 256,
-        };
-        let rs = StretchParams {
-            min: red_min,
-            max: red_max,
-            gamma: red_gamma,
-        };
-        let gs = StretchParams {
-            min: green_min,
-            max: green_max,
-            gamma: green_gamma,
-        };
-        let bs = StretchParams {
-            min: blue_min,
-            max: blue_max,
-            gamma: blue_gamma,
-        };
-        extract_cross_layer_rgb_tile(
-            &rg.0, red_band, &gg.0, green_band, &bg.0, blue_band, &request, &rs, &gs, &bs,
-        )
-    })
-    .await
-    .map_err(|e| e.to_string())??;
-    Ok(Response::new(bytes))
-}
-
-/// Get a tile for non-georeferenced images (using pixel coordinates)
-#[tauri::command]
-pub async fn get_pixel_tile(
-    id: String,
-    x: i32,
-    y: i32,
-    z: u8,
-    band: Option<i32>,
-    min: f64,
-    max: f64,
-    gamma: f64,
-    state: State<'_, DatasetCache>,
-) -> Result<Response, String> {
-    use crate::gdal::tile_extractor::{extract_pixel_tile, StretchParams, TileRequest};
-    let pool = state.get_pool(&id).ok_or("Dataset not found")?;
-    let bytes = tokio::task::spawn_blocking(move || {
-        let guard = pool.checkout();
-        let request = TileRequest {
-            x,
-            y,
-            z,
-            band: band.unwrap_or(1),
-            tile_size: 256,
-        };
-        extract_pixel_tile(&guard.0, &request, &StretchParams { min, max, gamma })
-    })
-    .await
-    .map_err(|e| e.to_string())??;
-    Ok(Response::new(bytes))
-}
-
-/// Get an RGB tile for non-georeferenced images (using pixel coordinates)
-#[tauri::command]
-pub async fn get_pixel_rgb_tile(
-    id: String,
-    x: i32,
-    y: i32,
-    z: u8,
-    red_band: i32,
-    green_band: i32,
-    blue_band: i32,
-    red_min: f64,
-    red_max: f64,
-    red_gamma: f64,
-    green_min: f64,
-    green_max: f64,
-    green_gamma: f64,
-    blue_min: f64,
-    blue_max: f64,
-    blue_gamma: f64,
-    state: State<'_, DatasetCache>,
-) -> Result<Response, String> {
-    use crate::gdal::tile_extractor::{extract_pixel_rgb_tile, StretchParams, TileRequest};
-    let pool = state.get_pool(&id).ok_or("Dataset not found")?;
-    let bytes = tokio::task::spawn_blocking(move || {
-        let guard = pool.checkout();
-        let request = TileRequest {
-            x,
-            y,
-            z,
-            band: 1,
-            tile_size: 256,
-        };
-        let rs = StretchParams {
-            min: red_min,
-            max: red_max,
-            gamma: red_gamma,
-        };
-        let gs = StretchParams {
-            min: green_min,
-            max: green_max,
-            gamma: green_gamma,
-        };
-        let bs = StretchParams {
-            min: blue_min,
-            max: blue_max,
-            gamma: blue_gamma,
-        };
-        extract_pixel_rgb_tile(
-            &guard.0, &request, red_band, green_band, blue_band, &rs, &gs, &bs,
-        )
-    })
-    .await
-    .map_err(|e| e.to_string())??;
-    Ok(Response::new(bytes))
-}
-
-/// Get a cross-layer RGB tile for non-georeferenced images (using pixel coordinates)
-#[tauri::command]
-pub async fn get_cross_layer_pixel_rgb_tile(
-    red_id: String,
-    red_band: i32,
-    green_id: String,
-    green_band: i32,
-    blue_id: String,
-    blue_band: i32,
-    x: i32,
-    y: i32,
-    z: u8,
-    red_min: f64,
-    red_max: f64,
-    red_gamma: f64,
-    green_min: f64,
-    green_max: f64,
-    green_gamma: f64,
-    blue_min: f64,
-    blue_max: f64,
-    blue_gamma: f64,
-    state: State<'_, DatasetCache>,
-) -> Result<Response, String> {
-    use crate::gdal::tile_extractor::{
-        extract_cross_layer_pixel_rgb_tile, StretchParams, TileRequest,
-    };
-    let r_pool = state.get_pool(&red_id).ok_or("Red dataset not found")?;
-    let g_pool = state.get_pool(&green_id).ok_or("Green dataset not found")?;
-    let b_pool = state.get_pool(&blue_id).ok_or("Blue dataset not found")?;
-    let bytes = tokio::task::spawn_blocking(move || {
-        let rg = r_pool.checkout();
-        let gg = g_pool.checkout();
-        let bg = b_pool.checkout();
-        let request = TileRequest {
-            x,
-            y,
-            z,
-            band: 1,
-            tile_size: 256,
-        };
-        let rs = StretchParams {
-            min: red_min,
-            max: red_max,
-            gamma: red_gamma,
-        };
-        let gs = StretchParams {
-            min: green_min,
-            max: green_max,
-            gamma: green_gamma,
-        };
-        let bs = StretchParams {
-            min: blue_min,
-            max: blue_max,
-            gamma: blue_gamma,
-        };
-        extract_cross_layer_pixel_rgb_tile(
-            &rg.0, red_band, &gg.0, green_band, &bg.0, blue_band, &request, &rs, &gs, &bs,
-        )
-    })
-    .await
-    .map_err(|e| e.to_string())??;
-    Ok(Response::new(bytes))
 }
 
 /// Close a dataset and remove from cache

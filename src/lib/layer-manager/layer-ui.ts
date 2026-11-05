@@ -13,6 +13,13 @@ import type {
   RpcElevation,
 } from './types';
 import { computeFilterableFields, type FilterableField } from './vector-handler';
+import {
+  COLORMAPS,
+  COLORMAP_LABELS,
+  colormapGradient,
+  isColormapName,
+  type ColormapName,
+} from './colormaps';
 
 /** Extended LayerManager interface with UI-specific properties */
 interface LayerManagerWithUI extends LayerManagerInterface {
@@ -26,6 +33,7 @@ interface LayerManagerWithUI extends LayerManagerInterface {
   setLayerDisplayMode: (id: string, mode: string) => void;
   setLayerBand: (id: string, band: number) => void;
   setLayerStretch: (id: string, min: number, max: number, gamma: number) => void;
+  setLayerColormap: (id: string, colormap: ColormapName) => void;
   setRpcElevation: (id: string, elevation: RpcElevation) => Promise<boolean>;
   buildOverviews: (id: string) => Promise<void>;
   setRgbBands: (id: string, r: number, g: number, b: number) => void;
@@ -884,10 +892,20 @@ function attachRpcElevationListeners(manager: LayerManagerWithUI, layer: RasterL
  */
 function renderGrayscaleControls(layer: RasterLayer, bandOptions: string): string {
   const bandStats = layer.band_stats[layer.band - 1] || { min: 0, max: 255 };
+  const colormap = layer.colormap ?? 'gray';
+  const colormapOptions = COLORMAPS.map(
+    name =>
+      `<option value="${name}" ${name === colormap ? 'selected' : ''}>${COLORMAP_LABELS[name]}</option>`
+  ).join('');
   return `
     <div class="control-section">
       <label>Band</label>
       <select id="band-select">${bandOptions}</select>
+    </div>
+    <div class="control-section">
+      <label>Colormap</label>
+      <select id="colormap-select">${colormapOptions}</select>
+      <div id="colormap-preview" class="colormap-preview" style="background: ${colormapGradient(colormap)}"></div>
     </div>
     <div class="control-section">
       <label>Min <span class="value-display">${layer.stretch.min.toFixed(1)}</span></label>
@@ -1078,6 +1096,15 @@ function attachGrayscaleListeners(manager: LayerManagerWithUI, layer: RasterLaye
       }
     });
   }
+
+  const colormapSelect = document.getElementById('colormap-select') as HTMLSelectElement | null;
+  colormapSelect?.addEventListener('change', () => {
+    const name = colormapSelect.value;
+    if (!manager.selectedLayerId || !isColormapName(name)) return;
+    const preview = document.getElementById('colormap-preview');
+    if (preview) preview.style.background = colormapGradient(name);
+    manager.setLayerColormap(manager.selectedLayerId, name);
+  });
 
   const minSlider = document.getElementById('stretch-min') as HTMLInputElement | null;
   const maxSlider = document.getElementById('stretch-max') as HTMLInputElement | null;
