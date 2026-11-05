@@ -28,6 +28,7 @@ import type {
   LayerManagerOptions,
   RpcElevation,
   RasterAdjust,
+  BandMathSettings,
   StretchPreset,
 } from './types';
 
@@ -52,6 +53,8 @@ import {
   setLayerStretch,
   setLayerColormap,
   applyStretchPreset,
+  applyWhiteBalance,
+  setLayerBandMath,
   setLayerEqualize,
   setLayerAdjust,
   setLayerBand,
@@ -489,6 +492,24 @@ export class LayerManager {
    */
   applyStretchPreset(id: string, preset: StretchPreset): Promise<boolean> {
     return applyStretchPreset(this, id, preset);
+  }
+
+  /**
+   * Display a band math expression in grayscale, or return to the plain band.
+   * @param id - Layer ID
+   * @param settings - Expression and template, or null
+   */
+  setLayerBandMath(id: string, settings: Omit<BandMathSettings, 'range'> | null): Promise<void> {
+    return setLayerBandMath(this, id, settings);
+  }
+
+  /**
+   * Grey-world white balance of the RGB channels.
+   * @param id - Layer ID
+   * @returns Whether it applied
+   */
+  applyWhiteBalance(id: string): Promise<boolean> {
+    return applyWhiteBalance(this, id);
   }
 
   /**

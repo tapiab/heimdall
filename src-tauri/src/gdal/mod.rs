@@ -1,3 +1,4 @@
+pub mod analysis;
 pub mod dataset_cache;
 pub mod georef;
 pub mod image_stats;

@@ -18,7 +18,9 @@ import {
 } from './types';
 import { logger } from '../logger';
 import { equalizationLut, peekBandHistogram } from './stretch-presets';
+import { compileBandMathCached } from './band-math';
 import {
+  TILE_SIZE,
   fetchRawTile,
   renderGrayscale,
   renderRgb,
@@ -179,6 +181,14 @@ export function setupTileProtocol(
     }
     if (layer.displayMode === 'rgb' && layer.bands >= 3) {
       return renderDatasetRgb(datasetId, layer, pixel, coord, signal);
+    }
+    if (layer.bandMath) {
+      const compiled = compileBandMathCached(layer.bandMath.expression, layer.bands);
+      const planes = await fetchRawTile({ datasetId, bands: compiled.bands, pixel }, coord, signal);
+      if (planes.some(p => !p)) return null;
+      const byBand = new Map(compiled.bands.map((b, i) => [b, planes[i] as Float32Array]));
+      const values = compiled.evaluate(byBand, TILE_SIZE * TILE_SIZE);
+      return renderGrayscale(values, layer.stretch, layer.colormap ?? 'gray');
     }
     const [band] = await fetchRawTile({ datasetId, bands: [layer.band], pixel }, coord, signal);
     const histogram = layer.equalize ? peekBandHistogram(datasetId, layer.band) : undefined;

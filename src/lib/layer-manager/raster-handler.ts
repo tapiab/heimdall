@@ -17,8 +17,12 @@ import {
   invalidateBandHistograms,
   presetLimits,
   presetNeedsHistogram,
+  greyWorldStretch,
+  histogramMean,
 } from './stretch-presets';
+import { compileBandMath, sampleBandMathStretch } from './band-math';
 import type {
+  BandMathSettings,
   LayerManagerInterface,
   RasterLayer,
   BandStats,
@@ -295,7 +299,8 @@ export async function applyStretchPreset(
   };
 
   try {
-    const doGray = scope !== 'rgb' && !layer.isComposition;
+    // Band math has its own stretch (sampled from the expression)
+    const doGray = scope !== 'rgb' && !layer.isComposition && !layer.bandMath;
     const doRgb = scope !== 'grayscale' && layer.bands >= 3;
     const grayBand = layer.band;
     const rgbBands = { ...layer.rgbBands };
@@ -328,6 +333,87 @@ export async function applyStretchPreset(
     return true;
   } catch (error) {
     log.warn('Stretch preset not applied', { id, preset, error: String(error) });
+    return false;
+  }
+}
+
+/**
+ * Show a band math expression in grayscale (null returns to the plain band).
+ * The stretch is set to the expression's 2–98 % range over a low-resolution
+ * overview. Throws with a readable message on an invalid expression.
+ */
+export async function setLayerBandMath(
+  manager: LayerManagerInterface,
+  id: string,
+  settings: Omit<BandMathSettings, 'range'> | null
+): Promise<void> {
+  const layer = manager.layers.get(id) as RasterLayer | undefined;
+  if (!layer || layer.type !== 'raster' || layer.isComposition) return;
+
+  if (!settings) {
+    if (!layer.bandMath) return;
+    layer.bandMath = null;
+    const preset = layer.stretchPreset;
+    const applied = await applyStretchPreset(
+      manager,
+      id,
+      preset && preset !== 'custom' ? preset : DEFAULT_STRETCH_PRESET,
+      'grayscale'
+    );
+    if (!applied) {
+      manager.refreshLayerTiles(id);
+      manager.updateDynamicControls();
+    }
+    return;
+  }
+
+  const compiled = compileBandMath(settings.expression, layer.bands);
+  const stretch = await sampleBandMathStretch(
+    { datasetId: datasetOf(layer), pixel: !layer.is_georeferenced },
+    layer.bounds,
+    compiled
+  );
+  if (!stretch) throw new Error('The expression has no valid value over this layer');
+  layer.bandMath = { ...settings, range: stretch.range };
+  layer.equalize = false;
+  layer.stretch = { min: stretch.min, max: stretch.max, gamma: layer.stretch.gamma };
+  manager.refreshLayerTiles(id);
+  manager.updateDynamicControls();
+}
+
+/**
+ * Grey-world white balance of the RGB channels: white points move so the
+ * channel means (from the band histograms) display at the same level. Black
+ * points and gamma are kept. Returns false when it can't apply.
+ */
+export async function applyWhiteBalance(
+  manager: LayerManagerInterface,
+  id: string
+): Promise<boolean> {
+  const layer = manager.layers.get(id) as RasterLayer | undefined;
+  if (!layer || layer.type !== 'raster' || layer.bands < 3) return false;
+  if (layer.isCrossLayerComposition || layer.displayMode === 'crossLayerRgb') return false;
+
+  const datasetId = datasetOf(layer);
+  const bands = { ...layer.rgbBands };
+  try {
+    const histograms = await Promise.all(
+      [bands.r, bands.g, bands.b].map(band => getBandHistogram(datasetId, band))
+    );
+    const means = histograms.map(histogramMean);
+    if (means.some(m => m == null)) return false;
+    const { r, g, b } = layer.rgbStretch;
+    const balanced = greyWorldStretch([r, g, b], means as [number, number, number]);
+    const stale =
+      layer.rgbBands.r !== bands.r || layer.rgbBands.g !== bands.g || layer.rgbBands.b !== bands.b;
+    if (!balanced || stale) return false;
+    layer.rgbStretch = { r: balanced[0], g: balanced[1], b: balanced[2] };
+    layer.stretchPreset = 'custom';
+    manager.refreshLayerTiles(id);
+    manager.updateDynamicControls();
+    return true;
+  } catch (error) {
+    log.warn('White balance not applied', { id, error: String(error) });
     return false;
   }
 }

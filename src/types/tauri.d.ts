@@ -158,7 +158,10 @@ export interface TauriCommands {
   /** Whole-band summary and per-column / per-line series (reads the full band) */
   get_image_statistics(id: string, band: number): Promise<unknown>;
   query_pixel_value(id: string, lon: number, lat: number, band: number): Promise<number | null>;
-  get_elevation_profile(id: string, coords: [number, number][]): Promise<number[]>;
+  /** Every band along a polyline (lon/lat, or pixel positions when `pixel`) */
+  get_band_profile(id: string, coords: [number, number][], pixel: boolean): Promise<unknown>;
+  /** Per-band statistics over the pixel box enclosing `coords` */
+  get_region_statistics(id: string, coords: [number, number][], pixel: boolean): Promise<unknown>;
 
   // Vector commands
   open_vector(path: string): Promise<VectorLayerData>;

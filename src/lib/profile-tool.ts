@@ -18,6 +18,8 @@ import maplibregl, {
 } from 'maplibre-gl';
 import type { Feature, LineString } from 'geojson';
 import { showToast, showError, showLoading, hideLoading } from './notifications';
+import { findAnalysisTarget, toBackendCoords, type AnalysisLayerManager } from './analysis-common';
+import { showBandProfilePanel, type BandProfile } from './band-profile-panel';
 
 /**
  * Pixel extent information for non-georeferenced images
@@ -45,27 +47,8 @@ interface MapManager {
   isTerrainEnabled: () => boolean;
 }
 
-/**
- * Raster layer data structure
- */
-interface RasterLayer {
-  /** Unique layer identifier */
-  id: string;
-  /** Layer type discriminator */
-  type: 'raster';
-  /** Whether layer is currently visible */
-  visible: boolean;
-}
-
-/**
- * LayerManager interface for layer operations
- */
-interface LayerManager {
-  /** Ordered list of layer IDs (bottom to top) */
-  layerOrder: string[];
-  /** Map of layer ID to layer data */
-  layers: Map<string, RasterLayer>;
-}
+/** LayerManager parts used to pick the profiled raster */
+type LayerManager = AnalysisLayerManager;
 
 /** Geographic coordinate as [longitude, latitude] */
 type Coordinate = [number, number];
@@ -135,6 +118,7 @@ export class ProfileTool {
   private points: Coordinate[];
   private markers: Marker[];
   private useTerrainElevation: boolean;
+  private hoverMarker: Marker | null = null;
 
   /**
    * Create a new ProfileTool instance
@@ -362,6 +346,8 @@ export class ProfileTool {
 
   private clearMarkers(): void {
     this.markers.forEach(m => m.remove());
+    this.hoverMarker?.remove();
+    this.hoverMarker = null;
     this.markers = [];
     this.points = [];
   }
@@ -382,9 +368,8 @@ export class ProfileTool {
       return;
     }
 
-    // Find a suitable raster layer for value profile
-    const rasterLayer = this.findElevationLayer();
-    if (!rasterLayer) {
+    const target = findAnalysisTarget(this.layerManager);
+    if (!target) {
       showToast('No raster layer found for value profile', 'error');
       return;
     }
@@ -392,39 +377,58 @@ export class ProfileTool {
     showLoading('Generating value profile...');
 
     try {
-      let result: ElevationProfileResult;
-
-      if (this.mapManager.isPixelCoordMode() && this.mapManager.pixelExtent) {
-        // Convert pseudo-geographic coordinates to pixel coordinates
-        const extent = this.mapManager.pixelExtent;
-        const scale = extent.scale || 0.01;
-        const offsetX = extent.offsetX || 0;
-        const offsetY = extent.offsetY || 0;
-
-        const pixelCoords = this.points.map(([lng, lat]) => [
-          Math.floor((lng + offsetX) / scale),
-          Math.floor((offsetY - lat) / scale),
-        ]);
-
-        result = await invoke<ElevationProfileResult>('get_elevation_profile_pixels', {
-          id: rasterLayer.id,
-          pixel_coords: pixelCoords,
-          num_samples: 200,
-        });
-      } else {
-        result = await invoke<ElevationProfileResult>('get_elevation_profile', {
-          id: rasterLayer.id,
-          coords: this.points,
-          num_samples: 200,
-        });
-      }
-
-      this.showProfilePanel(result);
+      const { coords, pixel } = toBackendCoords(this.mapManager, this.points);
+      const profile = await invoke<BandProfile>('get_band_profile', {
+        id: target.datasetId,
+        coords,
+        pixel,
+      });
+      showBandProfilePanel(target, profile, {
+        onHover: index => this.showHoverMarker(profile, index, pixel),
+        onClose: () => this.deactivate(),
+      });
     } catch (error) {
       console.error('Profile generation failed:', error);
       showError('Profile failed', error instanceof Error ? error : String(error));
     } finally {
       hideLoading();
+    }
+  }
+
+  /**
+   * Mark the hovered profile sample on the map, interpolated along the drawn
+   * line (ground distance for geographic lines, planar for pixel ones).
+   */
+  private showHoverMarker(profile: BandProfile, index: number | null, pixel: boolean): void {
+    if (index == null || this.points.length < 2 || profile.total_distance <= 0) {
+      this.hoverMarker?.remove();
+      this.hoverMarker = null;
+      return;
+    }
+    const lengths = this.points.slice(1).map(([lng, lat], i) => {
+      const [lng0, lat0] = this.points[i];
+      return pixel
+        ? Math.hypot(lng - lng0, lat - lat0)
+        : this.haversineDistance(lat0, lng0, lat, lng);
+    });
+    const total = lengths.reduce((a, b) => a + b, 0);
+    let along = (profile.distance[index] / profile.total_distance) * total;
+    let position: Coordinate = this.points[this.points.length - 1];
+    for (let i = 0; i < lengths.length; i++) {
+      if (along <= lengths[i] || i === lengths.length - 1) {
+        const t = lengths[i] > 0 ? Math.min(1, along / lengths[i]) : 0;
+        const [a, b] = [this.points[i], this.points[i + 1]];
+        position = [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t];
+        break;
+      }
+      along -= lengths[i];
+    }
+    if (!this.hoverMarker) {
+      const el = document.createElement('div');
+      el.className = 'profile-hover-marker';
+      this.hoverMarker = new maplibregl.Marker({ element: el }).setLngLat(position).addTo(this.map);
+    } else {
+      this.hoverMarker.setLngLat(position);
     }
   }
 
@@ -544,18 +548,6 @@ export class ProfileTool {
         Math.sin(dLng / 2);
     const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
     return R * c;
-  }
-
-  private findElevationLayer(): RasterLayer | null {
-    // Find the topmost visible raster layer (including non-georeferenced)
-    const layerOrder = [...this.layerManager.layerOrder].reverse();
-    for (const id of layerOrder) {
-      const layer = this.layerManager.layers.get(id);
-      if (layer && layer.type === 'raster' && layer.visible) {
-        return layer;
-      }
-    }
-    return null;
   }
 
   private showProfilePanel(result: ElevationProfileResult): void {

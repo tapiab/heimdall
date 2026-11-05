@@ -7,6 +7,7 @@ import { ExportTool } from './lib/export-tool.js';
 import { ProfileTool } from './lib/profile-tool.js';
 import { AnnotationTool } from './lib/annotation-tool.js';
 import { ZoomRectTool } from './lib/zoom-rect-tool.js';
+import { RegionStatsTool } from './lib/region-stats-tool.js';
 import { ProjectManager } from './lib/project-manager.js';
 import { StacBrowser } from './lib/stac-browser.js';
 import { GeoreferenceTool } from './lib/georeference-tool.js';
@@ -55,6 +56,9 @@ async function init() {
   // Create zoom rectangle tool
   const zoomRectTool = new ZoomRectTool(mapManager);
 
+  // Create region statistics tool (box statistics and pixel spectra)
+  const regionStatsTool = new RegionStatsTool(mapManager, layerManager);
+
   // Create project manager
   const projectManager = new ProjectManager(mapManager, layerManager, annotationTool);
 
@@ -82,6 +86,7 @@ async function init() {
     elevationProfileTool,
     annotationTool,
     zoomRectTool,
+    regionStatsTool,
     projectManager,
     stacBrowser,
     configManager,

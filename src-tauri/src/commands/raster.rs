@@ -1,5 +1,6 @@
 #![allow(clippy::too_many_arguments)]
 
+use crate::gdal::analysis::{self, RegionStatistics};
 use crate::gdal::dataset_cache::DatasetCache;
 use crate::gdal::georef::{self, GeorefMethod};
 use crate::gdal::image_stats::{self, ImageStatistics, Percentiles};
@@ -681,56 +682,177 @@ pub struct PixelBandValue {
     pub is_nodata: bool,
 }
 
-/// Map a lon/lat (EPSG:4326) point to integer pixel/line through the dataset's
-/// geotransform, reprojecting into its native CRS first when needed.
-fn geo_to_pixel(dataset: &Dataset, lng: f64, lat: f64) -> Result<(i32, i32), String> {
+/// Map lon/lat points (EPSG:4326) to fractional pixel/line positions, through
+/// the RPC model or the geotransform (reprojecting into the native CRS first).
+fn lonlat_to_pixels(dataset: &Dataset, coords: &[[f64; 2]]) -> Result<Vec<(f64, f64)>, String> {
+    let mut xs: Vec<f64> = coords.iter().map(|c| c[0]).collect();
+    let mut ys: Vec<f64> = coords.iter().map(|c| c[1]).collect();
+
+    if georef::georef_method(dataset) == GeorefMethod::Rpc {
+        georef::rpc_lonlat_to_pixel(dataset, &mut xs, &mut ys)?;
+        return Ok(xs.into_iter().zip(ys).collect());
+    }
+
     let gt = dataset
         .geo_transform()
         .map_err(|e| format!("Failed to get geotransform: {}", e))?;
 
     let projection = dataset.projection();
-
-    // Transform coordinates from EPSG:4326 to native CRS if needed
-    let (native_x, native_y) = if !projection.is_empty() {
+    if !projection.is_empty() {
         let mut source_srs = SpatialRef::from_epsg(4326)
             .map_err(|e| format!("Failed to create EPSG:4326 SRS: {}", e))?;
-
         let mut target_srs = SpatialRef::from_wkt(&projection)
             .map_err(|e| format!("Failed to parse target SRS: {}", e))?;
 
         if !target_srs.is_geographic() {
-            // Set axis mapping to traditional GIS order (lng, lat) not (lat, lng)
+            // Traditional GIS order (lng, lat), not (lat, lng)
             source_srs.set_axis_mapping_strategy(
                 gdal::spatial_ref::AxisMappingStrategy::TraditionalGisOrder,
             );
             target_srs.set_axis_mapping_strategy(
                 gdal::spatial_ref::AxisMappingStrategy::TraditionalGisOrder,
             );
-
             let transform = CoordTransform::new(&source_srs, &target_srs)
                 .map_err(|e| format!("Failed to create coordinate transform: {}", e))?;
-
-            let mut xs = vec![lng];
-            let mut ys = vec![lat];
-
             transform
                 .transform_coords(&mut xs, &mut ys, &mut [])
                 .map_err(|e| format!("Failed to transform coordinates: {}", e))?;
-
-            (xs[0], ys[0])
-        } else {
-            (lng, lat)
         }
-    } else {
-        (lng, lat)
-    };
+    }
 
-    // Convert geographic coordinates to pixel coordinates
-    // Inverse geotransform: pixel_x = (geo_x - gt[0]) / gt[1]
-    //                       pixel_y = (geo_y - gt[3]) / gt[5]
-    let pixel_x = ((native_x - gt[0]) / gt[1]).floor() as i32;
-    let pixel_y = ((native_y - gt[3]) / gt[5]).floor() as i32;
-    Ok((pixel_x, pixel_y))
+    // Inverse geotransform, including rotation terms
+    let det = gt[1] * gt[5] - gt[2] * gt[4];
+    if det == 0.0 {
+        return Err("Geotransform is not invertible".to_string());
+    }
+    Ok(xs
+        .into_iter()
+        .zip(ys)
+        .map(|(x, y)| {
+            let (dx, dy) = (x - gt[0], y - gt[3]);
+            (
+                (gt[5] * dx - gt[2] * dy) / det,
+                (gt[1] * dy - gt[4] * dx) / det,
+            )
+        })
+        .collect())
+}
+
+/// Map a lon/lat (EPSG:4326) point to integer pixel/line through the dataset's
+/// geotransform, reprojecting into its native CRS first when needed.
+fn geo_to_pixel(dataset: &Dataset, lng: f64, lat: f64) -> Result<(i32, i32), String> {
+    let (x, y) = lonlat_to_pixels(dataset, &[[lng, lat]])?[0];
+    Ok((x.floor() as i32, y.floor() as i32))
+}
+
+/// Values of every band along a polyline
+#[derive(Serialize)]
+pub struct BandProfile {
+    /// "m" along georeferenced lines, "px" for pixel coordinates
+    pub unit: &'static str,
+    pub total_distance: f64,
+    pub distance: Vec<f64>,
+    /// Full-resolution pixel of each sample
+    pub x: Vec<i64>,
+    pub y: Vec<i64>,
+    /// `values[band][sample]`, null outside the raster or for nodata
+    pub values: Vec<Vec<Option<f64>>>,
+}
+
+/// Profile of every band along a polyline, about one sample per pixel (at
+/// most `analysis::MAX_PROFILE_SAMPLES`). `coords` are lon/lat, or pixel/line
+/// positions when `pixel` is set.
+#[tauri::command]
+pub async fn get_band_profile(
+    id: String,
+    coords: Vec<[f64; 2]>,
+    pixel: bool,
+    state: State<'_, DatasetCache>,
+) -> Result<BandProfile, String> {
+    let pool = state.get_pool(&id).ok_or("Dataset not found")?;
+    tokio::task::spawn_blocking(move || {
+        let guard = pool.checkout();
+        let dataset = &guard.0;
+        let vertices = if pixel {
+            coords.iter().map(|c| (c[0], c[1])).collect()
+        } else {
+            lonlat_to_pixels(dataset, &coords)?
+        };
+        let samples = analysis::sample_polyline(&vertices, analysis::MAX_PROFILE_SAMPLES)?;
+
+        // Ground distance per segment, spread linearly along each segment
+        let (unit, distance, total_distance) = if pixel {
+            let distance: Vec<f64> = samples.iter().map(|s| s.along).collect();
+            let total = distance.last().copied().unwrap_or(0.0);
+            ("px", distance, total)
+        } else {
+            let segment_m: Vec<f64> = coords
+                .windows(2)
+                .map(|w| haversine_distance(w[0][0], w[0][1], w[1][0], w[1][1]))
+                .collect();
+            let start_m: Vec<f64> = segment_m
+                .iter()
+                .scan(0.0, |acc, d| {
+                    let start = *acc;
+                    *acc += d;
+                    Some(start)
+                })
+                .collect();
+            let distance = samples
+                .iter()
+                .map(|s| start_m[s.segment] + segment_m[s.segment] * s.fraction)
+                .collect();
+            ("m", distance, segment_m.iter().sum())
+        };
+
+        let pixels: Vec<(i64, i64)> = samples
+            .iter()
+            .map(|s| (s.x.floor() as i64, s.y.floor() as i64))
+            .collect();
+        let values = analysis::read_band_values(dataset, &pixels)?;
+        Ok(BandProfile {
+            unit,
+            total_distance,
+            distance,
+            x: pixels.iter().map(|p| p.0).collect(),
+            y: pixels.iter().map(|p| p.1).collect(),
+            values,
+        })
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Per-band statistics over the pixel bounding box of `coords` (lon/lat, or
+/// pixel/line positions when `pixel` is set). On rotated or RPC rasters the
+/// box encloses the drawn shape rather than matching it.
+#[tauri::command]
+pub async fn get_region_statistics(
+    id: String,
+    coords: Vec<[f64; 2]>,
+    pixel: bool,
+    state: State<'_, DatasetCache>,
+) -> Result<RegionStatistics, String> {
+    let pool = state.get_pool(&id).ok_or("Dataset not found")?;
+    tokio::task::spawn_blocking(move || {
+        let guard = pool.checkout();
+        let dataset = &guard.0;
+        let corners = if pixel {
+            coords.iter().map(|c| (c[0], c[1])).collect()
+        } else {
+            lonlat_to_pixels(dataset, &coords)?
+        };
+        if corners.len() < 2 {
+            return Err("A region needs at least 2 corners".to_string());
+        }
+        let (mut x0, mut y0, mut x1, mut y1) = (f64::MAX, f64::MAX, f64::MIN, f64::MIN);
+        for (x, y) in corners {
+            (x0, y0, x1, y1) = (x0.min(x), y0.min(y), x1.max(x), y1.max(y));
+        }
+        analysis::region_statistics(dataset, x0, y0, x1, y1)
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 /// Query pixel values at a specific geographic coordinate
@@ -799,212 +921,6 @@ pub async fn query_pixel_value(
     })
 }
 
-/// Elevation profile point
-#[derive(Clone, Serialize, Deserialize)]
-pub struct ProfilePoint {
-    pub distance: f64,  // Distance from start in meters
-    pub elevation: f64, // Elevation value
-    pub lng: f64,
-    pub lat: f64,
-    pub is_valid: bool,
-}
-
-/// Elevation profile result
-#[derive(Clone, Serialize, Deserialize)]
-pub struct ProfileResult {
-    pub points: Vec<ProfilePoint>,
-    pub min_elevation: f64,
-    pub max_elevation: f64,
-    pub total_distance: f64,
-    pub elevation_gain: f64,
-    pub elevation_loss: f64,
-}
-
-/// Get elevation profile along a line
-#[tauri::command]
-pub async fn get_elevation_profile(
-    id: String,
-    coords: Vec<[f64; 2]>, // Array of [lng, lat] pairs
-    num_samples: Option<usize>,
-    state: State<'_, DatasetCache>,
-) -> Result<ProfileResult, String> {
-    let ds_pool = state.get_pool(&id).ok_or("Dataset not found")?;
-    let ds_guard = ds_pool.checkout();
-    let dataset = &ds_guard.0;
-
-    let is_rpc = georef::georef_method(dataset) == GeorefMethod::Rpc;
-    // RPC rasters have no geotransform; it's only read on the affine path.
-    let gt = if is_rpc {
-        [0.0, 1.0, 0.0, 0.0, 0.0, 1.0]
-    } else {
-        dataset
-            .geo_transform()
-            .map_err(|e| format!("Failed to get geotransform: {}", e))?
-    };
-
-    let projection = dataset.projection();
-    let (width, height) = dataset.raster_size();
-    let band = dataset
-        .rasterband(1)
-        .map_err(|e| format!("Failed to get band: {}", e))?;
-    let nodata = band.no_data_value();
-
-    // Create coordinate transform if needed
-    let needs_transform = !is_rpc && !projection.is_empty() && {
-        let srs = SpatialRef::from_wkt(&projection).ok();
-        srs.is_some_and(|s| !s.is_geographic())
-    };
-
-    let transform = if needs_transform {
-        let mut source_srs = SpatialRef::from_epsg(4326)
-            .map_err(|e| format!("Failed to create EPSG:4326 SRS: {}", e))?;
-        let mut target_srs = SpatialRef::from_wkt(&projection)
-            .map_err(|e| format!("Failed to parse target SRS: {}", e))?;
-        // Set axis mapping to traditional GIS order (lng, lat) not (lat, lng)
-        source_srs
-            .set_axis_mapping_strategy(gdal::spatial_ref::AxisMappingStrategy::TraditionalGisOrder);
-        target_srs
-            .set_axis_mapping_strategy(gdal::spatial_ref::AxisMappingStrategy::TraditionalGisOrder);
-        Some(
-            CoordTransform::new(&source_srs, &target_srs)
-                .map_err(|e| format!("Failed to create transform: {}", e))?,
-        )
-    } else {
-        None
-    };
-
-    // Calculate total distance and sample points along the line
-    let samples = num_samples.unwrap_or(100);
-    let mut points = Vec::with_capacity(samples);
-
-    // Calculate total line length using Haversine
-    let mut total_distance = 0.0;
-    let mut segment_lengths = Vec::new();
-
-    for i in 1..coords.len() {
-        let d = haversine_distance(
-            coords[i - 1][0],
-            coords[i - 1][1],
-            coords[i][0],
-            coords[i][1],
-        );
-        segment_lengths.push(d);
-        total_distance += d;
-    }
-
-    if total_distance == 0.0 {
-        return Err("Line has zero length".to_string());
-    }
-
-    // Sample points along the line
-    let step = total_distance / (samples - 1) as f64;
-    let mut segment_idx = 0;
-    let mut segment_start_distance = 0.0;
-
-    let mut min_elev = f64::INFINITY;
-    let mut max_elev = f64::NEG_INFINITY;
-    let mut elevation_gain = 0.0;
-    let mut elevation_loss = 0.0;
-    let mut prev_elevation: Option<f64> = None;
-
-    for i in 0..samples {
-        let target_distance = i as f64 * step;
-
-        // Find the segment containing this distance
-        while segment_idx < segment_lengths.len()
-            && segment_start_distance + segment_lengths[segment_idx] < target_distance
-        {
-            segment_start_distance += segment_lengths[segment_idx];
-            segment_idx += 1;
-        }
-
-        // Interpolate position along segment
-        let (lng, lat) = if segment_idx >= segment_lengths.len() {
-            // Last point
-            (coords[coords.len() - 1][0], coords[coords.len() - 1][1])
-        } else {
-            let segment_progress =
-                (target_distance - segment_start_distance) / segment_lengths[segment_idx];
-            let lng = coords[segment_idx][0]
-                + (coords[segment_idx + 1][0] - coords[segment_idx][0]) * segment_progress;
-            let lat = coords[segment_idx][1]
-                + (coords[segment_idx + 1][1] - coords[segment_idx][1]) * segment_progress;
-            (lng, lat)
-        };
-
-        // Transform coordinates if needed
-        let (native_x, native_y) = if let Some(ref t) = transform {
-            let mut xs = vec![lng];
-            let mut ys = vec![lat];
-            t.transform_coords(&mut xs, &mut ys, &mut [])
-                .map_err(|e| format!("Transform failed: {}", e))?;
-            (xs[0], ys[0])
-        } else {
-            (lng, lat)
-        };
-
-        // Convert to pixel coordinates
-        let (pixel_x, pixel_y) = if is_rpc {
-            let (mut xs, mut ys) = ([lng], [lat]);
-            georef::rpc_lonlat_to_pixel(dataset, &mut xs, &mut ys)?;
-            (xs[0].floor() as i32, ys[0].floor() as i32)
-        } else {
-            (
-                ((native_x - gt[0]) / gt[1]).floor() as i32,
-                ((native_y - gt[3]) / gt[5]).floor() as i32,
-            )
-        };
-
-        let (elevation, is_valid) =
-            if pixel_x >= 0 && pixel_x < width as i32 && pixel_y >= 0 && pixel_y < height as i32 {
-                let buffer = band
-                    .read_as::<f64>((pixel_x as isize, pixel_y as isize), (1, 1), (1, 1), None)
-                    .map_err(|e| format!("Failed to read: {}", e))?;
-                let value = buffer.data()[0];
-                let is_nodata = nodata.is_some_and(|nd| (value - nd).abs() < 1e-10);
-                if is_nodata {
-                    (0.0, false)
-                } else {
-                    (value, true)
-                }
-            } else {
-                (0.0, false)
-            };
-
-        if is_valid {
-            min_elev = min_elev.min(elevation);
-            max_elev = max_elev.max(elevation);
-
-            if let Some(prev) = prev_elevation {
-                let diff = elevation - prev;
-                if diff > 0.0 {
-                    elevation_gain += diff;
-                } else {
-                    elevation_loss += diff.abs();
-                }
-            }
-            prev_elevation = Some(elevation);
-        }
-
-        points.push(ProfilePoint {
-            distance: target_distance,
-            elevation,
-            lng,
-            lat,
-            is_valid,
-        });
-    }
-
-    Ok(ProfileResult {
-        points,
-        min_elevation: if min_elev.is_finite() { min_elev } else { 0.0 },
-        max_elevation: if max_elev.is_finite() { max_elev } else { 0.0 },
-        total_distance,
-        elevation_gain,
-        elevation_loss,
-    })
-}
-
 /// Haversine distance in meters
 fn haversine_distance(lng1: f64, lat1: f64, lng2: f64, lat2: f64) -> f64 {
     let r = 6371000.0; // Earth radius in meters
@@ -1018,145 +934,6 @@ fn haversine_distance(lng1: f64, lat1: f64, lng2: f64, lat2: f64) -> f64 {
     let c = 2.0 * a.sqrt().atan2((1.0 - a).sqrt());
 
     r * c
-}
-
-/// Euclidean distance in pixels
-fn pixel_distance(x1: i32, y1: i32, x2: i32, y2: i32) -> f64 {
-    let dx = (x2 - x1) as f64;
-    let dy = (y2 - y1) as f64;
-    (dx * dx + dy * dy).sqrt()
-}
-
-/// Get elevation profile along a line using pixel coordinates (for non-georeferenced images)
-#[tauri::command]
-pub async fn get_elevation_profile_pixels(
-    id: String,
-    pixel_coords: Vec<[i32; 2]>, // Array of [x, y] pixel pairs
-    num_samples: Option<usize>,
-    state: State<'_, DatasetCache>,
-) -> Result<ProfileResult, String> {
-    let ds_pool = state.get_pool(&id).ok_or("Dataset not found")?;
-    let ds_guard = ds_pool.checkout();
-    let dataset = &ds_guard.0;
-
-    let (width, height) = dataset.raster_size();
-    let band = dataset
-        .rasterband(1)
-        .map_err(|e| format!("Failed to get band: {}", e))?;
-    let nodata = band.no_data_value();
-
-    // Calculate total distance and sample points along the line
-    let samples = num_samples.unwrap_or(100);
-    let mut points = Vec::with_capacity(samples);
-
-    // Calculate total line length in pixels
-    let mut total_distance = 0.0;
-    let mut segment_lengths = Vec::new();
-
-    for i in 1..pixel_coords.len() {
-        let d = pixel_distance(
-            pixel_coords[i - 1][0],
-            pixel_coords[i - 1][1],
-            pixel_coords[i][0],
-            pixel_coords[i][1],
-        );
-        segment_lengths.push(d);
-        total_distance += d;
-    }
-
-    if total_distance == 0.0 {
-        return Err("Line has zero length".to_string());
-    }
-
-    // Sample points along the line
-    let step = total_distance / (samples - 1) as f64;
-    let mut segment_idx = 0;
-    let mut segment_start_distance = 0.0;
-
-    let mut min_elev = f64::INFINITY;
-    let mut max_elev = f64::NEG_INFINITY;
-    let mut elevation_gain = 0.0;
-    let mut elevation_loss = 0.0;
-    let mut prev_elevation: Option<f64> = None;
-
-    for i in 0..samples {
-        let target_distance = i as f64 * step;
-
-        // Find the segment containing this distance
-        while segment_idx < segment_lengths.len()
-            && segment_start_distance + segment_lengths[segment_idx] < target_distance
-        {
-            segment_start_distance += segment_lengths[segment_idx];
-            segment_idx += 1;
-        }
-
-        // Interpolate position along segment
-        let (pixel_x, pixel_y) = if segment_idx >= segment_lengths.len() {
-            // Last point
-            (
-                pixel_coords[pixel_coords.len() - 1][0],
-                pixel_coords[pixel_coords.len() - 1][1],
-            )
-        } else {
-            let segment_progress =
-                (target_distance - segment_start_distance) / segment_lengths[segment_idx];
-            let x = pixel_coords[segment_idx][0] as f64
-                + (pixel_coords[segment_idx + 1][0] - pixel_coords[segment_idx][0]) as f64
-                    * segment_progress;
-            let y = pixel_coords[segment_idx][1] as f64
-                + (pixel_coords[segment_idx + 1][1] - pixel_coords[segment_idx][1]) as f64
-                    * segment_progress;
-            (x.round() as i32, y.round() as i32)
-        };
-
-        let (elevation, is_valid) =
-            if pixel_x >= 0 && pixel_x < width as i32 && pixel_y >= 0 && pixel_y < height as i32 {
-                let buffer = band
-                    .read_as::<f64>((pixel_x as isize, pixel_y as isize), (1, 1), (1, 1), None)
-                    .map_err(|e| format!("Failed to read: {}", e))?;
-                let value = buffer.data()[0];
-                let is_nodata = nodata.is_some_and(|nd| (value - nd).abs() < 1e-10);
-                if is_nodata {
-                    (0.0, false)
-                } else {
-                    (value, true)
-                }
-            } else {
-                (0.0, false)
-            };
-
-        if is_valid {
-            min_elev = min_elev.min(elevation);
-            max_elev = max_elev.max(elevation);
-
-            if let Some(prev) = prev_elevation {
-                let diff = elevation - prev;
-                if diff > 0.0 {
-                    elevation_gain += diff;
-                } else {
-                    elevation_loss += diff.abs();
-                }
-            }
-            prev_elevation = Some(elevation);
-        }
-
-        points.push(ProfilePoint {
-            distance: target_distance,
-            elevation,
-            lng: pixel_x as f64, // Use pixel coords as "lng/lat" for display
-            lat: pixel_y as f64,
-            is_valid,
-        });
-    }
-
-    Ok(ProfileResult {
-        points,
-        min_elevation: if min_elev.is_finite() { min_elev } else { 0.0 },
-        max_elevation: if max_elev.is_finite() { max_elev } else { 0.0 },
-        total_distance,
-        elevation_gain,
-        elevation_loss,
-    })
 }
 
 /// Query pixel values at pixel coordinates (for non-georeferenced images)
