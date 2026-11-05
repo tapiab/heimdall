@@ -4959,3 +4959,19 @@ button:disabled {
   color: var(--text-tertiary);
   font-size: var(--font-size-sm);
 }
+
+/* Band math: Apply and Create Layer side by side */
+.band-math-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.band-math-actions[hidden] {
+  display: none;
+}
+
+.band-math-actions .control-btn {
+  flex: 1;
+  margin: 0;
+}

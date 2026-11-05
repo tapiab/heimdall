@@ -318,6 +318,29 @@ export function compileBandMathCached(expression: string, bandCount: number): Co
   return compiled;
 }
 
+/**
+ * Value of an expression at one pixel from its band values (no-data bands are
+ * missing). NaN when a band it reads is missing or the result isn't finite.
+ */
+export function bandMathPixelValue(
+  expression: string,
+  bandCount: number,
+  values: ReadonlyArray<{ band: number; value: number; is_nodata: boolean }>
+): number {
+  let compiled: CompiledBandMath;
+  try {
+    compiled = compileBandMathCached(expression, bandCount);
+  } catch {
+    return NaN;
+  }
+  const planes = new Map<number, Float32Array>();
+  for (const v of values) {
+    planes.set(v.band, Float32Array.of(v.is_nodata ? NaN : v.value));
+  }
+  if (compiled.bands.some(b => !planes.has(b))) return NaN;
+  return compiled.evaluate(planes, 1)[0];
+}
+
 /** Expression templates offered in the UI (A and B are band numbers) */
 export const BAND_MATH_TEMPLATES = {
   nd: {

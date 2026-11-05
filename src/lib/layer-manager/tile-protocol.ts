@@ -153,20 +153,21 @@ async function renderCrossLayerRgb(
  * Setup tile protocol for a raster layer
  * @param manager - The LayerManager instance
  * @param protocolName - Protocol name (e.g., 'raster-abc123')
- * @param datasetId - Dataset ID
+ * @param layerId - Layer ID; samples come from its `sourceLayerId` dataset when set
  * @param _layerData - Layer data (unused but kept for signature consistency)
  */
 export function setupTileProtocol(
   manager: LayerManagerInterface,
   protocolName: string,
-  datasetId: string,
+  layerId: string,
   _layerData: Layer
 ): void {
   registerProtocol(protocolName, 'tile', async (coord, signal) => {
-    const layer = manager.layers.get(datasetId) as RasterLayer | undefined;
+    const layer = manager.layers.get(layerId) as RasterLayer | undefined;
     if (!layer) {
       throw new Error('Layer not found');
     }
+    const datasetId = layer.sourceLayerId ?? layerId;
     const pixel = !layer.is_georeferenced;
 
     if (layer.displayMode === 'crossLayerRgb' && layer.crossLayerRgb) {

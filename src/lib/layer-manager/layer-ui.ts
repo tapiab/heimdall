@@ -45,6 +45,10 @@ interface LayerManagerWithUI extends LayerManagerInterface {
   applyStretchPreset: (id: string, preset: StretchPreset) => Promise<boolean>;
   applyWhiteBalance: (id: string) => Promise<boolean>;
   setLayerBandMath: (id: string, settings: Omit<BandMathSettings, 'range'> | null) => Promise<void>;
+  createBandMathLayer: (
+    sourceLayerId: string,
+    settings: Omit<BandMathSettings, 'range'>
+  ) => Promise<string>;
   setLayerEqualize: (id: string, enabled: boolean) => Promise<void>;
   setLayerAdjust: (id: string, patch: Partial<RasterAdjust>) => void;
   showImageStatistics: (layerId: string, band: number) => Promise<void>;
@@ -158,6 +162,10 @@ export function updateLayerPanel(manager: LayerManagerWithUI): void {
       const rasterLayer = layer as RasterLayer;
       name.title = `${displayName}\n\nRGB Composition\nR: Band ${rasterLayer.rgbBands.r}, G: Band ${rasterLayer.rgbBands.g}, B: Band ${rasterLayer.rgbBands.b}\n${rasterLayer.width}x${rasterLayer.height}\nDouble-click to rename`;
       name.style.fontStyle = 'italic';
+    } else if ((layer as RasterLayer).isBandMathLayer) {
+      const rasterLayer = layer as RasterLayer;
+      name.title = `${displayName}\n\nBand math: ${rasterLayer.bandMath?.expression ?? ''}\n${layer.path}\nDouble-click to rename`;
+      name.style.fontStyle = 'italic';
     } else {
       const rasterLayer = layer as RasterLayer;
       name.title = `${displayName}\n\n${layer.path}\n${rasterLayer.width}x${rasterLayer.height}, ${rasterLayer.bands} band(s)\nDouble-click to rename`;
@@ -246,7 +254,7 @@ export function updateLayerPanel(manager: LayerManagerWithUI): void {
     // Add band selector for multi-band rasters
     if (layer.type === 'raster') {
       const rasterLayer = layer as RasterLayer;
-      if (rasterLayer.bands > 1 && !rasterLayer.isComposition) {
+      if (rasterLayer.bands > 1 && !rasterLayer.isComposition && !rasterLayer.bandMath) {
         const bandRow = document.createElement('div');
         bandRow.className = 'layer-band-selector';
 
@@ -752,8 +760,8 @@ function renderRasterControls(
 
   const modeOptions = `
     <option value="grayscale" ${layer.displayMode === 'grayscale' ? 'selected' : ''}>Grayscale</option>
-    ${layer.bands >= 3 ? `<option value="rgb" ${layer.displayMode === 'rgb' ? 'selected' : ''}>RGB Composite</option>` : ''}
-    ${canCrossLayerRgb ? `<option value="crossLayerRgb" ${layer.displayMode === 'crossLayerRgb' ? 'selected' : ''}>Cross-Layer RGB</option>` : ''}
+    ${layer.bands >= 3 && !layer.isBandMathLayer ? `<option value="rgb" ${layer.displayMode === 'rgb' ? 'selected' : ''}>RGB Composite</option>` : ''}
+    ${canCrossLayerRgb && !layer.isBandMathLayer ? `<option value="crossLayerRgb" ${layer.displayMode === 'crossLayerRgb' ? 'selected' : ''}>Cross-Layer RGB</option>` : ''}
   `;
 
   let controlsHtml = `
@@ -935,7 +943,7 @@ function renderBandMathControls(layer: RasterLayer): string {
     <div class="control-section band-math-section">
       <label>Band Math</label>
       <select id="band-math-template">
-        <option value="off" ${template === 'off' ? 'selected' : ''}>Off (single band)</option>
+        ${layer.isBandMathLayer ? '' : `<option value="off" ${template === 'off' ? 'selected' : ''}>Off (single band)</option>`}
         ${templates}
         <option value="custom" ${template === 'custom' ? 'selected' : ''}>Custom expression</option>
       </select>
@@ -947,7 +955,10 @@ function renderBandMathControls(layer: RasterLayer): string {
         placeholder="(b4 - b3) / (b4 + b3)" value="${escapeHtml(math?.expression ?? '')}"
         ${template === 'off' ? 'hidden' : ''} ${template !== 'custom' ? 'readonly' : ''}>
       <div class="band-math-help" ${template === 'custom' ? '' : 'hidden'}>b1…b${layer.bands}, + − × ÷ ^, abs sqrt log log10 exp min max</div>
-      <button id="band-math-apply" class="control-btn" ${template === 'off' ? 'hidden' : ''}>Apply</button>
+      <div class="band-math-actions" ${template === 'off' ? 'hidden' : ''}>
+        <button id="band-math-apply" class="control-btn">Apply</button>
+        ${layer.isBandMathLayer ? '' : '<button id="band-math-new-layer" class="control-btn" title="Add the expression as a new layer, keeping this one as it is">Create Layer</button>'}
+      </div>
     </div>
   `;
 }
@@ -1273,6 +1284,8 @@ function attachBandMathListeners(manager: LayerManagerWithUI): void {
   const exprInput = document.getElementById('band-math-expr') as HTMLInputElement | null;
   const help = document.querySelector('.band-math-help') as HTMLElement | null;
   const applyBtn = document.getElementById('band-math-apply') as HTMLButtonElement | null;
+  const newLayerBtn = document.getElementById('band-math-new-layer') as HTMLButtonElement | null;
+  const actions = document.querySelector('.band-math-actions') as HTMLElement | null;
   if (!aSelect || !bSelect || !exprInput || !applyBtn) return;
 
   const template = () => templateSelect.value as BandMathTemplate | 'custom' | 'off';
@@ -1311,7 +1324,7 @@ function attachBandMathListeners(manager: LayerManagerWithUI): void {
     exprInput.hidden = t === 'off';
     exprInput.readOnly = t !== 'custom';
     if (help) help.hidden = t !== 'custom';
-    applyBtn.hidden = t === 'off';
+    if (actions) actions.hidden = t === 'off';
     syncExpression();
     if (t === 'off') void apply();
     else if (t !== 'custom') void apply();
@@ -1324,6 +1337,24 @@ function attachBandMathListeners(manager: LayerManagerWithUI): void {
     });
   }
   applyBtn.addEventListener('click', () => void apply());
+  newLayerBtn?.addEventListener('click', async () => {
+    const id = manager.selectedLayerId;
+    const t = template();
+    if (!id || t === 'off') return;
+    newLayerBtn.disabled = true;
+    try {
+      await manager.createBandMathLayer(id, {
+        expression: exprInput.value.trim(),
+        template: t,
+        a: Number(aSelect.value),
+        b: Number(bSelect.value),
+      });
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : String(error), 'error', 4000);
+    } finally {
+      newLayerBtn.disabled = false;
+    }
+  });
   exprInput.addEventListener('keydown', e => {
     if (e.key === 'Enter') void apply();
   });

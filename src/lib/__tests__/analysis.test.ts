@@ -25,6 +25,7 @@ import {
   overviewTiles,
   percentileStretch,
   BAND_MATH_TEMPLATES,
+  bandMathPixelValue,
 } from '../layer-manager/band-math';
 import {
   displayedBands,
@@ -250,5 +251,20 @@ describe('grey-world white balance', () => {
     expect(balanced?.map(c => c.min)).toEqual([0, 0, 10]);
     // Mean at the black point can't be balanced
     expect(greyWorldStretch([s(0, 1), s(5, 9), s(0, 1)], [0.5, 5, 0.5])).toBeNull();
+  });
+});
+
+describe('bandMathPixelValue', () => {
+  const v = (band: number, value: number, is_nodata = false) => ({ band, value, is_nodata });
+
+  it('evaluates the expression at one pixel', () => {
+    expect(bandMathPixelValue('(b2 - b1) / (b2 + b1)', 2, [v(1, 1), v(2, 3)])).toBeCloseTo(0.5);
+  });
+
+  it('is NaN on no-data, a missing band or an invalid expression', () => {
+    expect(bandMathPixelValue('b1 + b2', 2, [v(1, 1), v(2, 0, true)])).toBeNaN();
+    expect(bandMathPixelValue('b1 + b3', 3, [v(1, 1), v(2, 2)])).toBeNaN();
+    expect(bandMathPixelValue('b1 +', 2, [v(1, 1), v(2, 2)])).toBeNaN();
+    expect(bandMathPixelValue('b1 / b2', 2, [v(1, 1), v(2, 0)])).toBeNaN();
   });
 });

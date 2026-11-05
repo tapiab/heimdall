@@ -185,7 +185,9 @@ export interface RasterLayer extends BaseLayer {
   isComposition?: boolean;
   /** Whether this is a cross-layer composition */
   isCrossLayerComposition?: boolean;
-  /** Source layer ID for same-layer compositions */
+  /** Layer made by "Create Layer" in band math: always shows `bandMath` */
+  isBandMathLayer?: boolean;
+  /** Source layer ID for same-layer compositions and band math layers */
   sourceLayerId?: string;
   /** Cross-layer RGB configuration */
   crossLayerRgb?: CrossLayerRgbConfig;
