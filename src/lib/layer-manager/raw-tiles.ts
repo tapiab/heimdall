@@ -171,13 +171,15 @@ export function transparentTile(): Uint8ClampedArray<ArrayBuffer> {
 }
 
 /**
- * Render one band through a stretch and colormap into RGBA. NaN samples and
- * a missing band are transparent.
+ * Render one band through a stretch, optional equalization, gamma and a
+ * colormap into RGBA. NaN samples and a missing band are transparent.
+ * `equalize` maps the stretched value 0..255 to 0..255 before gamma.
  */
 export function renderGrayscale(
   band: RawBand,
   stretch: StretchSettings,
-  colormap: ColormapName
+  colormap: ColormapName,
+  equalize?: Uint8Array
 ): Uint8ClampedArray<ArrayBuffer> {
   const rgba = transparentTile();
   if (!band) return rgba;
@@ -190,6 +192,7 @@ export function renderGrayscale(
     if (Number.isNaN(v)) continue; // nodata or outside
     let t = (v - min) / range;
     t = t < 0 ? 0 : t > 1 ? 1 : t;
+    if (equalize) t = equalize[Math.floor(t * 255)] / 255;
     if (gamma !== 1) t = Math.pow(t, invGamma);
     const k = Math.floor(t * 255) * 3;
     const o = i * 4;

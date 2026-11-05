@@ -1912,6 +1912,103 @@ button:disabled {
   background: var(--accent-primary-muted);
 }
 
+/* Image statistics panel */
+#image-stats-panel {
+  position: absolute;
+  top: calc(var(--toolbar-height) + var(--space-6));
+  right: var(--space-3);
+  width: 520px;
+  max-width: calc(100vw - var(--space-6));
+  max-height: calc(100vh - var(--toolbar-height) - var(--status-bar-height) - var(--space-8));
+  z-index: calc(var(--z-sticky) + 1);
+  display: none;
+  flex-direction: column;
+}
+
+#image-stats-panel.visible {
+  display: flex;
+}
+
+#image-stats-controls {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-left: auto;
+  margin-right: var(--space-2);
+  font-size: var(--font-size-xs);
+  color: var(--text-secondary);
+}
+
+#image-stats-content {
+  padding: var(--space-3);
+  overflow-y: auto;
+}
+
+#image-stats-summary {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: var(--space-2);
+}
+
+.image-stats-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: var(--font-size-xs);
+  color: var(--text-secondary);
+}
+
+.image-stats-cell strong {
+  font-family: var(--font-family-mono);
+  color: var(--text-primary);
+  font-weight: var(--font-weight-medium);
+}
+
+#image-stats-note {
+  margin: var(--space-2) 0;
+  font-size: var(--font-size-xs);
+  color: var(--text-tertiary);
+}
+
+.image-stats-outliers {
+  margin-top: var(--space-1);
+  font-family: var(--font-family-mono);
+  color: var(--color-warning, var(--accent-primary));
+}
+
+.image-stats-outliers span {
+  font-family: inherit;
+  color: var(--text-secondary);
+}
+
+.image-stats-chart {
+  margin-top: var(--space-3);
+}
+
+.image-stats-chart-header {
+  display: flex;
+  justify-content: space-between;
+  font-size: var(--font-size-xs);
+  color: var(--text-secondary);
+  margin-bottom: var(--space-1);
+}
+
+.image-stats-readout {
+  font-family: var(--font-family-mono);
+  color: var(--accent-primary);
+}
+
+.image-stats-chart canvas {
+  width: 100%;
+  height: 80px;
+  display: block;
+  color: var(--accent-primary);
+  background: var(--bg-primary);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  cursor: crosshair;
+}
+
 /* Histogram panel */
 #histogram-panel {
   position: absolute;

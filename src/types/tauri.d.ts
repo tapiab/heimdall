@@ -154,7 +154,9 @@ export interface TauriCommands {
     pixel: boolean
   ): Promise<ArrayBuffer>;
   get_raster_stats(id: string, band: number): Promise<BandStats>;
-  get_histogram(id: string, band: number, bin_count: number): Promise<HistogramData>;
+  get_histogram(id: string, band: number, num_bins?: number): Promise<HistogramData>;
+  /** Whole-band summary and per-column / per-line series (reads the full band) */
+  get_image_statistics(id: string, band: number): Promise<unknown>;
   query_pixel_value(id: string, lon: number, lat: number, band: number): Promise<number | null>;
   get_elevation_profile(id: string, coords: [number, number][]): Promise<number[]>;
 

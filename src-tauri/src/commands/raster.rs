@@ -2,6 +2,7 @@
 
 use crate::gdal::dataset_cache::DatasetCache;
 use crate::gdal::georef::{self, GeorefMethod};
+use crate::gdal::image_stats::{self, ImageStatistics, Percentiles};
 use crate::gdal::tile_extractor::{extract_raw_pixel_tile, extract_raw_tile, TileRequest};
 use crate::gdal::{online_dem, overview};
 use gdal::spatial_ref::{CoordTransform, SpatialRef};
@@ -42,6 +43,26 @@ pub struct BandStats {
     pub max: f64,
     pub mean: f64,
     pub std_dev: f64,
+    /// Bits used by unsigned integer samples (NBITS metadata, else the data
+    /// type size); `None` for signed and floating-point bands.
+    #[serde(default)]
+    pub significant_bits: Option<u32>,
+}
+
+/// Bits used by an unsigned integer band, from NBITS (e.g. 12 or 14-bit data
+/// in 16-bit containers) or the data type size.
+pub(crate) fn significant_bits(band: &gdal::raster::RasterBand) -> Option<u32> {
+    use gdal::Metadata;
+    let band_type = band.band_type();
+    if !band_type.is_integer() || band_type.is_signed() {
+        return None;
+    }
+    let type_bits = u32::from(band_type.bits());
+    let nbits = band
+        .metadata_item("NBITS", "IMAGE_STRUCTURE")
+        .and_then(|v| v.trim().parse::<u32>().ok())
+        .filter(|&n| n > 0 && n <= type_bits);
+    Some(nbits.unwrap_or(type_bits))
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -52,6 +73,8 @@ pub struct HistogramData {
     pub bin_count: usize,
     pub counts: Vec<u64>,
     pub bin_edges: Vec<f64>,
+    /// Percentiles of the same sample, for stretch presets
+    pub percentiles: Option<Percentiles>,
 }
 
 /// Compute histogram bins from raw pixel values
@@ -218,6 +241,7 @@ fn compute_band_stats(dataset: &Dataset) -> Vec<BandStats> {
                     max: min_max.max,
                     mean,
                     std_dev,
+                    significant_bits: significant_bits(&band),
                 });
             }
         }
@@ -528,6 +552,7 @@ pub async fn get_raster_stats(
         max,
         mean,
         std_dev,
+        significant_bits: significant_bits(&rasterband),
     })
 }
 
@@ -542,59 +567,89 @@ pub async fn get_histogram(
     use gdal::raster::ResampleAlg;
 
     let ds_pool = state.get_pool(&id).ok_or("Dataset not found")?;
-    let ds_guard = ds_pool.checkout();
-    let dataset = &ds_guard.0;
+    // Blocking GDAL read: keep it off the async runtime (runs on every layer open)
+    tokio::task::spawn_blocking(move || {
+        let ds_guard = ds_pool.checkout();
+        let dataset = &ds_guard.0;
 
-    let rasterband = dataset
-        .rasterband(band as usize)
-        .map_err(|e| format!("Failed to get band {}: {}", band, e))?;
+        let rasterband = dataset
+            .rasterband(band as usize)
+            .map_err(|e| format!("Failed to get band {}: {}", band, e))?;
 
-    // Get band statistics for range
-    let stats = rasterband
-        .compute_raster_min_max(true)
-        .map_err(|e| format!("Failed to compute statistics: {}", e))?;
+        // Get band statistics for range
+        let stats = rasterband
+            .compute_raster_min_max(true)
+            .map_err(|e| format!("Failed to compute statistics: {}", e))?;
 
-    let min = stats.min;
-    let max = stats.max;
-    let bin_count = num_bins.unwrap_or(256);
+        let min = stats.min;
+        let max = stats.max;
+        let bin_count = num_bins.unwrap_or(256);
 
-    // For large rasters, use decimation to sample
-    let (width, height) = dataset.raster_size();
-    let max_sample_size = 1024;
+        // For large rasters, use decimation to sample
+        let (width, height) = dataset.raster_size();
+        let max_sample_size = 1024;
 
-    let (read_width, read_height) = if width > max_sample_size || height > max_sample_size {
-        let scale = (max_sample_size as f64 / width.max(height) as f64).min(1.0);
-        (
-            (width as f64 * scale) as usize,
-            (height as f64 * scale) as usize,
-        )
-    } else {
-        (width, height)
-    };
+        let (read_width, read_height) = if width > max_sample_size || height > max_sample_size {
+            let scale = (max_sample_size as f64 / width.max(height) as f64).min(1.0);
+            (
+                (width as f64 * scale) as usize,
+                (height as f64 * scale) as usize,
+            )
+        } else {
+            (width, height)
+        };
 
-    // Read band data with resampling if needed
-    let nodata = rasterband.no_data_value();
+        // Read band data with resampling if needed
+        let nodata = rasterband.no_data_value();
 
-    let buffer = rasterband
-        .read_as::<f64>(
-            (0, 0),
-            (width, height),
-            (read_width, read_height),
-            Some(ResampleAlg::NearestNeighbour),
-        )
-        .map_err(|e| format!("Failed to read band data: {}", e))?;
+        let buffer = rasterband
+            .read_as::<f64>(
+                (0, 0),
+                (width, height),
+                (read_width, read_height),
+                Some(ResampleAlg::NearestNeighbour),
+            )
+            .map_err(|e| format!("Failed to read band data: {}", e))?;
 
-    // Compute histogram bins using extracted function
-    let (counts, bin_edges) = compute_histogram_bins(buffer.data(), min, max, bin_count, nodata);
+        // Compute histogram bins using extracted function
+        let (counts, bin_edges) =
+            compute_histogram_bins(buffer.data(), min, max, bin_count, nodata);
+        let percentiles = image_stats::percentiles(buffer.data(), nodata);
 
-    Ok(HistogramData {
-        band: band as usize,
-        min,
-        max,
-        bin_count,
-        counts,
-        bin_edges,
+        Ok(HistogramData {
+            band: band as usize,
+            min,
+            max,
+            bin_count,
+            counts,
+            bin_edges,
+            percentiles,
+        })
     })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Whole-band statistics at full resolution: summary plus per-column and
+/// per-line median, mean and sigma. Reads the entire band, so it takes about
+/// a second per 100 Mpx; run on demand only.
+#[tauri::command]
+pub async fn get_image_statistics(
+    id: String,
+    band: i32,
+    state: State<'_, DatasetCache>,
+) -> Result<ImageStatistics, String> {
+    let pool = state.get_pool(&id).ok_or("Dataset not found")?;
+    tokio::task::spawn_blocking(move || {
+        let guard = pool.checkout();
+        let rasterband = guard
+            .0
+            .rasterband(band as usize)
+            .map_err(|e| format!("Failed to get band {}: {}", band, e))?;
+        image_stats::compute_image_statistics(&rasterband, band as usize)
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 /// Close a dataset and remove from cache
