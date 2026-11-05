@@ -11,6 +11,9 @@ import type {
   CrossLayerRgbConfig,
   LayerManagerOptions,
   RpcElevation,
+  RasterAdjust,
+  StretchPreset,
+  BandStats,
 } from './types';
 import { computeFilterableFields, type FilterableField } from './vector-handler';
 import {
@@ -20,6 +23,9 @@ import {
   isColormapName,
   type ColormapName,
 } from './colormaps';
+import { STRETCH_PRESET_LABELS, bitRange, DEFAULT_STRETCH_PRESET } from './stretch-presets';
+import { DEFAULT_ADJUST } from './raster-handler';
+import { showToast } from '../notifications';
 
 /** Extended LayerManager interface with UI-specific properties */
 interface LayerManagerWithUI extends LayerManagerInterface {
@@ -34,6 +40,10 @@ interface LayerManagerWithUI extends LayerManagerInterface {
   setLayerBand: (id: string, band: number) => void;
   setLayerStretch: (id: string, min: number, max: number, gamma: number) => void;
   setLayerColormap: (id: string, colormap: ColormapName) => void;
+  applyStretchPreset: (id: string, preset: StretchPreset) => Promise<boolean>;
+  setLayerEqualize: (id: string, enabled: boolean) => Promise<void>;
+  setLayerAdjust: (id: string, patch: Partial<RasterAdjust>) => void;
+  showImageStatistics: (layerId: string, band: number) => Promise<void>;
   setRpcElevation: (id: string, elevation: RpcElevation) => Promise<boolean>;
   buildOverviews: (id: string) => Promise<void>;
   setRgbBands: (id: string, r: number, g: number, b: number) => void;
@@ -770,8 +780,10 @@ function renderRasterControls(
   } else {
     controlsHtml += renderRgbControls(layer);
   }
+  controlsHtml += renderDisplayAdjustControls(layer);
 
   controlsPanel.innerHTML = controlsHtml;
+  attachDisplayAdjustListeners(manager);
 
   // Attach event listeners
   attachRasterEventListeners(manager, layer);
@@ -892,6 +904,9 @@ function attachRpcElevationListeners(manager: LayerManagerWithUI, layer: RasterL
  */
 function renderGrayscaleControls(layer: RasterLayer, bandOptions: string): string {
   const bandStats = layer.band_stats[layer.band - 1] || { min: 0, max: 255 };
+  // Presets (percentiles, bit range) can fall outside the band's min/max
+  const sliderMin = Math.min(bandStats.min, layer.stretch.min);
+  const sliderMax = Math.max(bandStats.max, layer.stretch.max);
   const colormap = layer.colormap ?? 'gray';
   const colormapOptions = COLORMAPS.map(
     name =>
@@ -907,13 +922,20 @@ function renderGrayscaleControls(layer: RasterLayer, bandOptions: string): strin
       <select id="colormap-select">${colormapOptions}</select>
       <div id="colormap-preview" class="colormap-preview" style="background: ${colormapGradient(colormap)}"></div>
     </div>
+    ${renderStretchPresetControl('stretch-preset', layer, [layer.band_stats[layer.band - 1]])}
+    <div class="control-section">
+      <label class="stretch-toggle-label">
+        <input type="checkbox" id="stretch-equalize" ${layer.equalize ? 'checked' : ''}>
+        Histogram equalization
+      </label>
+    </div>
     <div class="control-section">
       <label>Min <span class="value-display">${layer.stretch.min.toFixed(1)}</span></label>
-      <input type="range" id="stretch-min" min="${bandStats.min}" max="${bandStats.max}" value="${layer.stretch.min}" step="0.1">
+      <input type="range" id="stretch-min" min="${sliderMin}" max="${sliderMax}" value="${layer.stretch.min}" step="0.1">
     </div>
     <div class="control-section">
       <label>Max <span class="value-display">${layer.stretch.max.toFixed(1)}</span></label>
-      <input type="range" id="stretch-max" min="${bandStats.min}" max="${bandStats.max}" value="${layer.stretch.max}" step="0.1">
+      <input type="range" id="stretch-max" min="${sliderMin}" max="${sliderMax}" value="${layer.stretch.max}" step="0.1">
     </div>
     <div class="control-section">
       <label>Gamma <span class="value-display">${layer.stretch.gamma.toFixed(2)}</span></label>
@@ -921,7 +943,97 @@ function renderGrayscaleControls(layer: RasterLayer, bandOptions: string): strin
     </div>
     <button id="auto-stretch" class="control-btn">Auto Stretch</button>
     <button id="show-histogram" class="control-btn">Show Histogram</button>
+    <button id="show-image-stats" class="control-btn" title="Per-column and per-line statistics (reads the full band)">Image Statistics</button>
   `;
+}
+
+/**
+ * Stretch preset selector. "Full bit range" appears only when every band's
+ * bit depth is known; "Custom" only once limits were edited by hand.
+ */
+function renderStretchPresetControl(
+  id: string,
+  layer: RasterLayer,
+  stats: Array<BandStats | undefined>
+): string {
+  const current = layer.stretchPreset ?? 'minmax';
+  const presets: StretchPreset[] = ['p2', 'p1', 'minmax'];
+  if (stats.every(s => bitRange(s))) presets.push('bits');
+  if (current === 'custom') presets.push('custom');
+  const options = presets
+    .map(
+      p =>
+        `<option value="${p}" ${p === current ? 'selected' : ''}>${STRETCH_PRESET_LABELS[p]}</option>`
+    )
+    .join('');
+  return `
+    <div class="control-section">
+      <label>Stretch</label>
+      <select id="${id}">${options}</select>
+    </div>
+  `;
+}
+
+/** Brightness, contrast, saturation and interpolation (applied on the GPU) */
+function renderDisplayAdjustControls(layer: RasterLayer): string {
+  const adjust = { ...DEFAULT_ADJUST, ...layer.adjust };
+  const slider = (key: 'brightness' | 'contrast' | 'saturation', label: string): string => `
+    <div class="control-section">
+      <label>${label} <span class="value-display">${adjust[key].toFixed(2)}</span></label>
+      <input type="range" id="adjust-${key}" min="-1" max="1" step="0.05" value="${adjust[key]}">
+    </div>`;
+  return `
+    <div class="control-section">
+      <label>Interpolation</label>
+      <select id="adjust-resampling">
+        <option value="linear" ${adjust.resampling === 'linear' ? 'selected' : ''}>Linear</option>
+        <option value="nearest" ${adjust.resampling === 'nearest' ? 'selected' : ''}>Nearest (pixels)</option>
+      </select>
+    </div>
+    ${slider('brightness', 'Brightness')}
+    ${slider('contrast', 'Contrast')}
+    ${slider('saturation', 'Saturation')}
+  `;
+}
+
+/** Apply a stretch preset from a selector, warning when it doesn't apply */
+async function applyPresetFromUi(
+  manager: LayerManagerWithUI,
+  preset: StretchPreset
+): Promise<void> {
+  const id = manager.selectedLayerId;
+  if (!id) return;
+  const applied = await manager.applyStretchPreset(id, preset);
+  if (!applied) {
+    showToast(`${STRETCH_PRESET_LABELS[preset]} is not available for this layer`, 'info', 3000);
+    manager.updateDynamicControls();
+  }
+}
+
+/**
+ * Attach display adjustment listeners. Sliders apply while dragging: MapLibre
+ * changes them on the GPU without reloading tiles.
+ */
+function attachDisplayAdjustListeners(manager: LayerManagerWithUI): void {
+  for (const key of ['brightness', 'contrast', 'saturation'] as const) {
+    const input = document.getElementById(`adjust-${key}`) as HTMLInputElement | null;
+    input?.addEventListener('input', () => {
+      const value = parseFloat(input.value);
+      const display = input.previousElementSibling?.querySelector('.value-display');
+      if (display) display.textContent = value.toFixed(2);
+      if (manager.selectedLayerId) {
+        manager.setLayerAdjust(manager.selectedLayerId, { [key]: value });
+      }
+    });
+  }
+  const resampling = document.getElementById('adjust-resampling') as HTMLSelectElement | null;
+  resampling?.addEventListener('change', () => {
+    if (manager.selectedLayerId) {
+      manager.setLayerAdjust(manager.selectedLayerId, {
+        resampling: resampling.value === 'nearest' ? 'nearest' : 'linear',
+      });
+    }
+  });
 }
 
 /**
@@ -993,6 +1105,7 @@ function renderRgbControls(layer: RasterLayerWithUI): string {
   const showStretch = layer.showRgbStretch || false;
 
   return `
+    ${renderStretchPresetControl('rgb-stretch-preset', layer, [rStats, gStats, bStats])}
     <div class="control-section rgb-bands">
       <div class="rgb-channel-group">
         <div class="rgb-row">
@@ -1056,6 +1169,7 @@ function renderRgbControls(layer: RasterLayerWithUI): string {
       </label>
     </div>
     <button id="auto-stretch-rgb" class="control-btn">Auto Stretch All</button>
+    <button id="show-image-stats" class="control-btn" title="Per-column and per-line statistics (reads the full band)">Image Statistics</button>
     ${!layer.isComposition ? '<button id="create-rgb-layer" class="control-btn" style="margin-top: 8px;">Create RGB Layer</button>' : ''}
   `;
 }
@@ -1104,6 +1218,24 @@ function attachGrayscaleListeners(manager: LayerManagerWithUI, layer: RasterLaye
     const preview = document.getElementById('colormap-preview');
     if (preview) preview.style.background = colormapGradient(name);
     manager.setLayerColormap(manager.selectedLayerId, name);
+  });
+
+  const presetSelect = document.getElementById('stretch-preset') as HTMLSelectElement | null;
+  presetSelect?.addEventListener('change', () => {
+    void applyPresetFromUi(manager, presetSelect.value as StretchPreset);
+  });
+
+  const equalizeBox = document.getElementById('stretch-equalize') as HTMLInputElement | null;
+  equalizeBox?.addEventListener('change', () => {
+    if (manager.selectedLayerId) {
+      void manager.setLayerEqualize(manager.selectedLayerId, equalizeBox.checked);
+    }
+  });
+
+  document.getElementById('show-image-stats')?.addEventListener('click', () => {
+    if (manager.selectedLayerId) {
+      void manager.showImageStatistics(manager.selectedLayerId, layer.band);
+    }
   });
 
   const minSlider = document.getElementById('stretch-min') as HTMLInputElement | null;
@@ -1172,12 +1304,13 @@ function attachGrayscaleListeners(manager: LayerManagerWithUI, layer: RasterLaye
 
   const autoStretchBtn = document.getElementById('auto-stretch');
   if (autoStretchBtn) {
+    // Re-apply the selected preset (the default one after manual edits)
     autoStretchBtn.addEventListener('click', () => {
-      const bandStats = layer.band_stats[layer.band - 1];
-      if (bandStats && manager.selectedLayerId) {
-        manager.setLayerStretch(manager.selectedLayerId, bandStats.min, bandStats.max, 1.0);
-        manager.updateDynamicControls();
-      }
+      const preset = layer.stretchPreset;
+      void applyPresetFromUi(
+        manager,
+        preset && preset !== 'custom' ? preset : DEFAULT_STRETCH_PRESET
+      );
     });
   }
 
@@ -1309,17 +1442,24 @@ function attachRgbListeners(manager: LayerManagerWithUI, layer: RasterLayerWithU
   const autoStretchRgbBtn = document.getElementById('auto-stretch-rgb');
   if (autoStretchRgbBtn) {
     autoStretchRgbBtn.addEventListener('click', () => {
-      const rStats = layer.band_stats[layer.rgbBands.r - 1];
-      const gStats = layer.band_stats[layer.rgbBands.g - 1];
-      const bStats = layer.band_stats[layer.rgbBands.b - 1];
+      const preset = layer.stretchPreset;
+      void applyPresetFromUi(
+        manager,
+        preset && preset !== 'custom' ? preset : DEFAULT_STRETCH_PRESET
+      );
+    });
+  }
 
-      if (rStats) layer.rgbStretch.r = { min: rStats.min, max: rStats.max, gamma: 1.0 };
-      if (gStats) layer.rgbStretch.g = { min: gStats.min, max: gStats.max, gamma: 1.0 };
-      if (bStats) layer.rgbStretch.b = { min: bStats.min, max: bStats.max, gamma: 1.0 };
+  const rgbPresetSelect = document.getElementById('rgb-stretch-preset') as HTMLSelectElement | null;
+  rgbPresetSelect?.addEventListener('change', () => {
+    void applyPresetFromUi(manager, rgbPresetSelect.value as StretchPreset);
+  });
 
+  const rgbStatsBtn = document.getElementById('show-image-stats');
+  if (rgbStatsBtn) {
+    rgbStatsBtn.addEventListener('click', () => {
       if (manager.selectedLayerId) {
-        manager.refreshLayerTiles(manager.selectedLayerId);
-        manager.updateDynamicControls();
+        void manager.showImageStatistics(manager.selectedLayerId, layer.rgbBands.r);
       }
     });
   }

@@ -1609,6 +1609,7 @@ fn get_default_band_stats(dataset: &Dataset) -> Vec<BandStats> {
                 max,
                 mean,
                 std_dev,
+                significant_bits: super::raster::significant_bits(&band),
             });
         }
     }
@@ -1994,6 +1995,7 @@ mod tests {
             max: 255.0,
             mean: 128.0,
             std_dev: 64.0,
+            significant_bits: None,
         };
 
         assert_eq!(stats.band, 1);

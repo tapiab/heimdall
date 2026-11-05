@@ -11,12 +11,21 @@ import { setupTileProtocol } from './tile-protocol';
 import { invalidateRawTiles } from './raw-tiles';
 import type { ColormapName } from './colormaps';
 import { logger } from '../logger';
+import {
+  DEFAULT_STRETCH_PRESET,
+  getBandHistogram,
+  invalidateBandHistograms,
+  presetLimits,
+  presetNeedsHistogram,
+} from './stretch-presets';
 import type {
   LayerManagerInterface,
   RasterLayer,
   BandStats,
   DisplayMode,
+  RasterAdjust,
   RpcElevation,
+  StretchPreset,
 } from './types';
 
 const log = logger.child('LayerManager:Raster');
@@ -89,6 +98,8 @@ export async function addRasterLayer(
       type: 'raster',
       // Display mode: 'grayscale', 'rgb', or 'crossLayerRgb'
       displayMode: metadata.bands >= 3 ? 'rgb' : 'grayscale',
+      // Min/max until the default preset's histogram arrives
+      stretchPreset: 'minmax',
       // Grayscale settings
       band: 1,
       stretch: {
@@ -208,6 +219,8 @@ export async function addRasterLayer(
     }
 
     showToast(`Loaded ${fileName}`, 'success', 2000);
+    // Not awaited: tiles render with min/max meanwhile, then redraw from cache
+    void applyStretchPreset(manager, metadata.id, DEFAULT_STRETCH_PRESET);
     if (metadata.georef_method === 'rpc') {
       void applyDefaultRpcElevation(manager, metadata.id);
     }
@@ -245,7 +258,136 @@ export function setLayerStretch(
   if (!layer) return;
 
   layer.stretch = { min, max, gamma };
+  layer.stretchPreset = 'custom';
   manager.refreshLayerTiles(id);
+}
+
+/** Dataset holding a layer's pixels (a same-layer composition reads its source) */
+function datasetOf(layer: RasterLayer): string {
+  return layer.sourceLayerId ?? layer.id;
+}
+
+/**
+ * Set stretch limits from a preset (percentiles, min/max or bit depth), for
+ * the grayscale band, the RGB channels, or both. Percentile presets fetch the
+ * band histograms first. Returns false when the preset doesn't apply (e.g.
+ * unknown bit depth); the stretch is then left unchanged.
+ */
+export async function applyStretchPreset(
+  manager: LayerManagerInterface,
+  id: string,
+  preset: StretchPreset,
+  scope: 'all' | 'grayscale' | 'rgb' = 'all'
+): Promise<boolean> {
+  const layer = manager.layers.get(id) as RasterLayer | undefined;
+  if (!layer || layer.type !== 'raster' || preset === 'custom') return false;
+  if (layer.isCrossLayerComposition || layer.displayMode === 'crossLayerRgb') return false;
+
+  const datasetId = datasetOf(layer);
+  // Composition layers keep band_stats per channel, not per source band
+  const statsFor = (band: number, channel: number): BandStats | undefined =>
+    layer.isComposition ? layer.band_stats[channel] : layer.band_stats[band - 1];
+  const limitsFor = async (band: number, channel: number) => {
+    const histogram = presetNeedsHistogram(preset)
+      ? await getBandHistogram(datasetId, band)
+      : undefined;
+    return presetLimits(preset, statsFor(band, channel), histogram);
+  };
+
+  try {
+    const doGray = scope !== 'rgb' && !layer.isComposition;
+    const doRgb = scope !== 'grayscale' && layer.bands >= 3;
+    const grayBand = layer.band;
+    const rgbBands = { ...layer.rgbBands };
+    const [gray, r, g, b] = await Promise.all([
+      doGray ? limitsFor(grayBand, 0) : null,
+      doRgb ? limitsFor(rgbBands.r, 0) : null,
+      doRgb ? limitsFor(rgbBands.g, 1) : null,
+      doRgb ? limitsFor(rgbBands.b, 2) : null,
+    ]);
+    if ((doGray && !gray) || (doRgb && (!r || !g || !b))) return false;
+
+    // Bands may have changed while histograms loaded; skip what's now stale.
+    if (gray && layer.band === grayBand) {
+      layer.stretch = { ...gray, gamma: layer.stretch.gamma };
+    }
+    const sameRgb =
+      layer.rgbBands.r === rgbBands.r &&
+      layer.rgbBands.g === rgbBands.g &&
+      layer.rgbBands.b === rgbBands.b;
+    if (r && g && b && sameRgb) {
+      layer.rgbStretch = {
+        r: { ...r, gamma: layer.rgbStretch.r.gamma },
+        g: { ...g, gamma: layer.rgbStretch.g.gamma },
+        b: { ...b, gamma: layer.rgbStretch.b.gamma },
+      };
+    }
+    layer.stretchPreset = preset;
+    manager.refreshLayerTiles(id);
+    manager.updateDynamicControls();
+    return true;
+  } catch (error) {
+    log.warn('Stretch preset not applied', { id, preset, error: String(error) });
+    return false;
+  }
+}
+
+/**
+ * Turn histogram equalization on or off for grayscale display. Fetches the
+ * band histogram first, which equalization is computed from.
+ */
+export async function setLayerEqualize(
+  manager: LayerManagerInterface,
+  id: string,
+  enabled: boolean
+): Promise<void> {
+  const layer = manager.layers.get(id) as RasterLayer | undefined;
+  if (!layer || layer.type !== 'raster') return;
+  if (enabled) {
+    try {
+      await getBandHistogram(datasetOf(layer), layer.band);
+    } catch (error) {
+      showError('Failed to load histogram', error as Error);
+      return;
+    }
+  }
+  layer.equalize = enabled;
+  manager.refreshLayerTiles(id);
+}
+
+export const DEFAULT_ADJUST: RasterAdjust = {
+  brightness: 0,
+  contrast: 0,
+  saturation: 0,
+  resampling: 'linear',
+};
+
+/** Apply brightness, contrast, saturation and resampling to a map layer. */
+function applyRasterPaint(manager: LayerManagerInterface, id: string, adjust: RasterAdjust): void {
+  const { map } = manager.mapManager;
+  const layerId = `raster-layer-${id}`;
+  if (!map.getLayer(layerId)) return;
+  // Brightness shifts the output range: up raises the floor, down lowers the ceiling
+  map.setPaintProperty(layerId, 'raster-brightness-min', Math.max(0, adjust.brightness));
+  map.setPaintProperty(layerId, 'raster-brightness-max', 1 + Math.min(0, adjust.brightness));
+  map.setPaintProperty(layerId, 'raster-contrast', adjust.contrast);
+  map.setPaintProperty(layerId, 'raster-saturation', adjust.saturation);
+  map.setPaintProperty(layerId, 'raster-resampling', adjust.resampling);
+}
+
+/**
+ * Change brightness, contrast, saturation or resampling. MapLibre applies
+ * them on the GPU, so tiles are not re-rendered.
+ */
+export function setLayerAdjust(
+  manager: LayerManagerInterface,
+  id: string,
+  patch: Partial<RasterAdjust>
+): void {
+  const layer = manager.layers.get(id) as RasterLayer | undefined;
+  if (!layer || layer.type !== 'raster') return;
+  layer.adjust = { ...DEFAULT_ADJUST, ...layer.adjust, ...patch };
+  applyRasterPaint(manager, id, layer.adjust);
 }
 
 /**
@@ -306,8 +448,9 @@ export async function buildOverviews(manager: LayerManagerInterface, id: string)
     });
     await invoke('build_overviews', { id });
     layer.suggest_overviews = false;
-    // Zoomed-out tiles now read the overviews: drop the ones read without them
+    // Zoomed-out tiles and sampled histograms now read the overviews
     invalidateRawTiles(id);
+    invalidateBandHistograms(id);
     refreshDependentTiles(manager, id);
     manager.updateDynamicControls();
     showToast('Overviews built', 'success', 2000);
@@ -375,6 +518,8 @@ function rebuildRasterSource(
     },
     beforeId
   );
+  const layer = manager.layers.get(id) as RasterLayer | undefined;
+  if (layer?.adjust) applyRasterPaint(manager, id, layer.adjust);
 }
 
 /**
@@ -525,11 +670,20 @@ export function setLayerBand(manager: LayerManagerInterface, id: string, band: n
   if (!layer) return;
 
   layer.band = band;
-  // Update stretch to match band stats
+  // Min/max right away, then the layer's preset once its histogram is in
   const bandStats = layer.band_stats[band - 1];
   if (bandStats) {
     layer.stretch.min = bandStats.min;
     layer.stretch.max = bandStats.max;
+  }
+  const preset = layer.stretchPreset ?? 'minmax';
+  if (preset !== 'minmax' && preset !== 'custom') {
+    void applyStretchPreset(manager, id, preset, 'grayscale');
+  } else {
+    layer.stretchPreset = 'minmax';
+  }
+  if (layer.equalize) {
+    void getBandHistogram(datasetOf(layer), band).then(() => manager.refreshLayerTiles(id));
   }
   manager.refreshLayerTiles(id);
   manager.updateDynamicControls();
@@ -582,6 +736,10 @@ export function setRgbBands(
   if (rStats) layer.rgbStretch.r = { min: rStats.min, max: rStats.max, gamma: 1.0 };
   if (gStats) layer.rgbStretch.g = { min: gStats.min, max: gStats.max, gamma: 1.0 };
   if (bStats) layer.rgbStretch.b = { min: bStats.min, max: bStats.max, gamma: 1.0 };
+  const preset = layer.stretchPreset ?? 'minmax';
+  if (preset !== 'minmax' && preset !== 'custom') {
+    void applyStretchPreset(manager, id, preset, 'rgb');
+  }
 
   manager.refreshLayerTiles(id);
   manager.updateDynamicControls();
@@ -608,6 +766,7 @@ export function setRgbStretch(
   if (!layer) return;
 
   layer.rgbStretch[channel] = { min, max, gamma };
+  layer.stretchPreset = 'custom';
   manager.refreshLayerTiles(id);
 }
 

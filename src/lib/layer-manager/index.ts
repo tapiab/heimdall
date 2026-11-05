@@ -27,6 +27,8 @@ import type {
   VectorStyle,
   LayerManagerOptions,
   RpcElevation,
+  RasterAdjust,
+  StretchPreset,
 } from './types';
 
 /** Value for a single band from pixel query */
@@ -49,6 +51,9 @@ import {
   addRasterLayer,
   setLayerStretch,
   setLayerColormap,
+  applyStretchPreset,
+  setLayerEqualize,
+  setLayerAdjust,
   setLayerBand,
   setLayerDisplayMode,
   setRgbBands,
@@ -80,6 +85,8 @@ import {
   removeProtocol,
 } from './tile-protocol';
 import { invalidateRawTiles } from './raw-tiles';
+import { invalidateBandHistograms } from './stretch-presets';
+import { showImageStatistics, invalidateImageStatistics } from './image-stats';
 import type { ColormapName } from './colormaps';
 import { showHistogram, setupHistogramHover, drawHistogram } from './histogram';
 import { updateLayerPanel, updateDynamicControls } from './layer-ui';
@@ -475,6 +482,43 @@ export class LayerManager {
   }
 
   /**
+   * Set stretch limits from a preset (percentiles, min/max, bit depth).
+   * @param id - Layer ID
+   * @param preset - Stretch preset
+   * @returns Whether the preset applied
+   */
+  applyStretchPreset(id: string, preset: StretchPreset): Promise<boolean> {
+    return applyStretchPreset(this, id, preset);
+  }
+
+  /**
+   * Turn histogram equalization on or off for grayscale display.
+   * @param id - Layer ID
+   * @param enabled - Equalize within the stretch limits
+   */
+  setLayerEqualize(id: string, enabled: boolean): Promise<void> {
+    return setLayerEqualize(this, id, enabled);
+  }
+
+  /**
+   * Change brightness, contrast, saturation or resampling (GPU, no re-render).
+   * @param id - Layer ID
+   * @param patch - Values to change
+   */
+  setLayerAdjust(id: string, patch: Partial<RasterAdjust>): void {
+    setLayerAdjust(this, id, patch);
+  }
+
+  /**
+   * Open the image statistics panel for a raster band.
+   * @param layerId - Layer ID
+   * @param band - Band number (1-indexed)
+   */
+  showImageStatistics(layerId: string, band: number): Promise<void> {
+    return showImageStatistics(this, layerId, band);
+  }
+
+  /**
    * Set the displayed band for a raster layer.
    * @param id - Layer ID
    * @param band - Band number (1-indexed)
@@ -800,6 +844,8 @@ export class LayerManager {
           log.error('Failed to close dataset in backend', { error: String(error) });
         }
         invalidateRawTiles(id);
+        invalidateBandHistograms(id);
+        invalidateImageStatistics(id);
       }
 
       // Remove protocol

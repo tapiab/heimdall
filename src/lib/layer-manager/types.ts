@@ -56,9 +56,28 @@ export interface BandStats {
   max: number;
   mean?: number;
   std_dev?: number;
+  /** Bits used by unsigned integer samples (e.g. 14 in a 16-bit container) */
+  significant_bits?: number | null;
 }
 
 // ==================== Stretch Settings ====================
+
+/**
+ * How stretch limits were chosen: band min/max, a percentile cut, the full
+ * range of the bit depth, or edited by hand.
+ */
+export type StretchPreset = 'minmax' | 'p1' | 'p2' | 'bits' | 'custom';
+
+/** Map-side display adjustments, applied by MapLibre on the GPU */
+export interface RasterAdjust {
+  /** -1..1, 0 = unchanged */
+  brightness: number;
+  /** -1..1, 0 = unchanged */
+  contrast: number;
+  /** -1..1, 0 = unchanged */
+  saturation: number;
+  resampling: 'linear' | 'nearest';
+}
 
 /** Stretch parameters for grayscale display */
 export interface StretchSettings {
@@ -139,6 +158,12 @@ export interface RasterLayer extends BaseLayer {
   stretch: StretchSettings;
   /** Colormap for grayscale display (default gray) */
   colormap?: ColormapName;
+  /** How the current stretch (grayscale and RGB) was chosen */
+  stretchPreset?: StretchPreset;
+  /** Histogram equalization within the stretch limits (grayscale) */
+  equalize?: boolean;
+  /** Brightness, contrast, saturation and resampling */
+  adjust?: RasterAdjust;
   /** RGB band assignments */
   rgbBands: RgbBands;
   /** RGB stretch settings */
@@ -245,6 +270,8 @@ export interface HistogramData {
   bin_edges: number[];
   min: number;
   max: number;
+  /** Percentiles of the sampled band (absent when every sample is nodata) */
+  percentiles?: { p1: number; p2: number; p98: number; p99: number } | null;
 }
 
 // ==================== Import maplibregl types ====================

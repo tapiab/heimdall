@@ -17,6 +17,7 @@ import {
   type StretchSettings,
 } from './types';
 import { logger } from '../logger';
+import { equalizationLut, peekBandHistogram } from './stretch-presets';
 import {
   fetchRawTile,
   renderGrayscale,
@@ -180,7 +181,9 @@ export function setupTileProtocol(
       return renderDatasetRgb(datasetId, layer, pixel, coord, signal);
     }
     const [band] = await fetchRawTile({ datasetId, bands: [layer.band], pixel }, coord, signal);
-    return renderGrayscale(band, layer.stretch, layer.colormap ?? 'gray');
+    const histogram = layer.equalize ? peekBandHistogram(datasetId, layer.band) : undefined;
+    const equalize = histogram ? equalizationLut(histogram, layer.stretch) : undefined;
+    return renderGrayscale(band, layer.stretch, layer.colormap ?? 'gray', equalize);
   });
 }
 

@@ -5,26 +5,48 @@
 
 export const COLORMAPS = [
   'gray',
+  'gray_r',
   'viridis',
   'magma',
   'inferno',
   'plasma',
   'turbo',
+  'hot',
+  'ice',
   'rdbu',
+  'piyg',
   'terrain',
+  'hsv',
+  'red',
+  'green',
+  'blue',
+  'cyan',
+  'magenta',
+  'yellow',
 ] as const;
 
 export type ColormapName = (typeof COLORMAPS)[number];
 
 export const COLORMAP_LABELS: Record<ColormapName, string> = {
   gray: 'Gray',
+  gray_r: 'Gray (reversed)',
   viridis: 'Viridis',
   magma: 'Magma',
   inferno: 'Inferno',
   plasma: 'Plasma',
   turbo: 'Turbo',
+  hot: 'Hot',
+  ice: 'Ice',
   rdbu: 'Red-Blue (diverging)',
+  piyg: 'Pink-Green (diverging)',
   terrain: 'Terrain',
+  hsv: 'HSV (cyclic)',
+  red: 'Red',
+  green: 'Green',
+  blue: 'Blue',
+  cyan: 'Cyan',
+  magenta: 'Magenta',
+  yellow: 'Yellow',
 };
 
 type Rgb = [number, number, number];
@@ -83,10 +105,49 @@ const TURBO: Rgb[] = [
   [59.28637943, 2.82956604, 27.34824973],
 ];
 
+type Stop = [number, number, number, number];
+type PiecewiseName = Exclude<ColormapName, 'gray' | 'turbo' | keyof typeof POLY>;
+
+/** Evenly spaced stops from hex colors */
+function evenStops(hexes: string[]): Stop[] {
+  return hexes.map((hex, i) => [
+    i / (hexes.length - 1),
+    parseInt(hex.slice(0, 2), 16) / 255,
+    parseInt(hex.slice(2, 4), 16) / 255,
+    parseInt(hex.slice(4, 6), 16) / 255,
+  ]);
+}
+
+/** Black to a single color */
+function ramp(r: number, g: number, b: number): Stop[] {
+  return [
+    [0, 0, 0, 0],
+    [1, r, g, b],
+  ];
+}
+
 /** Piecewise-linear colormaps: [position, r, g, b] with channels in 0..1. */
-const STOPS: Record<'rdbu' | 'terrain', Array<[number, number, number, number]>> = {
+const STOPS: Record<PiecewiseName, Stop[]> = {
+  gray_r: [
+    [0, 1, 1, 1],
+    [1, 0, 0, 0],
+  ],
+  // matplotlib "hot": black, red, yellow, white
+  hot: [
+    [0, 0.0416, 0, 0],
+    [0.365079, 1, 0, 0],
+    [0.746032, 1, 1, 0],
+    [1, 1, 1, 1],
+  ],
+  // black, blue, cyan, white
+  ice: [
+    [0, 0, 0, 0],
+    [1 / 3, 0, 0, 1],
+    [2 / 3, 0, 1, 1],
+    [1, 1, 1, 1],
+  ],
   // ColorBrewer RdBu (11 classes): red at the low end, blue at the high end.
-  rdbu: [
+  rdbu: evenStops([
     '67001f',
     'b2182b',
     'd6604d',
@@ -98,12 +159,29 @@ const STOPS: Record<'rdbu' | 'terrain', Array<[number, number, number, number]>>
     '4393c3',
     '2166ac',
     '053061',
-  ].map((hex, i, all) => [
-    i / (all.length - 1),
-    parseInt(hex.slice(0, 2), 16) / 255,
-    parseInt(hex.slice(2, 4), 16) / 255,
-    parseInt(hex.slice(4, 6), 16) / 255,
   ]),
+  // ColorBrewer PiYG (11 classes): pink at the low end, green at the high end.
+  piyg: evenStops([
+    '8e0152',
+    'c51b7d',
+    'de77ae',
+    'f1b6da',
+    'fde0ef',
+    'f7f7f7',
+    'e6f5d0',
+    'b8e186',
+    '7fbc41',
+    '4d9221',
+    '276419',
+  ]),
+  // Full hue circle, red at both ends (for angles and phases)
+  hsv: evenStops(['ff0000', 'ffff00', '00ff00', '00ffff', '0000ff', 'ff00ff', 'ff0000']),
+  red: ramp(1, 0, 0),
+  green: ramp(0, 1, 0),
+  blue: ramp(0, 0, 1),
+  cyan: ramp(0, 1, 1),
+  magenta: ramp(1, 0, 1),
+  yellow: ramp(1, 1, 0),
   // matplotlib "terrain": deep water, shallows, lowland, highland, rock, snow.
   terrain: [
     [0.0, 0.2, 0.2, 0.6],
@@ -125,7 +203,7 @@ function polynomial(coeffs: Rgb[], t: number): Rgb {
   return out;
 }
 
-function piecewise(stops: Array<[number, number, number, number]>, t: number): Rgb {
+function piecewise(stops: Stop[], t: number): Rgb {
   let i = 1;
   while (i < stops.length - 1 && t > stops[i][0]) i++;
   const [p0, r0, g0, b0] = stops[i - 1];
@@ -141,11 +219,13 @@ function sample(name: ColormapName, t: number): Rgb {
       return [t, t, t];
     case 'turbo':
       return polynomial(TURBO, t);
-    case 'rdbu':
-    case 'terrain':
-      return piecewise(STOPS[name], t);
-    default:
+    case 'viridis':
+    case 'magma':
+    case 'inferno':
+    case 'plasma':
       return polynomial(POLY[name], t);
+    default:
+      return piecewise(STOPS[name], t);
   }
 }
 
