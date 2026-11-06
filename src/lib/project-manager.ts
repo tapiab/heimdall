@@ -4,9 +4,13 @@
  * Handles saving and loading of Heimdall project files (.heimdall),
  * which preserve the complete state of a mapping session including:
  * - Map view (center, zoom, bearing, pitch)
- * - Loaded layers with their styling and settings
+ * - Loaded layers in order, with their display settings (band, stretch,
+ *   colormap, RGB bands, band math, adjustments, vector style and filters)
+ * - Layers derived from others: RGB compositions and band math layers
  * - Annotations (markers, lines, polygons)
- * - Application settings
+ *
+ * Layers are reopened from their file paths, so a project only works where
+ * those files are.
  *
  * @module project-manager
  */
@@ -14,12 +18,30 @@
 import { save, open } from '@tauri-apps/plugin-dialog';
 import { writeTextFile, readTextFile } from '@tauri-apps/plugin-fs';
 import { showToast, showError, showLoading, hideLoading } from './notifications';
+import { logger } from './logger';
 import type { Map as MapLibreMap } from 'maplibre-gl';
+import type {
+  BandMathSettings,
+  CrossLayerRgbConfig,
+  DisplayMode,
+  Layer,
+  RasterAdjust,
+  RasterLayer,
+  RgbBands,
+  RgbStretchSettings,
+  StretchPreset,
+  StretchSettings,
+  VectorLayer,
+  VectorStyle,
+} from './layer-manager/types';
+import type { ColormapName } from './layer-manager/colormaps';
 
-const PROJECT_VERSION = '1.0';
+const PROJECT_VERSION = '2.0';
 
-// Interface for MapManager (will be fully typed when MapManager is migrated)
-interface MapManager {
+const log = logger.child('ProjectManager');
+
+/** The MapManager members a project uses */
+export interface ProjectMapManager {
   map: MapLibreMap;
   getBasemap: () => string;
   setBasemap: (type: string) => void;
@@ -32,60 +54,35 @@ interface MapManager {
   resetView: () => void;
 }
 
-// Interface for LayerManager (will be fully typed when LayerManager is migrated)
-interface RasterLayerData {
-  id: string;
-  type: 'raster';
-  name: string;
-  filePath: string;
-  visible: boolean;
-  opacity: number;
-  band?: number;
-  colormap?: string;
-  stretchMin?: number;
-  stretchMax?: number;
-  is_georeferenced?: boolean;
-}
-
-interface VectorLayerData {
-  id: string;
-  type: 'vector';
-  name: string;
-  filePath: string;
-  visible: boolean;
-  opacity: number;
-  style?: Record<string, unknown>;
-}
-
-type LayerData = RasterLayerData | VectorLayerData;
-
-interface Layer {
-  id: string;
-  type: 'raster' | 'vector';
-  name: string;
-  filePath: string;
-  visible: boolean;
-  opacity: number;
-  band?: number;
-  colormap?: string;
-  stretchMin?: number;
-  stretchMax?: number;
-  is_georeferenced?: boolean;
-  style?: Record<string, unknown>;
-}
-
-interface LayerManager {
+/** The LayerManager members a project uses */
+export interface ProjectLayerManager {
   layers: Map<string, Layer>;
-  getLayerOrder: () => string[];
-  addRasterLayer: (filePath: string) => Promise<Layer>;
-  addVectorLayer: (filePath: string) => Promise<Layer>;
-  removeLayer: (id: string) => void;
+  layerOrder: string[];
+  addRasterLayer: (filePath: string) => Promise<RasterLayer>;
+  addVectorLayer: (filePath: string) => Promise<VectorLayer>;
+  removeLayer: (id: string) => Promise<void>;
   renameLayer: (id: string, name: string) => void;
   setLayerOpacity: (id: string, opacity: number) => void;
   toggleLayerVisibility: (id: string) => void;
-  setRasterBand: (id: string, band: number) => void;
-  setColormap: (id: string, colormap: string) => void;
-  setStretch: (id: string, min: number, max: number) => void;
+  setLayerAdjust: (id: string, patch: Partial<RasterAdjust>) => void;
+  setLayerEqualize: (id: string, enabled: boolean) => Promise<void>;
+  setVectorStyle: (id: string, property: keyof VectorStyle, value: string | number) => void;
+  setColorByField: (id: string, fieldName: string | null) => void;
+  setVectorFeatureFilter: (
+    id: string,
+    fieldName: string,
+    allowedValues: Array<string | number> | null
+  ) => void;
+  createRgbCompositionLayer: (sourceLayerId: string) => Promise<string | null>;
+  createCrossLayerRgbCompositionLayer: (sourceLayerId: string) => Promise<string | null>;
+  createBandMathLayer: (
+    sourceLayerId: string,
+    settings: Omit<BandMathSettings, 'range'>
+  ) => Promise<string>;
+  refreshLayerTiles: (id: string) => void;
+  applyLayerOrder: () => void;
+  updateLayerPanel: () => void;
+  updateDynamicControls: () => void;
 }
 
 // Interface for AnnotationTool
@@ -115,16 +112,140 @@ interface ViewData {
   pixelCoordMode: boolean;
 }
 
+/** How a raster layer was made: opened from a file, or derived from another layer */
+export type RasterLayerKind = 'file' | 'rgbComposition' | 'crossLayerComposition' | 'bandMath';
+
+/** Raster display settings, all optional so older or partial files load */
+export interface RasterDisplayData {
+  displayMode?: DisplayMode;
+  band?: number;
+  colormap?: ColormapName;
+  stretch?: StretchSettings;
+  stretchPreset?: StretchPreset;
+  equalize?: boolean;
+  bandMath?: BandMathSettings | null;
+  rgbBands?: RgbBands;
+  rgbStretch?: RgbStretchSettings;
+  crossLayerRgb?: CrossLayerRgbConfig;
+  adjust?: RasterAdjust;
+}
+
+export interface RasterLayerData {
+  id: string;
+  type: 'raster';
+  name?: string;
+  path: string;
+  visible: boolean;
+  opacity: number;
+  kind?: RasterLayerKind;
+  /** Saved ID of the layer a derived layer reads */
+  sourceId?: string;
+  display?: RasterDisplayData;
+  // Version 1.0 fields
+  filePath?: string;
+  band?: number;
+  colormap?: string;
+  stretchMin?: number;
+  stretchMax?: number;
+}
+
+export interface VectorLayerData {
+  id: string;
+  type: 'vector';
+  name?: string;
+  path: string;
+  visible: boolean;
+  opacity: number;
+  style?: Partial<VectorStyle>;
+  // Version 1.0 field
+  filePath?: string;
+}
+
+export type LayerData = RasterLayerData | VectorLayerData;
+
 // Empty for now - add any persistent settings here
 type ProjectSettings = Record<string, never>;
 
-interface ProjectData {
+export interface ProjectData {
   version: string;
   savedAt: string;
   view: ViewData;
   layers: LayerData[];
   annotations: SerializedAnnotation[];
   settings: ProjectSettings;
+}
+
+const VECTOR_EXTENSIONS = ['shp', 'geojson', 'json', 'gpkg', 'kml', 'kmz', 'gml', 'gpx', 'fgb'];
+
+const clone = <T>(value: T): T => (value === undefined ? value : structuredClone(value));
+
+function rasterKind(layer: RasterLayer): RasterLayerKind {
+  if (layer.isBandMathLayer) return 'bandMath';
+  if (layer.isCrossLayerComposition) return 'crossLayerComposition';
+  if (layer.isComposition) return 'rgbComposition';
+  return 'file';
+}
+
+/** Layer name to restore, if it differs from the file name */
+function layerName(layer: Layer): string | undefined {
+  return layer.displayName || undefined;
+}
+
+/** Saved state of one layer */
+export function serializeLayer(layer: Layer): LayerData {
+  if (layer.type === 'vector') {
+    return {
+      id: layer.id,
+      type: 'vector',
+      name: layerName(layer),
+      path: layer.path,
+      visible: layer.visible,
+      opacity: layer.opacity,
+      style: clone(layer.style),
+    };
+  }
+  return {
+    id: layer.id,
+    type: 'raster',
+    name: layerName(layer),
+    path: layer.path,
+    visible: layer.visible,
+    opacity: layer.opacity,
+    kind: rasterKind(layer),
+    sourceId: layer.sourceLayerId,
+    display: clone({
+      displayMode: layer.displayMode,
+      band: layer.band,
+      colormap: layer.colormap,
+      stretch: layer.stretch,
+      stretchPreset: layer.stretchPreset,
+      equalize: layer.equalize,
+      bandMath: layer.bandMath ?? null,
+      rgbBands: layer.rgbBands,
+      rgbStretch: layer.rgbStretch,
+      crossLayerRgb: layer.crossLayerRgb,
+      adjust: layer.adjust,
+    }),
+  };
+}
+
+/** Bring a version 1.0 layer entry to the current shape */
+export function upgradeLayerData(data: LayerData): LayerData {
+  const path = data.path ?? data.filePath ?? '';
+  if (data.type !== 'raster' || data.display) return { ...data, path };
+  const display: RasterDisplayData = {};
+  if (data.band) display.band = data.band;
+  if (data.colormap) display.colormap = data.colormap as ColormapName;
+  if (data.stretchMin !== undefined || data.stretchMax !== undefined) {
+    display.stretch = { min: data.stretchMin ?? 0, max: data.stretchMax ?? 255, gamma: 1 };
+  }
+  return { ...data, path, kind: data.kind ?? 'file', display };
+}
+
+const isFiniteNumber = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
+
+function validStretch(s: StretchSettings | undefined): s is StretchSettings {
+  return !!s && isFiniteNumber(s.min) && isFiniteNumber(s.max) && isFiniteNumber(s.gamma);
 }
 
 /**
@@ -149,8 +270,8 @@ interface ProjectData {
  * ```
  */
 export class ProjectManager {
-  private mapManager: MapManager;
-  private layerManager: LayerManager;
+  private mapManager: ProjectMapManager;
+  private layerManager: ProjectLayerManager;
   private annotationTool: AnnotationTool | null;
   private currentProjectPath: string | null;
 
@@ -161,8 +282,8 @@ export class ProjectManager {
    * @param annotationTool - Optional AnnotationTool for annotation state
    */
   constructor(
-    mapManager: MapManager,
-    layerManager: LayerManager,
+    mapManager: ProjectMapManager,
+    layerManager: ProjectLayerManager,
     annotationTool: AnnotationTool | null = null
   ) {
     this.mapManager = mapManager;
@@ -191,7 +312,7 @@ export class ProjectManager {
               extensions: ['heimdall', 'json'],
             },
           ],
-          defaultPath: 'project.heimdall',
+          defaultPath: this.currentProjectPath ?? 'project.heimdall',
         });
       }
 
@@ -211,7 +332,7 @@ export class ProjectManager {
       return filePath;
     } catch (error) {
       hideLoading();
-      console.error('Failed to save project:', error);
+      log.error('Failed to save project', { error: String(error) });
       showError('Save failed', error instanceof Error ? error : String(error));
       return null;
     }
@@ -251,26 +372,35 @@ export class ProjectManager {
       const projectData = JSON.parse(jsonString) as ProjectData;
 
       // Validate project version
-      if (!projectData.version) {
+      if (!projectData || typeof projectData !== 'object' || !projectData.version) {
         throw new Error('Invalid project file format');
       }
 
-      await this.deserializeProject(projectData);
+      const failed = await this.deserializeProject(projectData);
       this.currentProjectPath = filePath;
 
       hideLoading();
-      showToast('Project loaded', 'success');
+      if (failed.length > 0) {
+        showToast(
+          `Project loaded, ${failed.length} layer(s) missing: ${failed.join(', ')}`,
+          'error',
+          6000
+        );
+      } else {
+        showToast('Project loaded', 'success');
+      }
 
       return true;
     } catch (error) {
       hideLoading();
-      console.error('Failed to load project:', error);
+      log.error('Failed to load project', { error: String(error) });
       showError('Load failed', error instanceof Error ? error : String(error));
       return false;
     }
   }
 
-  private serializeProject(): ProjectData {
+  /** The current state as project data */
+  serializeProject(): ProjectData {
     return {
       version: PROJECT_VERSION,
       savedAt: new Date().toISOString(),
@@ -295,44 +425,13 @@ export class ProjectManager {
     };
   }
 
+  /** Layers bottom to top */
   private serializeLayers(): LayerData[] {
-    const layers: LayerData[] = [];
-    const layerOrder = this.layerManager.getLayerOrder();
-
-    for (const id of layerOrder) {
-      const layer = this.layerManager.layers.get(id);
-      if (!layer) continue;
-
-      if (layer.type === 'raster') {
-        const serialized: RasterLayerData = {
-          id,
-          type: 'raster',
-          name: layer.name,
-          filePath: layer.filePath,
-          visible: layer.visible,
-          opacity: layer.opacity,
-          band: layer.band,
-          colormap: layer.colormap,
-          stretchMin: layer.stretchMin,
-          stretchMax: layer.stretchMax,
-          is_georeferenced: layer.is_georeferenced,
-        };
-        layers.push(serialized);
-      } else {
-        const serialized: VectorLayerData = {
-          id,
-          type: 'vector',
-          name: layer.name,
-          filePath: layer.filePath,
-          visible: layer.visible,
-          opacity: layer.opacity,
-          style: layer.style,
-        };
-        layers.push(serialized);
-      }
-    }
-
-    return layers;
+    const { layers, layerOrder } = this.layerManager;
+    return layerOrder
+      .map(id => layers.get(id))
+      .filter((layer): layer is Layer => !!layer)
+      .map(serializeLayer);
   }
 
   private serializeAnnotations(): SerializedAnnotation[] {
@@ -346,18 +445,28 @@ export class ProjectManager {
     };
   }
 
-  private async deserializeProject(data: ProjectData): Promise<void> {
+  /**
+   * Replace the current state with a project's.
+   * @returns Names of the layers that couldn't be restored
+   */
+  async deserializeProject(data: ProjectData): Promise<string[]> {
     // Clear existing state
     await this.clearCurrentProject();
 
-    // Restore view
+    // Basemap first: pixel mode decides how layers are placed
     if (data.view) {
-      await this.deserializeView(data.view);
+      this.deserializeBasemap(data.view);
     }
 
-    // Restore layers
-    if (data.layers && data.layers.length > 0) {
-      await this.deserializeLayers(data.layers);
+    // Restore layers (they fit the map to themselves as they open)
+    const failed =
+      Array.isArray(data.layers) && data.layers.length > 0
+        ? await this.deserializeLayers(data.layers)
+        : [];
+
+    // Then the saved view on top
+    if (data.view) {
+      this.deserializeView(data.view);
     }
 
     // Restore annotations
@@ -369,6 +478,7 @@ export class ProjectManager {
     if (data.settings) {
       this.deserializeSettings(data.settings);
     }
+    return failed;
   }
 
   /**
@@ -376,10 +486,10 @@ export class ProjectManager {
    * Resets the project path to null
    */
   async clearCurrentProject(): Promise<void> {
-    // Remove all layers
-    const layerIds = Array.from(this.layerManager.layers.keys());
+    // Top first, so derived layers go before the layers they read
+    const layerIds = [...this.layerManager.layerOrder].reverse();
     for (const id of layerIds) {
-      this.layerManager.removeLayer(id);
+      await this.layerManager.removeLayer(id);
     }
 
     // Clear annotations
@@ -390,8 +500,7 @@ export class ProjectManager {
     this.currentProjectPath = null;
   }
 
-  private async deserializeView(view: ViewData): Promise<void> {
-    // Set basemap first if in pixel coord mode
+  private deserializeBasemap(view: ViewData): void {
     if (view.pixelCoordMode) {
       this.mapManager.setBasemap('pixel');
     } else if (view.basemap) {
@@ -399,7 +508,9 @@ export class ProjectManager {
       const basemapSelect = document.getElementById('basemap-select') as HTMLSelectElement | null;
       if (basemapSelect) basemapSelect.value = view.basemap;
     }
+  }
 
+  private deserializeView(view: ViewData): void {
     // Set view state
     if (view.center && view.zoom !== undefined) {
       this.mapManager.map.jumpTo({
@@ -427,58 +538,185 @@ export class ProjectManager {
     }
   }
 
-  private async deserializeLayers(layers: LayerData[]): Promise<void> {
-    const vectorExtensions = ['shp', 'geojson', 'json', 'gpkg', 'kml', 'kmz', 'gml', 'gpx', 'fgb'];
+  /**
+   * Reopen file layers, then rebuild derived layers from them, then restore
+   * the saved order. Layer IDs change on reload, so references go through
+   * a saved-to-new ID map.
+   * @returns Names of the layers that couldn't be restored
+   */
+  private async deserializeLayers(saved: LayerData[]): Promise<string[]> {
+    const lm = this.layerManager;
+    const entries = saved.filter(d => d && typeof d === 'object').map(upgradeLayerData);
+    const newIds = new Map<string, string>();
+    const failed: string[] = [];
+    const label = (d: LayerData) => d.name || d.path.split(/[/\\]/).pop() || d.id;
 
-    for (const layerData of layers) {
+    const isFileLayer = (d: LayerData) => d.type === 'vector' || !d.kind || d.kind === 'file';
+
+    for (const data of entries.filter(isFileLayer)) {
       try {
-        // Load the layer from file
-        const ext = layerData.filePath.split('.').pop()?.toLowerCase() || '';
-        let layer: Layer;
-
-        if (layerData.type === 'vector' || vectorExtensions.includes(ext)) {
-          layer = await this.layerManager.addVectorLayer(layerData.filePath);
-        } else {
-          layer = await this.layerManager.addRasterLayer(layerData.filePath);
-        }
-
-        if (layer) {
-          // Restore layer properties
-          if (layerData.name && layerData.name !== layer.name) {
-            this.layerManager.renameLayer(layer.id, layerData.name);
-          }
-
-          if (layerData.opacity !== undefined && layerData.opacity !== 1) {
-            this.layerManager.setLayerOpacity(layer.id, layerData.opacity);
-          }
-
-          if (!layerData.visible) {
-            this.layerManager.toggleLayerVisibility(layer.id);
-          }
-
-          // Restore raster-specific properties
-          if (layerData.type === 'raster') {
-            const rasterData = layerData as RasterLayerData;
-            if (rasterData.band && rasterData.band !== 1) {
-              this.layerManager.setRasterBand(layer.id, rasterData.band);
-            }
-            if (rasterData.colormap) {
-              this.layerManager.setColormap(layer.id, rasterData.colormap);
-            }
-            if (rasterData.stretchMin !== undefined || rasterData.stretchMax !== undefined) {
-              this.layerManager.setStretch(
-                layer.id,
-                rasterData.stretchMin ?? 0,
-                rasterData.stretchMax ?? 255
-              );
-            }
-          }
-        }
+        if (!data.path) throw new Error('No file path');
+        const ext = data.path.split('.').pop()?.toLowerCase() || '';
+        const layer =
+          data.type === 'vector' || VECTOR_EXTENSIONS.includes(ext)
+            ? await lm.addVectorLayer(data.path)
+            : await lm.addRasterLayer(data.path);
+        newIds.set(data.id, layer.id);
       } catch (error) {
-        console.warn(`Failed to restore layer ${layerData.filePath}:`, error);
-        showToast(`Could not load ${layerData.name || layerData.filePath}`, 'error');
+        log.warn('Failed to restore layer', { path: data.path, error: String(error) });
+        failed.push(label(data));
       }
     }
+
+    // Cross-layer RGB references other layers by ID
+    const remapCross = (cross: CrossLayerRgbConfig | undefined) => {
+      if (!cross) return undefined;
+      const r = newIds.get(cross.rLayerId);
+      const g = newIds.get(cross.gLayerId);
+      const b = newIds.get(cross.bLayerId);
+      return r && g && b ? { ...cross, rLayerId: r, gLayerId: g, bLayerId: b } : undefined;
+    };
+
+    for (const data of entries.filter(d => !isFileLayer(d)) as RasterLayerData[]) {
+      try {
+        const id = await this.createDerivedLayer(data, newIds, remapCross);
+        newIds.set(data.id, id);
+      } catch (error) {
+        log.warn('Failed to restore layer', { layer: label(data), error: String(error) });
+        failed.push(label(data));
+      }
+    }
+
+    // Display settings, names, visibility and opacity
+    for (const data of entries) {
+      const id = newIds.get(data.id);
+      if (!id) continue;
+      try {
+        if (data.type === 'raster' && data.display) {
+          await this.applyRasterDisplay(id, data.display, remapCross);
+        } else if (data.type === 'vector' && data.style) {
+          this.applyVectorStyle(id, data.style);
+        }
+        if (data.name) lm.renameLayer(id, data.name);
+        if (isFiniteNumber(data.opacity) && data.opacity !== 1) {
+          lm.setLayerOpacity(id, data.opacity);
+        }
+        if (data.visible === false) lm.toggleLayerVisibility(id);
+      } catch (error) {
+        log.warn('Failed to restore layer settings', { layer: label(data), error: String(error) });
+      }
+    }
+
+    // Saved order, bottom to top; anything else stays on top
+    const ordered = entries.map(d => newIds.get(d.id)).filter((id): id is string => !!id);
+    const rest = lm.layerOrder.filter(id => !ordered.includes(id));
+    lm.layerOrder.splice(0, lm.layerOrder.length, ...ordered, ...rest);
+    lm.applyLayerOrder();
+    lm.updateLayerPanel();
+    lm.updateDynamicControls();
+    return failed;
+  }
+
+  private async createDerivedLayer(
+    data: RasterLayerData,
+    newIds: Map<string, string>,
+    remapCross: (cross: CrossLayerRgbConfig | undefined) => CrossLayerRgbConfig | undefined
+  ): Promise<string> {
+    const lm = this.layerManager;
+    if (data.kind === 'crossLayerComposition') {
+      const cross = remapCross(data.display?.crossLayerRgb);
+      const host = cross && (lm.layers.get(cross.rLayerId) as RasterLayer | undefined);
+      if (!cross || !host) throw new Error('Source layers missing');
+      // The composition is built from a layer's cross-layer setting
+      const previous = host.crossLayerRgb;
+      host.crossLayerRgb = cross;
+      try {
+        const id = await lm.createCrossLayerRgbCompositionLayer(host.id);
+        if (!id) throw new Error('Composition failed');
+        return id;
+      } finally {
+        host.crossLayerRgb = previous;
+      }
+    }
+
+    const sourceId = data.sourceId && newIds.get(data.sourceId);
+    if (!sourceId) throw new Error('Source layer missing');
+    if (data.kind === 'bandMath') {
+      const math = data.display?.bandMath;
+      if (!math?.expression) throw new Error('No expression');
+      return lm.createBandMathLayer(sourceId, {
+        expression: math.expression,
+        template: math.template,
+        a: math.a,
+        b: math.b,
+      });
+    }
+    const id = await lm.createRgbCompositionLayer(sourceId);
+    if (!id) throw new Error('Composition failed');
+    return id;
+  }
+
+  /** Set saved raster display settings, keeping the layer's own where invalid */
+  private async applyRasterDisplay(
+    id: string,
+    display: RasterDisplayData,
+    remapCross: (cross: CrossLayerRgbConfig | undefined) => CrossLayerRgbConfig | undefined
+  ): Promise<void> {
+    const lm = this.layerManager;
+    const layer = lm.layers.get(id) as RasterLayer | undefined;
+    if (!layer || layer.type !== 'raster') return;
+    // RGB compositions are 3 bands wide but pick from their source's bands
+    const source = layer.isComposition && layer.sourceLayerId && lm.layers.get(layer.sourceLayerId);
+    const bandCount = source && source.type === 'raster' ? source.bands : layer.bands;
+    const validBand = (b: unknown): b is number =>
+      Number.isInteger(b) && (b as number) >= 1 && (b as number) <= bandCount;
+
+    if (validBand(display.band)) layer.band = display.band;
+    if (display.colormap) layer.colormap = display.colormap;
+    if (validStretch(display.stretch)) layer.stretch = { ...display.stretch };
+    if (display.stretchPreset) layer.stretchPreset = display.stretchPreset;
+    const rgb = display.rgbBands;
+    if (rgb && validBand(rgb.r) && validBand(rgb.g) && validBand(rgb.b)) {
+      layer.rgbBands = { ...rgb };
+    }
+    const { rgbStretch } = display;
+    if (rgbStretch && validStretch(rgbStretch.r) && validStretch(rgbStretch.g)) {
+      if (validStretch(rgbStretch.b)) layer.rgbStretch = structuredClone(rgbStretch);
+    }
+    if (!layer.isComposition) {
+      const math = display.bandMath;
+      layer.bandMath = math?.expression && Array.isArray(math.range) ? structuredClone(math) : null;
+    }
+    const cross = remapCross(display.crossLayerRgb);
+    if (cross) layer.crossLayerRgb = cross;
+
+    const mode = display.displayMode;
+    if (mode === 'grayscale' || (mode === 'rgb' && layer.bands >= 3)) {
+      layer.displayMode = mode;
+    } else if (mode === 'crossLayerRgb' && layer.crossLayerRgb) {
+      layer.displayMode = mode;
+    }
+
+    if (display.adjust) lm.setLayerAdjust(id, display.adjust);
+    if (display.equalize && !layer.bandMath) {
+      await lm.setLayerEqualize(id, true);
+    } else {
+      layer.equalize = false;
+      lm.refreshLayerTiles(id);
+    }
+  }
+
+  private applyVectorStyle(id: string, style: Partial<VectorStyle>): void {
+    const lm = this.layerManager;
+    const keys = ['fillColor', 'fillOpacity', 'strokeColor', 'strokeWidth', 'pointRadius'] as const;
+    for (const key of keys) {
+      const value = style[key];
+      if (typeof value === 'string' || isFiniteNumber(value)) lm.setVectorStyle(id, key, value);
+    }
+    for (const [field, values] of Object.entries(style.featureFilters ?? {})) {
+      if (Array.isArray(values)) lm.setVectorFeatureFilter(id, field, values);
+    }
+    if (style.colorByField) lm.setColorByField(id, style.colorByField);
   }
 
   private deserializeAnnotations(annotations: SerializedAnnotation[]): void {
