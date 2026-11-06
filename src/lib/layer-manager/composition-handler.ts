@@ -6,9 +6,11 @@
 import {
   setupCompositionTileProtocol,
   setupCrossLayerCompositionTileProtocol,
+  setupTileProtocol,
 } from './tile-protocol';
+import { compileBandMath, sampleBandMathStretch } from './band-math';
 import { logger } from '../logger';
-import type { LayerManagerInterface, RasterLayer } from './types';
+import type { BandMathSettings, LayerManagerInterface, RasterLayer } from './types';
 import type maplibregl from 'maplibre-gl';
 
 const log = logger.child('LayerManager:Composition');
@@ -70,37 +72,41 @@ export async function createRgbCompositionLayer(
     pixelOffset: sourceLayer.pixelOffset,
   };
 
-  manager.layers.set(compositionId, compositionLayer);
-  manager.layerOrder.push(compositionId);
-
   // Create protocol for the composition layer
-  const protocolName = `raster-${compositionId}`;
-  setupCompositionTileProtocol(manager, protocolName, compositionId, compositionLayer);
+  setupCompositionTileProtocol(manager, `raster-${compositionId}`, compositionId, compositionLayer);
+  addDerivedLayer(manager, compositionLayer);
+  return compositionId;
+}
 
-  // Add to map
-  const sourceId = `raster-source-${compositionId}`;
-  const layerId = `raster-layer-${compositionId}`;
+/**
+ * Add a layer derived from another one (its tile protocol already set up) on
+ * top of the map and the layer list, and select it.
+ */
+function addDerivedLayer(manager: LayerManagerInterface, layer: RasterLayer): void {
+  const { id } = layer;
+  manager.layers.set(id, layer);
+  manager.layerOrder.push(id);
 
-  let mapBounds = compositionLayer.bounds;
-  if (!compositionLayer.is_georeferenced && compositionLayer.pixelScale) {
-    const scale = compositionLayer.pixelScale;
-    const halfWidth = (compositionLayer.width * scale) / 2;
-    const halfHeight = (compositionLayer.height * scale) / 2;
+  let mapBounds = layer.bounds;
+  if (!layer.is_georeferenced && layer.pixelScale) {
+    const scale = layer.pixelScale;
+    const halfWidth = (layer.width * scale) / 2;
+    const halfHeight = (layer.height * scale) / 2;
     const clampedHalfHeight = Math.min(halfHeight, 85);
     mapBounds = [-halfWidth, -clampedHalfHeight, halfWidth, clampedHalfHeight];
   }
 
+  const sourceId = `raster-source-${id}`;
   manager.mapManager.addSource(sourceId, {
     type: 'raster',
-    tiles: [`${protocolName}://{z}/{x}/{y}`],
+    tiles: [`raster-${id}://{z}/{x}/{y}`],
     tileSize: 256,
     bounds: mapBounds,
     minzoom: 0,
     maxzoom: 22,
   });
-
   manager.mapManager.addLayer({
-    id: layerId,
+    id: `raster-layer-${id}`,
     type: 'raster',
     source: sourceId,
     paint: {
@@ -108,14 +114,70 @@ export async function createRgbCompositionLayer(
     },
   });
 
-  // Select the new composition layer
-  manager.selectedLayerId = compositionId;
-
-  // Update UI
+  manager.selectedLayerId = id;
   manager.updateLayerPanel();
   manager.updateDynamicControls();
+}
 
-  return compositionId;
+/**
+ * Create a grayscale layer showing a band math expression over a raster
+ * layer's bands. It reads the source dataset (no copy), so it only lives as
+ * long as the source layer. Throws with a readable message on an invalid
+ * expression or one with no valid value.
+ * @returns The new layer ID
+ */
+export async function createBandMathLayer(
+  manager: LayerManagerInterface,
+  sourceLayerId: string,
+  settings: Omit<BandMathSettings, 'range'>
+): Promise<string> {
+  const source = manager.layers.get(sourceLayerId) as RasterLayer | undefined;
+  if (!source || source.type !== 'raster' || source.isComposition) {
+    throw new Error('Band math needs a raster layer');
+  }
+  // Chained band math layers read the original dataset
+  const datasetId = source.sourceLayerId ?? sourceLayerId;
+  const compiled = compileBandMath(settings.expression, source.bands);
+  const stretch = await sampleBandMathStretch(
+    { datasetId, pixel: !source.is_georeferenced },
+    source.bounds,
+    compiled
+  );
+  if (!stretch) throw new Error('The expression has no valid value over this layer');
+
+  const id = `band-math-${Date.now()}`;
+  const sourceName =
+    source.displayName || source.path.split('/').pop()?.split('\\').pop() || 'Unknown';
+  const layer: RasterLayer = {
+    ...source,
+    id,
+    path: source.path,
+    displayName: `${compiled.expression} · ${sourceName}`,
+    sourceLayerId: datasetId,
+    isBandMathLayer: true,
+    visible: true,
+    opacity: 1,
+    displayMode: 'grayscale',
+    bandMath: { ...settings, expression: compiled.expression, range: stretch.range },
+    stretch: { min: stretch.min, max: stretch.max, gamma: 1 },
+    stretchPreset: undefined,
+    equalize: false,
+    colormap: source.colormap ?? 'gray',
+    adjust: source.adjust ? { ...source.adjust } : undefined,
+    rgbBands: { ...source.rgbBands },
+    rgbStretch: {
+      r: { ...source.rgbStretch.r },
+      g: { ...source.rgbStretch.g },
+      b: { ...source.rgbStretch.b },
+    },
+    // Overviews are built on the source layer
+    suggest_overviews: false,
+  };
+
+  setupTileProtocol(manager, `raster-${id}`, id, layer);
+  addDerivedLayer(manager, layer);
+  log.info('Band math layer created', { id, expression: compiled.expression });
+  return id;
 }
 
 /**

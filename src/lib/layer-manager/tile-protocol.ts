@@ -18,7 +18,9 @@ import {
 } from './types';
 import { logger } from '../logger';
 import { equalizationLut, peekBandHistogram } from './stretch-presets';
+import { compileBandMathCached } from './band-math';
 import {
+  TILE_SIZE,
   fetchRawTile,
   renderGrayscale,
   renderRgb,
@@ -151,20 +153,21 @@ async function renderCrossLayerRgb(
  * Setup tile protocol for a raster layer
  * @param manager - The LayerManager instance
  * @param protocolName - Protocol name (e.g., 'raster-abc123')
- * @param datasetId - Dataset ID
+ * @param layerId - Layer ID; samples come from its `sourceLayerId` dataset when set
  * @param _layerData - Layer data (unused but kept for signature consistency)
  */
 export function setupTileProtocol(
   manager: LayerManagerInterface,
   protocolName: string,
-  datasetId: string,
+  layerId: string,
   _layerData: Layer
 ): void {
   registerProtocol(protocolName, 'tile', async (coord, signal) => {
-    const layer = manager.layers.get(datasetId) as RasterLayer | undefined;
+    const layer = manager.layers.get(layerId) as RasterLayer | undefined;
     if (!layer) {
       throw new Error('Layer not found');
     }
+    const datasetId = layer.sourceLayerId ?? layerId;
     const pixel = !layer.is_georeferenced;
 
     if (layer.displayMode === 'crossLayerRgb' && layer.crossLayerRgb) {
@@ -179,6 +182,14 @@ export function setupTileProtocol(
     }
     if (layer.displayMode === 'rgb' && layer.bands >= 3) {
       return renderDatasetRgb(datasetId, layer, pixel, coord, signal);
+    }
+    if (layer.bandMath) {
+      const compiled = compileBandMathCached(layer.bandMath.expression, layer.bands);
+      const planes = await fetchRawTile({ datasetId, bands: compiled.bands, pixel }, coord, signal);
+      if (planes.some(p => !p)) return null;
+      const byBand = new Map(compiled.bands.map((b, i) => [b, planes[i] as Float32Array]));
+      const values = compiled.evaluate(byBand, TILE_SIZE * TILE_SIZE);
+      return renderGrayscale(values, layer.stretch, layer.colormap ?? 'gray');
     }
     const [band] = await fetchRawTile({ datasetId, bands: [layer.band], pixel }, coord, signal);
     const histogram = layer.equalize ? peekBandHistogram(datasetId, layer.band) : undefined;

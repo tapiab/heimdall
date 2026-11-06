@@ -2217,6 +2217,8 @@ button:disabled {
   --tool-annotate-light: #5dade2;
   --tool-georef: #9b59b6;
   --tool-georef-light: #a569bd;
+  --tool-region: #f0883e;
+  --tool-region-light: #f5a46b;
 }
 
 /* Base instruction banner */
@@ -2835,6 +2837,181 @@ button:disabled {
   color: var(--text-tertiary);
   font-family: var(--font-family-mono);
   border-top: 1px solid var(--border-subtle);
+}
+
+/* Multi-band value profile */
+#profile-canvas {
+  display: block;
+  cursor: crosshair;
+}
+
+#profile-hover-info {
+  white-space: nowrap;
+  line-height: 1.5;
+}
+
+.profile-actions,
+.region-stats-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.profile-bands {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  padding: var(--space-2) var(--space-3) 0;
+  max-height: 72px;
+  overflow-y: auto;
+}
+
+.profile-band-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px var(--space-2);
+  border: 1px solid var(--border-subtle);
+  border-left: 3px solid var(--chip-color, var(--text-tertiary));
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-xs);
+  font-family: var(--font-family-mono);
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.profile-band-chip input {
+  margin: 0;
+}
+
+.profile-normalize {
+  margin-left: auto;
+}
+
+.profile-chip-btn {
+  padding: 1px var(--space-2);
+  background: var(--surface-secondary);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-xs);
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.profile-chip-btn:hover:not(:disabled) {
+  color: var(--text-primary);
+  border-color: var(--accent-primary);
+}
+
+.profile-chip-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.profile-hover-marker {
+  width: 12px;
+  height: 12px;
+  background: white;
+  border: 3px solid var(--tool-profile);
+  border-radius: var(--radius-full);
+  box-shadow: var(--shadow-md);
+  pointer-events: none;
+}
+
+/* ============================================================================
+   REGION STATISTICS TOOL
+   ============================================================================ */
+
+#region-stats-instruction {
+  border: 1px solid var(--tool-region);
+  border-left: 3px solid var(--tool-region);
+}
+
+#region-stats-btn.active {
+  background: var(--tool-region) !important;
+  border-color: var(--tool-region-light) !important;
+  color: white !important;
+}
+
+.region-stats-box {
+  position: absolute;
+  border: 2px dashed var(--tool-region);
+  background: rgba(240, 136, 62, 0.1);
+  pointer-events: none;
+  z-index: 1000;
+}
+
+#region-stats-panel {
+  position: absolute;
+  top: calc(var(--toolbar-height) + var(--space-6));
+  right: var(--space-3);
+  width: 600px;
+  max-width: calc(100vw - var(--space-6));
+  max-height: calc(100vh - var(--toolbar-height) - var(--status-bar-height) - var(--space-8));
+  z-index: calc(var(--z-sticky) + 1);
+  display: flex;
+  flex-direction: column;
+}
+
+#region-stats-panel .floating-panel-header h4 {
+  color: var(--tool-region);
+}
+
+#region-stats-content {
+  padding: var(--space-3);
+  overflow: auto;
+}
+
+.region-stats-info {
+  font-size: var(--font-size-xs);
+  color: var(--text-tertiary);
+  margin-bottom: var(--space-2);
+}
+
+.region-stats-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--font-size-xs);
+  font-family: var(--font-family-mono);
+}
+
+.region-stats-table th,
+.region-stats-table td {
+  padding: 2px var(--space-2);
+  text-align: right;
+  white-space: nowrap;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.region-stats-table th {
+  position: sticky;
+  top: 0;
+  background: var(--surface-secondary);
+  color: var(--text-secondary);
+  font-weight: var(--font-weight-medium);
+}
+
+.region-stats-table td:first-child,
+.region-stats-table th:first-child {
+  text-align: left;
+}
+
+.region-stats-table tr.highlighted td {
+  color: var(--tool-region);
+}
+
+.region-stats-spectrum {
+  margin-top: var(--space-3);
+}
+
+.region-stats-spectrum canvas {
+  width: 100%;
+  height: 140px;
+  display: block;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  cursor: crosshair;
 }
 
 /* ============================================================================
@@ -4781,4 +4958,20 @@ button:disabled {
   text-align: center;
   color: var(--text-tertiary);
   font-size: var(--font-size-sm);
+}
+
+/* Band math: Apply and Create Layer side by side */
+.band-math-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.band-math-actions[hidden] {
+  display: none;
+}
+
+.band-math-actions .control-btn {
+  flex: 1;
+  margin: 0;
 }

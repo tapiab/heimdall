@@ -5,6 +5,7 @@
 
 import { open } from '@tauri-apps/plugin-dialog';
 import type {
+  BandMathSettings,
   LayerManagerInterface,
   RasterLayer,
   VectorLayer,
@@ -24,6 +25,7 @@ import {
   type ColormapName,
 } from './colormaps';
 import { STRETCH_PRESET_LABELS, bitRange, DEFAULT_STRETCH_PRESET } from './stretch-presets';
+import { BAND_MATH_TEMPLATES, type BandMathTemplate } from './band-math';
 import { DEFAULT_ADJUST } from './raster-handler';
 import { showToast } from '../notifications';
 
@@ -41,6 +43,12 @@ interface LayerManagerWithUI extends LayerManagerInterface {
   setLayerStretch: (id: string, min: number, max: number, gamma: number) => void;
   setLayerColormap: (id: string, colormap: ColormapName) => void;
   applyStretchPreset: (id: string, preset: StretchPreset) => Promise<boolean>;
+  applyWhiteBalance: (id: string) => Promise<boolean>;
+  setLayerBandMath: (id: string, settings: Omit<BandMathSettings, 'range'> | null) => Promise<void>;
+  createBandMathLayer: (
+    sourceLayerId: string,
+    settings: Omit<BandMathSettings, 'range'>
+  ) => Promise<string>;
   setLayerEqualize: (id: string, enabled: boolean) => Promise<void>;
   setLayerAdjust: (id: string, patch: Partial<RasterAdjust>) => void;
   showImageStatistics: (layerId: string, band: number) => Promise<void>;
@@ -154,6 +162,10 @@ export function updateLayerPanel(manager: LayerManagerWithUI): void {
       const rasterLayer = layer as RasterLayer;
       name.title = `${displayName}\n\nRGB Composition\nR: Band ${rasterLayer.rgbBands.r}, G: Band ${rasterLayer.rgbBands.g}, B: Band ${rasterLayer.rgbBands.b}\n${rasterLayer.width}x${rasterLayer.height}\nDouble-click to rename`;
       name.style.fontStyle = 'italic';
+    } else if ((layer as RasterLayer).isBandMathLayer) {
+      const rasterLayer = layer as RasterLayer;
+      name.title = `${displayName}\n\nBand math: ${rasterLayer.bandMath?.expression ?? ''}\n${layer.path}\nDouble-click to rename`;
+      name.style.fontStyle = 'italic';
     } else {
       const rasterLayer = layer as RasterLayer;
       name.title = `${displayName}\n\n${layer.path}\n${rasterLayer.width}x${rasterLayer.height}, ${rasterLayer.bands} band(s)\nDouble-click to rename`;
@@ -242,7 +254,7 @@ export function updateLayerPanel(manager: LayerManagerWithUI): void {
     // Add band selector for multi-band rasters
     if (layer.type === 'raster') {
       const rasterLayer = layer as RasterLayer;
-      if (rasterLayer.bands > 1 && !rasterLayer.isComposition) {
+      if (rasterLayer.bands > 1 && !rasterLayer.isComposition && !rasterLayer.bandMath) {
         const bandRow = document.createElement('div');
         bandRow.className = 'layer-band-selector';
 
@@ -748,8 +760,8 @@ function renderRasterControls(
 
   const modeOptions = `
     <option value="grayscale" ${layer.displayMode === 'grayscale' ? 'selected' : ''}>Grayscale</option>
-    ${layer.bands >= 3 ? `<option value="rgb" ${layer.displayMode === 'rgb' ? 'selected' : ''}>RGB Composite</option>` : ''}
-    ${canCrossLayerRgb ? `<option value="crossLayerRgb" ${layer.displayMode === 'crossLayerRgb' ? 'selected' : ''}>Cross-Layer RGB</option>` : ''}
+    ${layer.bands >= 3 && !layer.isBandMathLayer ? `<option value="rgb" ${layer.displayMode === 'rgb' ? 'selected' : ''}>RGB Composite</option>` : ''}
+    ${canCrossLayerRgb && !layer.isBandMathLayer ? `<option value="crossLayerRgb" ${layer.displayMode === 'crossLayerRgb' ? 'selected' : ''}>Cross-Layer RGB</option>` : ''}
   `;
 
   let controlsHtml = `
@@ -902,47 +914,108 @@ function attachRpcElevationListeners(manager: LayerManagerWithUI, layer: RasterL
 /**
  * Render grayscale stretch controls
  */
+/** Slider step and display digits suited to a value span */
+function sliderPrecision(span: number): { step: number; digits: number } {
+  if (!(span > 0) || span >= 1000) return { step: 0.1, digits: 1 };
+  const step = 10 ** Math.floor(Math.log10(span / 1000));
+  return { step, digits: Math.max(1, Math.min(6, -Math.floor(Math.log10(step)))) };
+}
+
+/** Band math selector: off, a template over bands A and B, or a custom expression */
+function renderBandMathControls(layer: RasterLayer): string {
+  if (layer.bands < 2 || layer.isComposition) return '';
+  const math = layer.bandMath;
+  const template = math?.template ?? 'off';
+  const a = math?.a ?? Math.min(layer.bands, 2);
+  const b = math?.b ?? 1;
+  const bandSelect = (id: string, value: number) =>
+    `<select id="${id}">${Array.from(
+      { length: layer.bands },
+      (_, i) => `<option value="${i + 1}" ${value === i + 1 ? 'selected' : ''}>B${i + 1}</option>`
+    ).join('')}</select>`;
+  const templates = (Object.keys(BAND_MATH_TEMPLATES) as BandMathTemplate[])
+    .map(
+      t =>
+        `<option value="${t}" ${t === template ? 'selected' : ''}>${BAND_MATH_TEMPLATES[t].label}</option>`
+    )
+    .join('');
+  return `
+    <div class="control-section band-math-section">
+      <label>Band Math</label>
+      <select id="band-math-template">
+        ${layer.isBandMathLayer ? '' : `<option value="off" ${template === 'off' ? 'selected' : ''}>Off (single band)</option>`}
+        ${templates}
+        <option value="custom" ${template === 'custom' ? 'selected' : ''}>Custom expression</option>
+      </select>
+      <div id="band-math-ab" class="band-math-ab" ${template === 'off' || template === 'custom' ? 'hidden' : ''}>
+        <label>A ${bandSelect('band-math-a', a)}</label>
+        <label>B ${bandSelect('band-math-b', b)}</label>
+      </div>
+      <input type="text" id="band-math-expr" class="band-math-expr" spellcheck="false"
+        placeholder="(b4 - b3) / (b4 + b3)" value="${escapeHtml(math?.expression ?? '')}"
+        ${template === 'off' ? 'hidden' : ''} ${template !== 'custom' ? 'readonly' : ''}>
+      <div class="band-math-help" ${template === 'custom' ? '' : 'hidden'}>b1…b${layer.bands}, + − × ÷ ^, abs sqrt log log10 exp min max</div>
+      <div class="band-math-actions" ${template === 'off' ? 'hidden' : ''}>
+        <button id="band-math-apply" class="control-btn">Apply</button>
+        ${layer.isBandMathLayer ? '' : '<button id="band-math-new-layer" class="control-btn" title="Add the expression as a new layer, keeping this one as it is">Create Layer</button>'}
+      </div>
+    </div>
+  `;
+}
+
 function renderGrayscaleControls(layer: RasterLayer, bandOptions: string): string {
+  const math = layer.bandMath;
   const bandStats = layer.band_stats[layer.band - 1] || { min: 0, max: 255 };
+  const [dataMin, dataMax] = math ? math.range : [bandStats.min, bandStats.max];
   // Presets (percentiles, bit range) can fall outside the band's min/max
-  const sliderMin = Math.min(bandStats.min, layer.stretch.min);
-  const sliderMax = Math.max(bandStats.max, layer.stretch.max);
+  const sliderMin = Math.min(dataMin, layer.stretch.min);
+  const sliderMax = Math.max(dataMax, layer.stretch.max);
+  const { step, digits } = sliderPrecision(sliderMax - sliderMin);
   const colormap = layer.colormap ?? 'gray';
   const colormapOptions = COLORMAPS.map(
     name =>
       `<option value="${name}" ${name === colormap ? 'selected' : ''}>${COLORMAP_LABELS[name]}</option>`
   ).join('');
   return `
-    <div class="control-section">
+    ${
+      math
+        ? ''
+        : `<div class="control-section">
       <label>Band</label>
       <select id="band-select">${bandOptions}</select>
-    </div>
+    </div>`
+    }
+    ${renderBandMathControls(layer)}
     <div class="control-section">
       <label>Colormap</label>
       <select id="colormap-select">${colormapOptions}</select>
       <div id="colormap-preview" class="colormap-preview" style="background: ${colormapGradient(colormap)}"></div>
     </div>
-    ${renderStretchPresetControl('stretch-preset', layer, [layer.band_stats[layer.band - 1]])}
+    ${
+      math
+        ? ''
+        : `${renderStretchPresetControl('stretch-preset', layer, [layer.band_stats[layer.band - 1]])}
     <div class="control-section">
       <label class="stretch-toggle-label">
         <input type="checkbox" id="stretch-equalize" ${layer.equalize ? 'checked' : ''}>
         Histogram equalization
       </label>
+    </div>`
+    }
+    <div class="control-section">
+      <label>Min <span class="value-display">${layer.stretch.min.toFixed(digits)}</span></label>
+      <input type="range" id="stretch-min" min="${sliderMin}" max="${sliderMax}" value="${layer.stretch.min}" step="${step}" data-digits="${digits}">
     </div>
     <div class="control-section">
-      <label>Min <span class="value-display">${layer.stretch.min.toFixed(1)}</span></label>
-      <input type="range" id="stretch-min" min="${sliderMin}" max="${sliderMax}" value="${layer.stretch.min}" step="0.1">
-    </div>
-    <div class="control-section">
-      <label>Max <span class="value-display">${layer.stretch.max.toFixed(1)}</span></label>
-      <input type="range" id="stretch-max" min="${sliderMin}" max="${sliderMax}" value="${layer.stretch.max}" step="0.1">
+      <label>Max <span class="value-display">${layer.stretch.max.toFixed(digits)}</span></label>
+      <input type="range" id="stretch-max" min="${sliderMin}" max="${sliderMax}" value="${layer.stretch.max}" step="${step}" data-digits="${digits}">
     </div>
     <div class="control-section">
       <label>Gamma <span class="value-display">${layer.stretch.gamma.toFixed(2)}</span></label>
       <input type="range" id="stretch-gamma" min="0.1" max="3.0" value="${layer.stretch.gamma}" step="0.05">
     </div>
     <button id="auto-stretch" class="control-btn">Auto Stretch</button>
-    <button id="show-histogram" class="control-btn">Show Histogram</button>
+    ${math ? '' : '<button id="show-histogram" class="control-btn">Show Histogram</button>'}
     <button id="show-image-stats" class="control-btn" title="Per-column and per-line statistics (reads the full band)">Image Statistics</button>
   `;
 }
@@ -1169,6 +1242,7 @@ function renderRgbControls(layer: RasterLayerWithUI): string {
       </label>
     </div>
     <button id="auto-stretch-rgb" class="control-btn">Auto Stretch All</button>
+    <button id="white-balance-rgb" class="control-btn" title="Grey world: equalize channel means by moving each white point">White Balance</button>
     <button id="show-image-stats" class="control-btn" title="Per-column and per-line statistics (reads the full band)">Image Statistics</button>
     ${!layer.isComposition ? '<button id="create-rgb-layer" class="control-btn" style="margin-top: 8px;">Create RGB Layer</button>' : ''}
   `;
@@ -1200,7 +1274,94 @@ function attachRasterEventListeners(manager: LayerManagerWithUI, layer: RasterLa
 /**
  * Attach grayscale control listeners
  */
+/** Wire the band math selector; Apply compiles, samples the range and redraws */
+function attachBandMathListeners(manager: LayerManagerWithUI): void {
+  const templateSelect = document.getElementById('band-math-template') as HTMLSelectElement | null;
+  if (!templateSelect) return;
+  const ab = document.getElementById('band-math-ab');
+  const aSelect = document.getElementById('band-math-a') as HTMLSelectElement | null;
+  const bSelect = document.getElementById('band-math-b') as HTMLSelectElement | null;
+  const exprInput = document.getElementById('band-math-expr') as HTMLInputElement | null;
+  const help = document.querySelector('.band-math-help') as HTMLElement | null;
+  const applyBtn = document.getElementById('band-math-apply') as HTMLButtonElement | null;
+  const newLayerBtn = document.getElementById('band-math-new-layer') as HTMLButtonElement | null;
+  const actions = document.querySelector('.band-math-actions') as HTMLElement | null;
+  if (!aSelect || !bSelect || !exprInput || !applyBtn) return;
+
+  const template = () => templateSelect.value as BandMathTemplate | 'custom' | 'off';
+  const syncExpression = () => {
+    const t = template();
+    if (t !== 'off' && t !== 'custom') {
+      exprInput.value = BAND_MATH_TEMPLATES[t].build(Number(aSelect.value), Number(bSelect.value));
+    }
+  };
+  const apply = async () => {
+    const id = manager.selectedLayerId;
+    const t = template();
+    if (!id) return;
+    if (t === 'off') {
+      await manager.setLayerBandMath(id, null);
+      return;
+    }
+    applyBtn.disabled = true;
+    try {
+      await manager.setLayerBandMath(id, {
+        expression: exprInput.value.trim(),
+        template: t,
+        a: Number(aSelect.value),
+        b: Number(bSelect.value),
+      });
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : String(error), 'error', 4000);
+    } finally {
+      applyBtn.disabled = false;
+    }
+  };
+
+  templateSelect.addEventListener('change', () => {
+    const t = template();
+    if (ab) ab.hidden = t === 'off' || t === 'custom';
+    exprInput.hidden = t === 'off';
+    exprInput.readOnly = t !== 'custom';
+    if (help) help.hidden = t !== 'custom';
+    if (actions) actions.hidden = t === 'off';
+    syncExpression();
+    if (t === 'off') void apply();
+    else if (t !== 'custom') void apply();
+    else exprInput.focus();
+  });
+  for (const select of [aSelect, bSelect]) {
+    select.addEventListener('change', () => {
+      syncExpression();
+      void apply();
+    });
+  }
+  applyBtn.addEventListener('click', () => void apply());
+  newLayerBtn?.addEventListener('click', async () => {
+    const id = manager.selectedLayerId;
+    const t = template();
+    if (!id || t === 'off') return;
+    newLayerBtn.disabled = true;
+    try {
+      await manager.createBandMathLayer(id, {
+        expression: exprInput.value.trim(),
+        template: t,
+        a: Number(aSelect.value),
+        b: Number(bSelect.value),
+      });
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : String(error), 'error', 4000);
+    } finally {
+      newLayerBtn.disabled = false;
+    }
+  });
+  exprInput.addEventListener('keydown', e => {
+    if (e.key === 'Enter') void apply();
+  });
+}
+
 function attachGrayscaleListeners(manager: LayerManagerWithUI, layer: RasterLayer): void {
+  attachBandMathListeners(manager);
   const bandSelect = document.getElementById('band-select') as HTMLSelectElement | null;
   if (bandSelect) {
     bandSelect.addEventListener('change', e => {
@@ -1247,7 +1408,11 @@ function attachGrayscaleListeners(manager: LayerManagerWithUI, layer: RasterLaye
       const target = e.target as HTMLInputElement;
       const label = target.previousElementSibling as HTMLElement;
       const valueDisplay = label?.querySelector('.value-display');
-      if (valueDisplay) valueDisplay.textContent = parseFloat(target.value).toFixed(1);
+      if (valueDisplay) {
+        valueDisplay.textContent = parseFloat(target.value).toFixed(
+          Number(target.dataset.digits ?? 1)
+        );
+      }
     });
     minSlider.addEventListener('change', e => {
       const target = e.target as HTMLInputElement;
@@ -1267,7 +1432,11 @@ function attachGrayscaleListeners(manager: LayerManagerWithUI, layer: RasterLaye
       const target = e.target as HTMLInputElement;
       const label = target.previousElementSibling as HTMLElement;
       const valueDisplay = label?.querySelector('.value-display');
-      if (valueDisplay) valueDisplay.textContent = parseFloat(target.value).toFixed(1);
+      if (valueDisplay) {
+        valueDisplay.textContent = parseFloat(target.value).toFixed(
+          Number(target.dataset.digits ?? 1)
+        );
+      }
     });
     maxSlider.addEventListener('change', e => {
       const target = e.target as HTMLInputElement;
@@ -1304,8 +1473,17 @@ function attachGrayscaleListeners(manager: LayerManagerWithUI, layer: RasterLaye
 
   const autoStretchBtn = document.getElementById('auto-stretch');
   if (autoStretchBtn) {
-    // Re-apply the selected preset (the default one after manual edits)
+    // Re-apply the selected preset (the default one after manual edits); band
+    // math re-samples the expression's range
     autoStretchBtn.addEventListener('click', () => {
+      const id = manager.selectedLayerId;
+      if (id && layer.bandMath) {
+        const { range: _range, ...settings } = layer.bandMath;
+        manager.setLayerBandMath(id, settings).catch((error: unknown) => {
+          showToast(error instanceof Error ? error.message : String(error), 'error', 4000);
+        });
+        return;
+      }
       const preset = layer.stretchPreset;
       void applyPresetFromUi(
         manager,
@@ -1449,6 +1627,16 @@ function attachRgbListeners(manager: LayerManagerWithUI, layer: RasterLayerWithU
       );
     });
   }
+
+  document.getElementById('white-balance-rgb')?.addEventListener('click', () => {
+    const id = manager.selectedLayerId;
+    if (!id) return;
+    void manager.applyWhiteBalance(id).then(applied => {
+      if (!applied) {
+        showToast('White balance needs channel means above their black points', 'info', 3000);
+      }
+    });
+  });
 
   const rgbPresetSelect = document.getElementById('rgb-stretch-preset') as HTMLSelectElement | null;
   rgbPresetSelect?.addEventListener('change', () => {

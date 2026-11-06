@@ -7,9 +7,9 @@ mod gdal;
 use commands::app::{get_version, read_config, write_config};
 use commands::georef::{apply_georeference, calculate_transformation};
 use commands::raster::{
-    build_overviews, close_dataset, get_elevation_profile, get_elevation_profile_pixels,
-    get_histogram, get_image_statistics, get_raster_stats, get_raw_tile, open_raster,
-    query_pixel_value, query_pixel_value_at_pixel, set_rpc_elevation, use_online_dem,
+    build_overviews, close_dataset, get_band_profile, get_histogram, get_image_statistics,
+    get_raster_stats, get_raw_tile, get_region_statistics, open_raster, query_pixel_value,
+    query_pixel_value_at_pixel, set_rpc_elevation, use_online_dem,
 };
 use commands::stac::{
     browse_static_collection, connect_stac_api, fetch_stac_resource, fetch_stac_thumbnail,
@@ -140,8 +140,8 @@ fn main() {
             open_vector,
             query_pixel_value,
             query_pixel_value_at_pixel,
-            get_elevation_profile,
-            get_elevation_profile_pixels,
+            get_band_profile,
+            get_region_statistics,
             // STAC commands
             connect_stac_api,
             list_stac_collections,

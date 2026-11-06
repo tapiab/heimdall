@@ -13,6 +13,7 @@ import type { ExportTool } from './export-tool';
 import type { ProfileTool } from './profile-tool';
 import type { AnnotationTool } from './annotation-tool';
 import type { ZoomRectTool } from './zoom-rect-tool';
+import type { RegionStatsTool } from './region-stats-tool';
 import type { ProjectManager } from './project-manager';
 import type { StacBrowser } from './stac-browser';
 import type { ConfigManager } from './config-manager';
@@ -30,6 +31,7 @@ interface ToolCollection {
   annotationTool?: AnnotationTool | null;
   zoomRectTool?: ZoomRectTool | null;
   georeferenceTool?: GeoreferenceTool | null;
+  regionStatsTool?: RegionStatsTool | null;
 }
 
 /**
@@ -92,7 +94,13 @@ function deactivateTools(tools: ToolCollection): void {
     annotationTool,
     zoomRectTool,
     georeferenceTool,
+    regionStatsTool,
   } = tools;
+
+  if (regionStatsTool && regionStatsTool.isActive()) {
+    // Clears its own button state
+    regionStatsTool.deactivate();
+  }
 
   if (measureTool && measureTool.isActive()) {
     measureTool.deactivate();
@@ -136,6 +144,7 @@ export interface SetupUIOptions {
   elevationProfileTool?: ProfileTool | null;
   annotationTool?: AnnotationTool | null;
   zoomRectTool?: ZoomRectTool | null;
+  regionStatsTool?: RegionStatsTool | null;
   projectManager?: ProjectManager | null;
   stacBrowser?: StacBrowser | null;
   configManager?: ConfigManager | null;
@@ -158,6 +167,7 @@ export function setupUI(options: SetupUIOptions): void {
     elevationProfileTool = null,
     annotationTool = null,
     zoomRectTool = null,
+    regionStatsTool = null,
     projectManager = null,
     stacBrowser = null,
     configManager = null,
@@ -277,7 +287,13 @@ export function setupUI(options: SetupUIOptions): void {
   const zoomRectBtn = document.getElementById('zoom-rect-btn');
   if (zoomRectBtn && zoomRectTool) {
     zoomRectBtn.addEventListener('click', () => {
-      deactivateTools({ measureTool, profileTool, elevationProfileTool, annotationTool });
+      deactivateTools({
+        regionStatsTool,
+        measureTool,
+        profileTool,
+        elevationProfileTool,
+        annotationTool,
+      });
       const active = zoomRectTool.toggle();
       zoomRectBtn.classList.toggle('active', active);
     });
@@ -287,7 +303,13 @@ export function setupUI(options: SetupUIOptions): void {
   const measureBtn = document.getElementById('measure-btn');
   if (measureBtn && measureTool) {
     measureBtn.addEventListener('click', () => {
-      deactivateTools({ profileTool, elevationProfileTool, annotationTool, zoomRectTool });
+      deactivateTools({
+        regionStatsTool,
+        profileTool,
+        elevationProfileTool,
+        annotationTool,
+        zoomRectTool,
+      });
       const active = measureTool.toggle();
       measureBtn.classList.toggle('active', active);
     });
@@ -297,9 +319,23 @@ export function setupUI(options: SetupUIOptions): void {
   const profileBtn = document.getElementById('profile-btn');
   if (profileBtn && profileTool) {
     profileBtn.addEventListener('click', () => {
-      deactivateTools({ measureTool, elevationProfileTool, annotationTool, zoomRectTool });
+      deactivateTools({
+        regionStatsTool,
+        measureTool,
+        elevationProfileTool,
+        annotationTool,
+        zoomRectTool,
+      });
       const active = profileTool.toggle();
       profileBtn.classList.toggle('active', active);
+    });
+  }
+
+  // Region statistics button (drag a box / click a pixel)
+  const regionStatsBtn = document.getElementById('region-stats-btn');
+  if (regionStatsBtn && regionStatsTool) {
+    regionStatsBtn.addEventListener('click', () => {
+      toggleRegionStatsTool();
     });
   }
 
@@ -307,7 +343,7 @@ export function setupUI(options: SetupUIOptions): void {
   const elevationBtn = document.getElementById('elevation-btn');
   if (elevationBtn && elevationProfileTool) {
     elevationBtn.addEventListener('click', () => {
-      deactivateTools({ measureTool, profileTool, annotationTool, zoomRectTool });
+      deactivateTools({ regionStatsTool, measureTool, profileTool, annotationTool, zoomRectTool });
       const active = elevationProfileTool.toggle();
       elevationBtn.classList.toggle('active', active);
     });
@@ -351,7 +387,13 @@ export function setupUI(options: SetupUIOptions): void {
           const { mode } = optionEl.dataset;
 
           // Deactivate other tools
-          deactivateTools({ measureTool, profileTool, elevationProfileTool, zoomRectTool });
+          deactivateTools({
+            regionStatsTool,
+            measureTool,
+            profileTool,
+            elevationProfileTool,
+            zoomRectTool,
+          });
 
           // Set annotation mode
           if (mode) {
@@ -380,10 +422,26 @@ export function setupUI(options: SetupUIOptions): void {
     if (addLayerDropdownEl) addLayerDropdownEl.classList.remove('visible');
   });
 
+  // Helper: toggle region statistics tool (shared by button and keyboard shortcut)
+  function toggleRegionStatsTool(): void {
+    if (!regionStatsTool) return;
+    deactivateTools({
+      measureTool,
+      profileTool,
+      elevationProfileTool,
+      annotationTool,
+      zoomRectTool,
+      georeferenceTool,
+    });
+    const active = regionStatsTool.toggle();
+    document.getElementById('region-stats-btn')?.classList.toggle('active', active);
+  }
+
   // Helper: toggle georeference tool (shared by button and keyboard shortcut)
   function toggleGeoreferenceTool(): void {
     if (!georeferenceTool) return;
     deactivateTools({
+      regionStatsTool,
       measureTool,
       profileTool,
       elevationProfileTool,
@@ -673,7 +731,13 @@ export function setupUI(options: SetupUIOptions): void {
     // Z to toggle zoom rectangle mode
     if (e.key === 'z' && !e.ctrlKey && !e.metaKey && !e.altKey) {
       if (zoomRectTool) {
-        deactivateTools({ measureTool, profileTool, elevationProfileTool, annotationTool });
+        deactivateTools({
+          regionStatsTool,
+          measureTool,
+          profileTool,
+          elevationProfileTool,
+          annotationTool,
+        });
         const active = zoomRectTool.toggle();
         const zoomRectBtnEl = document.getElementById('zoom-rect-btn');
         if (zoomRectBtnEl) {
@@ -684,7 +748,13 @@ export function setupUI(options: SetupUIOptions): void {
     // M to toggle measure mode
     if (e.key === 'm' && !e.ctrlKey && !e.metaKey && !e.altKey) {
       if (measureTool) {
-        deactivateTools({ profileTool, elevationProfileTool, annotationTool, zoomRectTool });
+        deactivateTools({
+          regionStatsTool,
+          profileTool,
+          elevationProfileTool,
+          annotationTool,
+          zoomRectTool,
+        });
         const active = measureTool.toggle();
         const measureBtnEl = document.getElementById('measure-btn');
         if (measureBtnEl) {
@@ -700,7 +770,13 @@ export function setupUI(options: SetupUIOptions): void {
           const annotateBtnEl = document.getElementById('annotate-btn');
           if (annotateBtnEl) annotateBtnEl.classList.remove('active');
         } else {
-          deactivateTools({ measureTool, profileTool, elevationProfileTool, zoomRectTool });
+          deactivateTools({
+            regionStatsTool,
+            measureTool,
+            profileTool,
+            elevationProfileTool,
+            zoomRectTool,
+          });
           annotationTool.activate('marker');
           const annotateBtnEl = document.getElementById('annotate-btn');
           if (annotateBtnEl) annotateBtnEl.classList.add('active');
@@ -710,7 +786,13 @@ export function setupUI(options: SetupUIOptions): void {
     // E to toggle elevation profile (auto-enables 3D terrain)
     if (e.key === 'e' && !e.ctrlKey && !e.metaKey && !e.altKey) {
       if (elevationProfileTool) {
-        deactivateTools({ measureTool, profileTool, annotationTool, zoomRectTool });
+        deactivateTools({
+          regionStatsTool,
+          measureTool,
+          profileTool,
+          annotationTool,
+          zoomRectTool,
+        });
         const active = elevationProfileTool.toggle();
         const elevationBtnEl = document.getElementById('elevation-btn');
         if (elevationBtnEl) {
@@ -741,13 +823,23 @@ export function setupUI(options: SetupUIOptions): void {
     // P to toggle profile mode (raster value profile)
     if (e.key === 'p' && !e.ctrlKey && !e.metaKey && !e.altKey) {
       if (profileTool) {
-        deactivateTools({ measureTool, elevationProfileTool, annotationTool, zoomRectTool });
+        deactivateTools({
+          regionStatsTool,
+          measureTool,
+          elevationProfileTool,
+          annotationTool,
+          zoomRectTool,
+        });
         const active = profileTool.toggle();
         const profileBtnEl = document.getElementById('profile-btn');
         if (profileBtnEl) {
           profileBtnEl.classList.toggle('active', active);
         }
       }
+    }
+    // S to toggle region statistics
+    if (e.key === 's' && !e.ctrlKey && !e.metaKey && !e.altKey) {
+      toggleRegionStatsTool();
     }
     // C to toggle STAC browser
     if (e.key === 'c' && !e.ctrlKey && !e.metaKey && !e.altKey) {
@@ -775,6 +867,7 @@ export function setupUI(options: SetupUIOptions): void {
     if (e.key === 'Escape') {
       // Cancel all active tools
       deactivateTools({
+        regionStatsTool,
         measureTool,
         profileTool,
         elevationProfileTool,

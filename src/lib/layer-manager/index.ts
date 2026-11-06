@@ -28,6 +28,7 @@ import type {
   LayerManagerOptions,
   RpcElevation,
   RasterAdjust,
+  BandMathSettings,
   StretchPreset,
 } from './types';
 
@@ -52,6 +53,8 @@ import {
   setLayerStretch,
   setLayerColormap,
   applyStretchPreset,
+  applyWhiteBalance,
+  setLayerBandMath,
   setLayerEqualize,
   setLayerAdjust,
   setLayerBand,
@@ -76,6 +79,7 @@ import {
 import {
   createRgbCompositionLayer,
   createCrossLayerRgbCompositionLayer,
+  createBandMathLayer,
   refreshCompositionTiles,
 } from './composition-handler';
 import {
@@ -85,6 +89,7 @@ import {
   removeProtocol,
 } from './tile-protocol';
 import { invalidateRawTiles } from './raw-tiles';
+import { bandMathPixelValue } from './band-math';
 import { invalidateBandHistograms } from './stretch-presets';
 import { showImageStatistics, invalidateImageStatistics } from './image-stats';
 import type { ColormapName } from './colormaps';
@@ -241,6 +246,7 @@ export class LayerManager {
       this._lastStatusBarQuery = now;
       this._statusBarQueryPending = true;
 
+      const datasetId = topmostRaster.sourceLayerId ?? topmostRaster.id;
       try {
         let result: PixelQueryResult;
 
@@ -254,19 +260,19 @@ export class LayerManager {
           const pixelY = Math.floor((offsetY - lat) / scale);
 
           result = await invoke<PixelQueryResult>('query_pixel_value_at_pixel', {
-            id: topmostRaster.id,
+            id: datasetId,
             pixel_x: pixelX,
             pixel_y: pixelY,
           });
         } else {
           result = await invoke<PixelQueryResult>('query_pixel_value', {
-            id: topmostRaster.id,
+            id: datasetId,
             lng,
             lat,
           });
         }
 
-        this.updateStatusBarPixelValue(result);
+        this.updateStatusBarPixelValue(result, topmostRaster);
       } catch {
         this.updateStatusBarPixelValue(null);
       } finally {
@@ -314,13 +320,22 @@ export class LayerManager {
   /**
    * Update the status bar with pixel value information.
    */
-  private updateStatusBarPixelValue(result: PixelQueryResult | null): void {
+  private updateStatusBarPixelValue(result: PixelQueryResult | null, layer?: RasterLayer): void {
     const pixelValueEl = document.getElementById('pixel-value');
 
     if (!pixelValueEl) return;
 
     if (!result || !result.is_valid || result.values.length === 0) {
       pixelValueEl.textContent = '--';
+      return;
+    }
+
+    // Grayscale band math: the expression's value rather than the bands
+    if (layer?.bandMath && layer.displayMode === 'grayscale') {
+      const value = bandMathPixelValue(layer.bandMath.expression, layer.bands, result.values);
+      pixelValueEl.textContent = Number.isFinite(value)
+        ? `Val: ${Number.isInteger(value) ? value : value.toPrecision(4)}`
+        : 'NoData';
       return;
     }
 
@@ -489,6 +504,37 @@ export class LayerManager {
    */
   applyStretchPreset(id: string, preset: StretchPreset): Promise<boolean> {
     return applyStretchPreset(this, id, preset);
+  }
+
+  /**
+   * Display a band math expression in grayscale, or return to the plain band.
+   * @param id - Layer ID
+   * @param settings - Expression and template, or null
+   */
+  setLayerBandMath(id: string, settings: Omit<BandMathSettings, 'range'> | null): Promise<void> {
+    return setLayerBandMath(this, id, settings);
+  }
+
+  /**
+   * Create a new layer showing a band math expression over a layer's bands.
+   * @param sourceLayerId - Layer whose bands the expression reads
+   * @param settings - Expression and template
+   * @returns The new layer ID
+   */
+  createBandMathLayer(
+    sourceLayerId: string,
+    settings: Omit<BandMathSettings, 'range'>
+  ): Promise<string> {
+    return createBandMathLayer(this, sourceLayerId, settings);
+  }
+
+  /**
+   * Grey-world white balance of the RGB channels.
+   * @param id - Layer ID
+   * @returns Whether it applied
+   */
+  applyWhiteBalance(id: string): Promise<boolean> {
+    return applyWhiteBalance(this, id);
   }
 
   /**
@@ -807,6 +853,12 @@ export class LayerManager {
     const layer = this.layers.get(id);
     if (!layer) return;
 
+    // Compositions and band math layers read this layer's dataset, which is about to close
+    const dependents = [...this.layers.values()]
+      .filter(l => l.id !== id && (l as RasterLayer).sourceLayerId === id)
+      .map(l => l.id);
+    for (const dependent of dependents) await this.removeLayer(dependent);
+
     if (layer.type === 'vector') {
       const sourceId = `vector-source-${id}`;
       const possibleLayerIds = [`vector-fill-${id}`, `vector-line-${id}`, `vector-circle-${id}`];
@@ -835,9 +887,9 @@ export class LayerManager {
         // Already removed
       }
 
-      // Close the dataset in the backend (if not a composition)
+      // Close the dataset in the backend (compositions and band math layers have none)
       const rasterLayer = layer as RasterLayer;
-      if (!rasterLayer.isComposition) {
+      if (!rasterLayer.isComposition && !rasterLayer.isBandMathLayer) {
         try {
           await invoke('close_dataset', { id });
         } catch (error) {

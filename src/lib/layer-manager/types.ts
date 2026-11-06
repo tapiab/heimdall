@@ -79,6 +79,17 @@ export interface RasterAdjust {
   resampling: 'linear' | 'nearest';
 }
 
+/** Grayscale display of a band math expression instead of one band */
+export interface BandMathSettings {
+  expression: string;
+  /** Template the expression came from, for the UI */
+  template: 'nd' | 'ratio' | 'diff' | 'custom';
+  a: number;
+  b: number;
+  /** Min and max of the expression over the sampled overview (slider range) */
+  range: [number, number];
+}
+
 /** Stretch parameters for grayscale display */
 export interface StretchSettings {
   min: number;
@@ -162,6 +173,8 @@ export interface RasterLayer extends BaseLayer {
   stretchPreset?: StretchPreset;
   /** Histogram equalization within the stretch limits (grayscale) */
   equalize?: boolean;
+  /** Grayscale shows this expression instead of `band` */
+  bandMath?: BandMathSettings | null;
   /** Brightness, contrast, saturation and resampling */
   adjust?: RasterAdjust;
   /** RGB band assignments */
@@ -172,7 +185,9 @@ export interface RasterLayer extends BaseLayer {
   isComposition?: boolean;
   /** Whether this is a cross-layer composition */
   isCrossLayerComposition?: boolean;
-  /** Source layer ID for same-layer compositions */
+  /** Layer made by "Create Layer" in band math: always shows `bandMath` */
+  isBandMathLayer?: boolean;
+  /** Source layer ID for same-layer compositions and band math layers */
   sourceLayerId?: string;
   /** Cross-layer RGB configuration */
   crossLayerRgb?: CrossLayerRgbConfig;

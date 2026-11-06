@@ -141,3 +141,35 @@ export function equalizationLut(
   }
   return lut;
 }
+
+/** Mean of the sampled band, from histogram bin centres; null when empty */
+export function histogramMean(histogram: HistogramData): number | null {
+  let sum = 0;
+  let count = 0;
+  histogram.counts.forEach((c, i) => {
+    const lo = histogram.bin_edges[i];
+    const hi = histogram.bin_edges[i + 1] ?? lo;
+    sum += c * ((lo + hi) / 2);
+    count += c;
+  });
+  return count > 0 ? sum / count : null;
+}
+
+/**
+ * Grey-world white balance: keep each channel's black point and move its
+ * white point so the channel means land on the same display level (the
+ * average of their current levels, preserving overall brightness). Null when
+ * a mean sits at or below its black point.
+ */
+export function greyWorldStretch(
+  stretches: [StretchSettings, StretchSettings, StretchSettings],
+  means: [number, number, number]
+): [StretchSettings, StretchSettings, StretchSettings] | null {
+  const levels = stretches.map((s, i) => (means[i] - s.min) / (s.max - s.min));
+  if (levels.some(l => !Number.isFinite(l) || l <= 0)) return null;
+  const target = levels.reduce((a, b) => a + b, 0) / 3;
+  return stretches.map((s, i) => ({
+    ...s,
+    max: s.min + (means[i] - s.min) / target,
+  })) as [StretchSettings, StretchSettings, StretchSettings];
+}
