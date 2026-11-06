@@ -341,7 +341,8 @@ export function refreshCompositionTiles(manager: LayerManagerInterface, id: stri
 
   // Force map to reload tiles
   const source = manager.mapManager.map.getSource(sourceId) as
-    maplibregl.RasterTileSource | undefined;
+    | maplibregl.RasterTileSource
+    | undefined;
   if (source) {
     const cacheBuster = Date.now();
     source.setTiles([`${protocolName}://{z}/{x}/{y}?v=${cacheBuster}`]);

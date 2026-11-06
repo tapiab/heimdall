@@ -396,7 +396,8 @@ export class LayerManager {
       if (layer.path && layer.path.startsWith('/vsicurl/')) {
         const sourceId = `raster-source-${id}`;
         const source = this.mapManager.map.getSource(sourceId) as
-          maplibregl.RasterTileSource | undefined;
+          | maplibregl.RasterTileSource
+          | undefined;
 
         if (source) {
           // Add cache buster to force tile reload
