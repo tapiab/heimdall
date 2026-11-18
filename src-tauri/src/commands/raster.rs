@@ -1022,9 +1022,7 @@ mod tests {
 
         // When range is 0, all values go in first bin
         assert_eq!(counts[0], 100);
-        for i in 1..10 {
-            assert_eq!(counts[i], 0);
-        }
+        assert_eq!(counts[1..], [0; 9]);
 
         // Bin edges should all be the same value
         for edge in &bin_edges {
