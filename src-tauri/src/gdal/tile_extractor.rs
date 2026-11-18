@@ -467,6 +467,18 @@ fn warp_source_bands(
     Ok(results)
 }
 
+/// Color interpretation of `band`, or `None` when the gdal crate does not know it.
+///
+/// `RasterBand::color_interpretation()` unwraps `ColorInterpretation::from_c_int`, whose enum
+/// stops at the YCbCr values (gdal 0.19 and georust master as of 2026-11). GDAL 3.10 added
+/// spectral interpretations (Coastal, RedEdge, NIR, SWIR, ...), so a band tagged with one of
+/// them panics there. Read the raw value and treat unknown ones as "no interpretation".
+fn color_interpretation(band: &gdal::raster::RasterBand) -> Option<ColorInterpretation> {
+    // SAFETY: `band` borrows its dataset, so the handle is valid for the duration of the call.
+    let raw = unsafe { gdal_sys::GDALGetRasterColorInterpretation(band.c_rasterband()) };
+    ColorInterpretation::from_c_int(raw)
+}
+
 /// Resolve effective nodata values for an RGB composite.
 ///
 /// Many 8-bit RGB orthos declare nodata=0 on every band as a marker for the
@@ -498,16 +510,10 @@ fn resolve_rgb_nodata(
     let g_nd = g.as_ref().and_then(|band| band.no_data_value());
     let b_nd = b.as_ref().and_then(|band| band.no_data_value());
 
-    let interps_match = matches!(
-        r.as_ref().map(|band| band.color_interpretation()),
-        Some(ColorInterpretation::RedBand)
-    ) && matches!(
-        g.as_ref().map(|band| band.color_interpretation()),
-        Some(ColorInterpretation::GreenBand)
-    ) && matches!(
-        b.as_ref().map(|band| band.color_interpretation()),
-        Some(ColorInterpretation::BlueBand)
-    );
+    let interps_match = r.as_ref().and_then(color_interpretation)
+        == Some(ColorInterpretation::RedBand)
+        && g.as_ref().and_then(color_interpretation) == Some(ColorInterpretation::GreenBand)
+        && b.as_ref().and_then(color_interpretation) == Some(ColorInterpretation::BlueBand);
     let all_zero_nodata = r_nd == Some(0.0) && g_nd == Some(0.0) && b_nd == Some(0.0);
 
     if interps_match && all_zero_nodata {
@@ -766,6 +772,52 @@ pub fn extract_raw_pixel_tile(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ==================== Color Interpretation Tests ====================
+
+    /// A 3-band MEM dataset; band 1 is tagged Coastal (GDAL >= 3.10), which the gdal crate's
+    /// `RasterBand::color_interpretation()` panics on.
+    fn coastal_tagged_dataset() -> Dataset {
+        let driver = DriverManager::get_driver_by_name("MEM").unwrap();
+        let ds = driver.create("", 4, 4, 3).unwrap();
+        let band = ds.rasterband(1).unwrap();
+        let rv = unsafe {
+            gdal_sys::GDALSetRasterColorInterpretation(
+                band.c_rasterband(),
+                gdal_sys::GDALColorInterp::GCI_CoastalBand,
+            )
+        };
+        assert_eq!(rv, CPLErr::CE_None);
+        ds.rasterband(2)
+            .unwrap()
+            .set_color_interpretation(ColorInterpretation::GreenBand)
+            .unwrap();
+        ds
+    }
+
+    #[test]
+    fn test_color_interpretation_unknown_to_crate_is_none() {
+        let ds = coastal_tagged_dataset();
+        assert_eq!(color_interpretation(&ds.rasterband(1).unwrap()), None);
+        assert_eq!(
+            color_interpretation(&ds.rasterband(2).unwrap()),
+            Some(ColorInterpretation::GreenBand)
+        );
+    }
+
+    #[test]
+    fn test_rgb_nodata_with_spectral_band_tags_does_not_panic() {
+        let ds = coastal_tagged_dataset();
+        for b in 1..=3 {
+            ds.rasterband(b)
+                .unwrap()
+                .set_no_data_value(Some(0.0))
+                .unwrap();
+        }
+        // Band 1 is Coastal, not Red: the nodata=0 suppression heuristic must not apply.
+        let nd = resolve_rgb_nodata(&ds, 1, 2, 3);
+        assert!(!nd.suppress_mask);
+    }
 
     // ==================== Coordinate Conversion Tests ====================
 
