@@ -6,11 +6,13 @@ use gdal::raster::ColorInterpretation;
 use gdal::spatial_ref::SpatialRef;
 use gdal::{Dataset, DriverManager};
 use gdal_sys::{
-    CPLErr, GDALApproxTransform, GDALChunkAndWarpImage, GDALCreateApproxTransformer,
-    GDALCreateWarpOperation, GDALCreateWarpOptions, GDALDestroyApproxTransformer,
-    GDALDestroyWarpOperation, GDALDestroyWarpOptions, GDALGenImgProjTransform, GDALResampleAlg,
+    CPLErr, CSLSetNameValue, GDALApproxTransform, GDALChunkAndWarpImage,
+    GDALCreateApproxTransformer, GDALCreateWarpOperation, GDALCreateWarpOptions,
+    GDALDestroyApproxTransformer, GDALDestroyWarpOperation, GDALDestroyWarpOptions,
+    GDALGenImgProjTransform, GDALResampleAlg,
 };
 use std::f64::consts::PI;
+use std::ffi::CString;
 
 #[derive(Clone, Copy)]
 pub struct TileRequest {
@@ -246,15 +248,24 @@ const WARP_MAX_ERROR: f64 = 0.125;
 
 /// Warp `src_bands` of `dataset` into `dst_bands` of `output_ds` through
 /// `transformer`, approximated within `max_error` pixels (0 = exact).
+///
+/// `src_nodata` holds one nodata value per source band. A source pixel is invalid
+/// only when every band equals its nodata (`UNIFIED_SRC_NODATA`), so a single
+/// zero channel on dark imagery stays valid. Invalid pixels are left out of the
+/// resampling kernel (no dark fringe from bilinear blending with padding) and
+/// destination pixels with no valid source come out as NaN.
 fn run_warp(
     dataset: &Dataset,
     output_ds: &Dataset,
     transformer: &GenImgTransformer,
     src_bands: &mut [i32],
     dst_bands: &mut [i32],
+    src_nodata: &mut [f64],
     tile_size: usize,
     max_error: f64,
 ) -> Result<(), String> {
+    debug_assert_eq!(src_nodata.len(), src_bands.len());
+    let mut dst_nodata = vec![f64::NAN; dst_bands.len()];
     unsafe {
         // Doesn't own the wrapped transformer; destroyed below, before it.
         let approx = if max_error > 0.0 {
@@ -278,6 +289,14 @@ fn run_warp(
         (*warp_opts).panSrcBands = src_bands.as_mut_ptr();
         (*warp_opts).panDstBands = dst_bands.as_mut_ptr();
         (*warp_opts).eResampleAlg = GDALResampleAlg::GRA_Bilinear;
+        (*warp_opts).padfSrcNoDataReal = src_nodata.as_mut_ptr();
+        (*warp_opts).padfDstNoDataReal = dst_nodata.as_mut_ptr();
+        for (key, value) in [("INIT_DEST", "NO_DATA"), ("UNIFIED_SRC_NODATA", "YES")] {
+            let key = CString::new(key).expect("static key");
+            let value = CString::new(value).expect("static value");
+            (*warp_opts).papszWarpOptions =
+                CSLSetNameValue((*warp_opts).papszWarpOptions, key.as_ptr(), value.as_ptr());
+        }
         match approx {
             Some(arg) => {
                 (*warp_opts).pfnTransformer = Some(GDALApproxTransform);
@@ -295,6 +314,8 @@ fn run_warp(
         let warp_op = GDALCreateWarpOperation(warp_opts);
         (*warp_opts).panSrcBands = std::ptr::null_mut();
         (*warp_opts).panDstBands = std::ptr::null_mut();
+        (*warp_opts).padfSrcNoDataReal = std::ptr::null_mut();
+        (*warp_opts).padfDstNoDataReal = std::ptr::null_mut();
         (*warp_opts).pfnTransformer = None;
         (*warp_opts).pTransformerArg = std::ptr::null_mut();
         GDALDestroyWarpOptions(warp_opts);
@@ -344,13 +365,25 @@ fn warp_bands_with_error(
     bands: &[i32],
     max_error: f64,
 ) -> Result<Vec<Vec<f64>>, String> {
+    // Read from the full-resolution bands: same values on overviews, and the
+    // fallback matches `is_nodata` (no declared nodata means 0 is padding).
+    let src_nodata: Vec<f64> = bands
+        .iter()
+        .map(|&b| {
+            dataset
+                .rasterband(b as usize)
+                .ok()
+                .and_then(|band| band.no_data_value())
+                .unwrap_or(0.0)
+        })
+        .collect();
     let level = tile_downsample_factor(dataset, request)
         .and_then(|factor| overview::pick_overview_level(dataset, factor));
     match level {
         Some(level) => overview::with_overview(dataset, level, |ovr| {
-            warp_source_bands(ovr, request, bands, max_error)
+            warp_source_bands(ovr, request, bands, &src_nodata, max_error)
         }),
-        None => warp_source_bands(dataset, request, bands, max_error),
+        None => warp_source_bands(dataset, request, bands, &src_nodata, max_error),
     }
 }
 
@@ -385,6 +418,7 @@ fn warp_source_bands(
     dataset: &Dataset,
     request: &TileRequest,
     bands: &[i32],
+    src_nodata: &[f64],
     max_error: f64,
 ) -> Result<Vec<Vec<f64>>, String> {
     let tile_bounds = tile_to_web_mercator_bounds(request.x, request.y, request.z);
@@ -417,6 +451,7 @@ fn warp_source_bands(
     // src_bands: which source bands to read; dst_bands: corresponding 1-indexed output bands.
     let mut src_bands: Vec<i32> = bands.to_vec();
     let mut dst_bands: Vec<i32> = (1..=(n_bands as i32)).collect();
+    let mut src_nodata = src_nodata.to_vec();
 
     if georef::georef_method(dataset) == GeorefMethod::Rpc {
         // Reuse the cached RPC model (and its open DEM), re-targeted at this tile.
@@ -431,6 +466,7 @@ fn warp_source_bands(
                 transformer,
                 &mut src_bands,
                 &mut dst_bands,
+                &mut src_nodata,
                 tile_size,
                 max_error,
             )
@@ -448,6 +484,7 @@ fn warp_source_bands(
             &transformer,
             &mut src_bands,
             &mut dst_bands,
+            &mut src_nodata,
             tile_size,
             max_error,
         )?;
@@ -486,7 +523,8 @@ fn color_interpretation(band: &gdal::raster::RasterBand) -> Option<ColorInterpre
 /// (and individual channels are very often 0 on darker pixels). Honoring those
 /// nodata values produces speckle/holes on water. Heuristic: if all three
 /// bands report ColorInterp Red/Green/Blue and every declared nodata equals 0,
-/// treat the file as truly opaque RGB and drop the nodata mask.
+/// drop the per-band mask. Pixels that are 0 on all three bands are still
+/// masked by the warp (`UNIFIED_SRC_NODATA`), so padding stays transparent.
 struct RgbNodata {
     r: Option<f64>,
     g: Option<f64>,
@@ -1052,7 +1090,9 @@ mod tests {
         let factor = tile_downsample_factor(ds, &req).unwrap();
         assert_eq!(overview::pick_overview_level(ds, factor), Some(1));
 
-        let full = warp_source_bands(ds, &req, &[1], 0.0).unwrap().remove(0);
+        let full = warp_source_bands(ds, &req, &[1], &[0.0], 0.0)
+            .unwrap()
+            .remove(0);
         let ovr = warp_bands(ds, &req, &[1]).unwrap().remove(0);
         let diffs: Vec<f64> = full
             .iter()
@@ -1129,6 +1169,104 @@ mod tests {
             .expect("tile overlaps the raster");
         assert_eq!(samples.len(), 256 * 256);
         assert!(samples.iter().all(|&v| (v - 7.0).abs() < 1e-6));
+    }
+
+    /// UTM 32N, 1000x1000 @ 100 m; columns < 500 are 0 padding on every band,
+    /// the rest is `values` (one per band).
+    fn half_padded_utm_dataset(values: &[f64]) -> Dataset {
+        let driver = DriverManager::get_driver_by_name("MEM").unwrap();
+        let mut ds = driver
+            .create_with_band_type::<f64, _>("", 1000, 1000, values.len())
+            .unwrap();
+        ds.set_geo_transform(&[528800.0, 100.0, 0.0, 5033600.0, 0.0, -100.0])
+            .unwrap();
+        ds.set_spatial_ref(&SpatialRef::from_epsg(32632).unwrap())
+            .unwrap();
+        for (k, &v) in values.iter().enumerate() {
+            let data: Vec<f64> = (0..1000 * 1000)
+                .map(|i| if i % 1000 < 500 { 0.0 } else { v })
+                .collect();
+            let mut buf = gdal::raster::Buffer::new((1000, 1000), data);
+            ds.rasterband(k + 1)
+                .unwrap()
+                .write((0, 0), (1000, 1000), &mut buf)
+                .unwrap();
+        }
+        ds
+    }
+
+    /// Zoom-12 tile holding the dataset centre, where the padding edge (column 500) runs.
+    fn padding_edge_tile() -> TileRequest {
+        // Centre of `half_padded_utm_dataset`, in lon/lat.
+        let src = SpatialRef::from_epsg(32632).unwrap();
+        let mut dst = SpatialRef::from_epsg(4326).unwrap();
+        dst.set_axis_mapping_strategy(gdal::spatial_ref::AxisMappingStrategy::TraditionalGisOrder);
+        let ct = gdal::spatial_ref::CoordTransform::new(&src, &dst).unwrap();
+        let (mut xs, mut ys, mut zs) = ([578800.0], [4983600.0], [0.0]);
+        ct.transform_coords(&mut xs, &mut ys, &mut zs).unwrap();
+        let (lon, lat) = (xs[0], ys[0]);
+        let n = 2f64.powi(12);
+        let x = ((lon + 180.0) / 360.0 * n) as i32;
+        let lat_r = lat.to_radians();
+        let y = ((1.0 - (lat_r.tan() + 1.0 / lat_r.cos()).ln() / PI) / 2.0 * n) as i32;
+        TileRequest {
+            x,
+            y,
+            z: 12,
+            tile_size: 256,
+        }
+    }
+
+    #[test]
+    fn test_raw_tile_padding_is_transparent_without_dark_fringe() {
+        // No declared nodata: 0 is padding, and bilinear must not blend it into the edge.
+        let ds = half_padded_utm_dataset(&[100.0]);
+        let samples = extract_raw_tile(&ds, &padding_edge_tile(), &[1])
+            .unwrap()
+            .expect("tile overlaps the raster");
+        assert!(samples.iter().any(|v| v.is_nan()), "padding should be NaN");
+        assert!(samples.iter().any(|&v| v == 100.0), "data should remain");
+        assert!(
+            samples.iter().all(|&v| v.is_nan() || v == 100.0),
+            "edge pixels blended with padding"
+        );
+    }
+
+    #[test]
+    fn test_raw_rgb_tile_masks_all_zero_pixels_only() {
+        // RGB ortho with nodata=0 on every band: the heuristic keeps single zero
+        // channels (dark water), but pixels that are 0 on all bands are padding.
+        let ds = half_padded_utm_dataset(&[0.0, 50.0, 80.0]);
+        for (b, interp) in [
+            ColorInterpretation::RedBand,
+            ColorInterpretation::GreenBand,
+            ColorInterpretation::BlueBand,
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let mut band = ds.rasterband(b + 1).unwrap();
+            band.set_color_interpretation(interp).unwrap();
+            band.set_no_data_value(Some(0.0)).unwrap();
+        }
+        let samples = extract_raw_tile(&ds, &padding_edge_tile(), &[1, 2, 3])
+            .unwrap()
+            .expect("tile overlaps the raster");
+        let px = 256 * 256;
+        let (r, g, b) = (&samples[..px], &samples[px..2 * px], &samples[2 * px..]);
+        for i in 0..px {
+            if g[i].is_nan() {
+                assert!(
+                    r[i].is_nan() && b[i].is_nan(),
+                    "partially masked pixel {}",
+                    i
+                );
+            } else {
+                assert_eq!((r[i], g[i], b[i]), (0.0, 50.0, 80.0), "pixel {}", i);
+            }
+        }
+        assert!(g.iter().any(|v| v.is_nan()), "padding should be NaN");
+        assert!(g.iter().any(|v| !v.is_nan()), "data should remain");
     }
 
     #[test]

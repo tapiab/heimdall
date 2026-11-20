@@ -205,25 +205,30 @@ export function renderGrayscale(
 }
 
 /**
- * Render three bands as RGB into RGBA. A pixel is transparent only when all
- * three samples are NaN; a single NaN channel renders as 0.
+ * Render three bands as RGB into RGBA. A pixel is transparent when any of its
+ * three samples is NaN (nodata, outside the raster, or a missing band), as in
+ * QGIS's multiband renderer: drawing the missing channel as 0 would paint a
+ * dark fringe where band footprints differ (e.g. pushbroom band offsets).
+ * RGB orthos whose nodata=0 is ambiguous with dark water never reach here with
+ * a single NaN channel: the backend drops their per-band mask.
  */
 export function renderRgb(
   bands: [RawBand, RawBand, RawBand],
   stretches: [StretchSettings, StretchSettings, StretchSettings]
 ): Uint8ClampedArray<ArrayBuffer> {
   const rgba = transparentTile();
-  if (!bands[0] && !bands[1] && !bands[2]) return rgba;
+  const [r, g, b] = bands;
+  if (!r || !g || !b) return rgba;
   for (let i = 0; i < TILE_PIXELS; i++) {
+    const rv = r[i];
+    const gv = g[i];
+    const bv = b[i];
+    if (Number.isNaN(rv) || Number.isNaN(gv) || Number.isNaN(bv)) continue;
     const o = i * 4;
-    let valid = false;
-    for (let c = 0; c < 3; c++) {
-      const v = bands[c]?.[i] ?? NaN;
-      if (Number.isNaN(v)) continue;
-      valid = true;
-      rgba[o + c] = stretchToByte(v, stretches[c]);
-    }
-    if (valid) rgba[o + 3] = 255;
+    rgba[o] = stretchToByte(rv, stretches[0]);
+    rgba[o + 1] = stretchToByte(gv, stretches[1]);
+    rgba[o + 2] = stretchToByte(bv, stretches[2]);
+    rgba[o + 3] = 255;
   }
   return rgba;
 }

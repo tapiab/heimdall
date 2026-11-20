@@ -114,15 +114,22 @@ describe('renderGrayscale', () => {
 });
 
 describe('renderRgb', () => {
-  it('is transparent only where all three channels are NaN', () => {
+  it('is transparent where any channel is NaN', () => {
     const r = plane(i => (i < 2 ? NaN : 100));
     const g = plane(i => (i === 0 ? NaN : 50));
     const b = plane(i => (i === 0 ? NaN : 0));
     const rgba = renderRgb([r, g, b], [linear, linear, linear]);
     expect(Array.from(rgba.slice(0, 4))).toEqual([0, 0, 0, 0]);
-    // Pixel 1: red is NaN, rendered as 0 but opaque
-    expect(Array.from(rgba.slice(4, 8))).toEqual([0, 127, 0, 255]);
+    // Pixel 1: only red is NaN (band footprints differ), still transparent
+    expect(Array.from(rgba.slice(4, 8))).toEqual([0, 0, 0, 0]);
+    // Pixel 2: a valid 0 sample stays opaque
     expect(Array.from(rgba.slice(8, 12))).toEqual([255, 127, 0, 255]);
+  });
+
+  it('is transparent when a band is missing', () => {
+    const v = plane(() => 50);
+    const rgba = renderRgb([v, null, v], [linear, linear, linear]);
+    expect(rgba.every(x => x === 0)).toBe(true);
   });
 
   it('uses a stretch per channel', () => {
