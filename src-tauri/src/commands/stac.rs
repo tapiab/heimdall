@@ -1313,6 +1313,7 @@ pub async fn open_stac_asset(
         georef_method,
         rpc_default_height: georef::rpc_default_height(&dataset),
         suggest_overviews: false,
+        rgb_bands: super::raster::tagged_rgb_bands(&dataset),
     };
 
     let final_dataset = Dataset::open(&final_path)
@@ -2021,6 +2022,7 @@ mod tests {
             georef_method: GeorefMethod::GeoTransform,
             rpc_default_height: None,
             suggest_overviews: false,
+            rgb_bands: None,
         };
 
         assert_eq!(metadata.id, "test-id");

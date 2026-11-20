@@ -28,6 +28,7 @@ import type {
   BandStats,
   DisplayMode,
   RasterAdjust,
+  RgbBands,
   RpcElevation,
   StretchPreset,
 } from './types';
@@ -47,6 +48,14 @@ interface RasterMetadata {
   georef_method?: 'geotransform' | 'rpc' | 'none';
   rpc_default_height?: number | null;
   suggest_overviews?: boolean;
+  /** 1-indexed bands tagged Red/Green/Blue, when the file tags all three */
+  rgb_bands?: [number, number, number] | null;
+}
+
+/** RGB bands for a new layer: the color-tagged ones, else the first three. */
+export function defaultRgbBands(tagged?: [number, number, number] | null): RgbBands {
+  const [r, g, b] = tagged ?? [1, 2, 3];
+  return { r, g, b };
 }
 
 /** Paths whose overview prompt was declined this session (don't nag on reopen). */
@@ -93,6 +102,7 @@ export async function addRasterLayer(
 
     // Get stats for first band (default)
     const defaultBandStats = metadata.band_stats[0] || { min: 0, max: 255 };
+    const rgbBands = defaultRgbBands(metadata.rgb_bands);
 
     // Store layer info with stretch parameters
     const layerData: RasterLayer = {
@@ -112,21 +122,21 @@ export async function addRasterLayer(
         gamma: 1.0,
       },
       // RGB settings
-      rgbBands: { r: 1, g: 2, b: 3 },
+      rgbBands,
       rgbStretch: {
         r: {
-          min: metadata.band_stats[0]?.min || 0,
-          max: metadata.band_stats[0]?.max || 255,
+          min: metadata.band_stats[rgbBands.r - 1]?.min || 0,
+          max: metadata.band_stats[rgbBands.r - 1]?.max || 255,
           gamma: 1.0,
         },
         g: {
-          min: metadata.band_stats[1]?.min || 0,
-          max: metadata.band_stats[1]?.max || 255,
+          min: metadata.band_stats[rgbBands.g - 1]?.min || 0,
+          max: metadata.band_stats[rgbBands.g - 1]?.max || 255,
           gamma: 1.0,
         },
         b: {
-          min: metadata.band_stats[2]?.min || 0,
-          max: metadata.band_stats[2]?.max || 255,
+          min: metadata.band_stats[rgbBands.b - 1]?.min || 0,
+          max: metadata.band_stats[rgbBands.b - 1]?.max || 255,
           gamma: 1.0,
         },
       },

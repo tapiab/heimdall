@@ -510,7 +510,7 @@ fn warp_source_bands(
 /// stops at the YCbCr values (gdal 0.19 and georust master as of 2026-11). GDAL 3.10 added
 /// spectral interpretations (Coastal, RedEdge, NIR, SWIR, ...), so a band tagged with one of
 /// them panics there. Read the raw value and treat unknown ones as "no interpretation".
-fn color_interpretation(band: &gdal::raster::RasterBand) -> Option<ColorInterpretation> {
+pub(crate) fn color_interpretation(band: &gdal::raster::RasterBand) -> Option<ColorInterpretation> {
     // SAFETY: `band` borrows its dataset, so the handle is valid for the duration of the call.
     let raw = unsafe { gdal_sys::GDALGetRasterColorInterpretation(band.c_rasterband()) };
     ColorInterpretation::from_c_int(raw)
@@ -1225,7 +1225,7 @@ mod tests {
             .unwrap()
             .expect("tile overlaps the raster");
         assert!(samples.iter().any(|v| v.is_nan()), "padding should be NaN");
-        assert!(samples.iter().any(|&v| v == 100.0), "data should remain");
+        assert!(samples.contains(&100.0), "data should remain");
         assert!(
             samples.iter().all(|&v| v.is_nan() || v == 100.0),
             "edge pixels blended with padding"

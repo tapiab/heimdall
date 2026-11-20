@@ -19,7 +19,9 @@ import type {
   BandStats,
   StretchSettings,
   RgbStretchSettings,
+  RgbBands,
 } from './layer-manager/types';
+import { defaultRgbBands } from './layer-manager/raster-handler';
 
 const log = logger.child('StacBrowser');
 
@@ -139,6 +141,7 @@ interface RasterMetadata {
   nodata?: number | null;
   band_stats: Array<BandStats & { band?: number }>;
   is_georeferenced: boolean;
+  rgb_bands?: [number, number, number] | null;
 }
 
 /** STAC layer data extending RasterLayer */
@@ -2192,6 +2195,7 @@ export class StacBrowser {
     const layerName = `${item.id}/${assetTitle}`;
 
     const mapBounds = metadata.bounds;
+    const rgbBands = defaultRgbBands(metadata.rgb_bands);
 
     // Create layer data structure compatible with LayerManager
     // Smart stretch detection handles different data types automatically
@@ -2211,8 +2215,8 @@ export class StacBrowser {
       displayMode: metadata.bands >= 3 ? 'rgb' : 'grayscale',
       band: 1,
       stretch: this.getDefaultStretch(metadata.band_stats, 1),
-      rgbBands: { r: 1, g: 2, b: 3 },
-      rgbStretch: this.getDefaultRgbStretch(metadata.band_stats),
+      rgbBands,
+      rgbStretch: this.getDefaultRgbStretch(metadata.band_stats, rgbBands),
       stacInfo: {
         itemId: item.id,
         collection: item.collection,
@@ -2346,12 +2350,13 @@ export class StacBrowser {
    * Get default RGB stretch settings.
    */
   private getDefaultRgbStretch(
-    bandStats: Array<BandStats & { band?: number }>
+    bandStats: Array<BandStats & { band?: number }>,
+    bands: RgbBands
   ): RgbStretchSettings {
     return {
-      r: this.getDefaultStretch(bandStats, 1),
-      g: this.getDefaultStretch(bandStats, 2),
-      b: this.getDefaultStretch(bandStats, 3),
+      r: this.getDefaultStretch(bandStats, bands.r),
+      g: this.getDefaultStretch(bandStats, bands.g),
+      b: this.getDefaultStretch(bandStats, bands.b),
     };
   }
 }

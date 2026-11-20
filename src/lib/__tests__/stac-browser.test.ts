@@ -1067,7 +1067,7 @@ describe('StacBrowser', () => {
         { band: 3, min: 0, max: 255 },
       ];
 
-      const rgbStretch = stacBrowser.getDefaultRgbStretch(bandStats);
+      const rgbStretch = stacBrowser.getDefaultRgbStretch(bandStats, { r: 1, g: 2, b: 3 });
 
       // 8-bit data preserves full range
       expect(rgbStretch.r).toEqual({ min: 0, max: 255, gamma: 1.0 });
