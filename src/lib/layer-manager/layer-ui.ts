@@ -54,6 +54,7 @@ interface LayerManagerWithUI extends LayerManagerInterface {
   showImageStatistics: (layerId: string, band: number) => Promise<void>;
   setRpcElevation: (id: string, elevation: RpcElevation) => Promise<boolean>;
   buildOverviews: (id: string) => Promise<void>;
+  reloadLayer: (id: string) => Promise<void>;
   setRgbBands: (id: string, r: number, g: number, b: number) => void;
   setRgbStretch: (
     id: string,
@@ -217,6 +218,23 @@ export function updateLayerPanel(manager: LayerManagerWithUI): void {
     headerRow.appendChild(name);
     headerRow.appendChild(moveUpBtn);
     headerRow.appendChild(moveDownBtn);
+    const raster = layer as RasterLayer;
+    if (
+      layer.type === 'raster' &&
+      !raster.sourceLayerId &&
+      !raster.isComposition &&
+      !raster.isCrossLayerComposition
+    ) {
+      const reloadBtn = document.createElement('button');
+      reloadBtn.className = 'layer-reload';
+      reloadBtn.textContent = '\u21bb';
+      reloadBtn.title = 'Reload from disk';
+      reloadBtn.addEventListener('click', e => {
+        e.stopPropagation();
+        void manager.reloadLayer(id);
+      });
+      headerRow.appendChild(reloadBtn);
+    }
     headerRow.appendChild(removeBtn);
 
     const opacityRow = document.createElement('div');

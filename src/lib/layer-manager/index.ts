@@ -64,6 +64,7 @@ import {
   refreshLayerTiles,
   setRpcElevation,
   buildOverviews,
+  reloadRasterLayer,
 } from './raster-handler';
 import {
   addVectorLayer,
@@ -626,6 +627,14 @@ export class LayerManager {
    */
   buildOverviews(id: string): Promise<void> {
     return buildOverviews(this, id);
+  }
+
+  /**
+   * Re-read a raster layer's file from disk and redraw it.
+   * @param id - Layer ID
+   */
+  reloadLayer(id: string): Promise<void> {
+    return reloadRasterLayer(this, id);
   }
 
   /**

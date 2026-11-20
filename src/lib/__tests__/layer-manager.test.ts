@@ -555,6 +555,84 @@ describe('LayerManager', () => {
     });
   });
 
+  describe('reload from disk', () => {
+    const fresh = {
+      id: 'scene',
+      path: '/data/scene.tif',
+      width: 100,
+      height: 50,
+      bands: 2,
+      bounds: [0, 0, 1, 1],
+      native_bounds: [0, 0, 1, 1],
+      projection: 'WKT',
+      pixel_size: [1, 1],
+      nodata: 0,
+      band_stats: [
+        { band: 1, min: 5, max: 50 },
+        { band: 2, min: 6, max: 60 },
+      ],
+      is_georeferenced: true,
+      georef_method: 'geotransform',
+      suggest_overviews: false,
+    };
+
+    beforeEach(() => {
+      layerManager.layers.set('scene', {
+        id: 'scene',
+        type: 'raster',
+        path: '/data/scene.tif',
+        width: 100,
+        height: 50,
+        bands: 4,
+        bounds: [0, 0, 1, 1],
+        band_stats: [],
+        is_georeferenced: true,
+        georef_method: 'geotransform',
+        displayMode: 'rgb',
+        band: 4,
+        rgbBands: { r: 4, g: 3, b: 2 },
+        stretchPreset: 'custom',
+      });
+      layerManager.layers.set('scene-comp', {
+        id: 'scene-comp',
+        type: 'raster',
+        isComposition: true,
+        sourceLayerId: 'scene',
+      });
+      layerManager.refreshLayerTiles = vi.fn();
+      layerManager.updateDynamicControls = vi.fn();
+      layerManager.updateLayerPanel = vi.fn();
+    });
+
+    it('should reopen the dataset, update metadata and redraw dependents', async () => {
+      invoke.mockResolvedValue(fresh);
+      await layerManager.reloadLayer('scene');
+
+      expect(invoke).toHaveBeenCalledWith('reload_raster', { id: 'scene' });
+      const layer = layerManager.layers.get('scene');
+      expect(layer.bands).toBe(2);
+      expect(layer.band_stats).toEqual(fresh.band_stats);
+      // Bands that no longer exist fall back to band 1; RGB needs 3 bands
+      expect(layer.band).toBe(1);
+      expect(layer.rgbBands).toEqual({ r: 1, g: 1, b: 2 });
+      expect(layer.displayMode).toBe('grayscale');
+      expect(layerManager.refreshLayerTiles).toHaveBeenCalledWith('scene');
+      expect(layerManager.refreshLayerTiles).toHaveBeenCalledWith('scene-comp');
+    });
+
+    it('should not reload layers built on another dataset', async () => {
+      await layerManager.reloadLayer('scene-comp');
+      expect(invoke).not.toHaveBeenCalledWith('reload_raster', expect.anything());
+    });
+
+    it('should keep the layer when the file cannot be reopened', async () => {
+      invoke.mockRejectedValue(new Error('No such file'));
+      await layerManager.reloadLayer('scene');
+      expect(layerManager.layers.get('scene').bands).toBe(4);
+      expect(layerManager.refreshLayerTiles).not.toHaveBeenCalled();
+    });
+  });
+
   describe('overviews', () => {
     beforeEach(() => {
       layerManager.layers.set('big', {

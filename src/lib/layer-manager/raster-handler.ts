@@ -9,6 +9,7 @@ import { ask } from '@tauri-apps/plugin-dialog';
 import { showToast, showError, showLoading, hideLoading } from '../notifications';
 import { setupTileProtocol } from './tile-protocol';
 import { invalidateRawTiles } from './raw-tiles';
+import { invalidateImageStatistics } from './image-stats';
 import type { ColormapName } from './colormaps';
 import { logger } from '../logger';
 import {
@@ -43,6 +44,10 @@ interface RasterMetadata {
   height: number;
   bands: number;
   bounds: [number, number, number, number];
+  native_bounds?: [number, number, number, number];
+  projection?: string;
+  pixel_size?: [number, number];
+  nodata?: number | null;
   band_stats: BandStats[];
   is_georeferenced: boolean;
   georef_method?: 'geotransform' | 'rpc' | 'none';
@@ -556,6 +561,89 @@ export async function buildOverviews(manager: LayerManagerInterface, id: string)
     unlisten?.();
     hideLoading();
   }
+}
+
+/**
+ * Re-read a raster layer's file from disk (e.g. after it was rewritten by
+ * another tool) and redraw it and everything built on its dataset. Display
+ * settings are kept; percentile/min-max stretches are recomputed from the new
+ * data. A change of size or georeferencing needs the file to be reopened.
+ */
+export async function reloadRasterLayer(manager: LayerManagerInterface, id: string): Promise<void> {
+  const layer = manager.layers.get(id) as RasterLayer | undefined;
+  if (!layer || layer.type !== 'raster' || layer.sourceLayerId || layer.isCrossLayerComposition) {
+    return;
+  }
+  const fileName = layer.path.split('/').pop()?.split('\\').pop() || 'layer';
+  showLoading(`Reloading ${fileName}...`);
+  try {
+    const metadata = await invoke<RasterMetadata>('reload_raster', { id });
+    const placementChanged =
+      metadata.georef_method !== layer.georef_method ||
+      (!metadata.is_georeferenced &&
+        (metadata.width !== layer.width || metadata.height !== layer.height));
+
+    // Keep the synthetic map bounds of non-georeferenced images
+    const bounds = metadata.is_georeferenced ? metadata.bounds : layer.bounds;
+    const boundsChanged = bounds.some((v, i) => v !== layer.bounds[i]);
+    Object.assign(layer, {
+      width: metadata.width,
+      height: metadata.height,
+      bands: metadata.bands,
+      bounds,
+      native_bounds: metadata.native_bounds,
+      projection: metadata.projection,
+      pixel_size: metadata.pixel_size,
+      nodata: metadata.nodata,
+      band_stats: metadata.band_stats,
+      rpc_default_height: metadata.rpc_default_height,
+      suggest_overviews: metadata.suggest_overviews,
+    });
+    clampBandsToCount(layer, metadata.bands);
+
+    invalidateRawTiles(id);
+    invalidateBandHistograms(id);
+    invalidateImageStatistics(id);
+    if (layer.stretchPreset && layer.stretchPreset !== 'custom') {
+      await applyStretchPreset(manager, id, layer.stretchPreset);
+    }
+    if (boundsChanged) {
+      const mapBounds =
+        layer.georef_method === 'rpc' ? padBounds(bounds, RPC_BOUNDS_MARGIN) : bounds;
+      for (const [otherId, other] of manager.layers) {
+        if (other.type !== 'raster') continue;
+        if (otherId === id || other.sourceLayerId === id) {
+          other.bounds = bounds;
+          rebuildRasterSource(manager, otherId, mapBounds);
+        }
+      }
+    }
+    refreshDependentTiles(manager, id);
+    manager.updateLayerPanel();
+    manager.updateDynamicControls();
+
+    if (placementChanged) {
+      showToast('Georeferencing or size changed: remove and reopen the file', 'info', 5000);
+    } else {
+      showToast(`Reloaded ${fileName}`, 'success', 2000);
+    }
+  } catch (error) {
+    showError('Failed to reload raster', error as Error);
+  } finally {
+    hideLoading();
+  }
+}
+
+/** Point band selections that no longer exist (fewer bands on reload) at band 1. */
+function clampBandsToCount(layer: RasterLayer, bands: number): void {
+  const clamp = (b: number): number => (b >= 1 && b <= bands ? b : 1);
+  layer.band = clamp(layer.band);
+  layer.rgbBands = {
+    r: clamp(layer.rgbBands.r),
+    g: clamp(layer.rgbBands.g),
+    b: clamp(layer.rgbBands.b),
+  };
+  if (layer.displayMode === 'rgb' && bands < 3) layer.displayMode = 'grayscale';
 }
 
 /** Reload tiles of a layer and of compositions built on its dataset. */

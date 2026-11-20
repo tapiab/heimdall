@@ -877,6 +877,29 @@ button:disabled {
   color: var(--text-primary);
 }
 
+.layer-item .layer-reload {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  cursor: pointer;
+  color: var(--text-tertiary);
+  font-size: 14px;
+  line-height: 1;
+  flex-shrink: 0;
+  transition: all var(--transition-fast);
+}
+
+.layer-item .layer-reload:hover {
+  color: var(--accent-primary);
+  background: var(--bg-tertiary);
+}
+
 .layer-item .layer-remove {
   display: flex;
   align-items: center;

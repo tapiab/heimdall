@@ -280,23 +280,44 @@ pub async fn open_raster(
     state: State<'_, DatasetCache>,
 ) -> Result<RasterMetadata, String> {
     let dataset = Dataset::open(&path).map_err(|e| format!("Failed to open raster: {}", e))?;
+    let id = uuid::Uuid::new_v4().to_string();
+    let metadata = raster_metadata(&dataset, id.clone(), path.clone())?;
+    state.add(id, path, dataset);
+    Ok(metadata)
+}
 
+/// Re-read a raster layer's file from disk: replace its open handles (tiles in
+/// flight finish on the old ones) and return fresh metadata under the same id.
+#[tauri::command]
+pub async fn reload_raster(
+    id: String,
+    state: State<'_, DatasetCache>,
+) -> Result<RasterMetadata, String> {
+    let path = state.get_path(&id).ok_or("Dataset not found")?;
+    let dataset = Dataset::open(&path).map_err(|e| format!("Failed to reopen raster: {}", e))?;
+    let metadata = raster_metadata(&dataset, id.clone(), path.clone())?;
+    state.add(id, path, dataset);
+    Ok(metadata)
+}
+
+/// Metadata of an open raster, as returned to the frontend.
+fn raster_metadata(dataset: &Dataset, id: String, path: String) -> Result<RasterMetadata, String> {
     let (width, height) = dataset.raster_size();
     let bands = dataset.raster_count();
-    let method = georef::georef_method(&dataset);
+    let method = georef::georef_method(dataset);
     let georeferenced = method != GeorefMethod::None;
 
     let (bounds, native_bounds, pixel_size) = if method == GeorefMethod::Rpc {
         // RPC footprint is already lon/lat; pixel size is an approximate GSD in degrees.
-        let bounds = georef::rpc_geo_bounds(&dataset)?;
+        let bounds = georef::rpc_geo_bounds(dataset)?;
         let pixel_size = [
             (bounds[2] - bounds[0]) / width as f64,
             (bounds[3] - bounds[1]) / height as f64,
         ];
         (bounds, bounds, pixel_size)
     } else if georeferenced {
-        let native_bounds = calculate_native_bounds(&dataset)?;
-        let bounds = transform_bounds_to_4326(&dataset, native_bounds)?;
+        let native_bounds = calculate_native_bounds(dataset)?;
+        let bounds = transform_bounds_to_4326(dataset, native_bounds)?;
         let gt = dataset
             .geo_transform()
             .map_err(|e| format!("Failed to get geotransform: {}", e))?;
@@ -312,13 +333,10 @@ pub async fn open_raster(
     let nodata = dataset.rasterband(1).ok().and_then(|b| b.no_data_value());
 
     // Compute stats for all bands
-    let band_stats = compute_band_stats(&dataset);
+    let band_stats = compute_band_stats(dataset);
 
-    let id = uuid::Uuid::new_v4().to_string();
-
-    let metadata = RasterMetadata {
-        id: id.clone(),
-        path: path.clone(),
+    Ok(RasterMetadata {
+        id,
         width,
         height,
         bands,
@@ -330,14 +348,11 @@ pub async fn open_raster(
         band_stats,
         is_georeferenced: georeferenced,
         georef_method: method,
-        rpc_default_height: georef::rpc_default_height(&dataset),
-        suggest_overviews: overview::should_suggest_overviews(&dataset, &path),
-        rgb_bands: tagged_rgb_bands(&dataset),
-    };
-
-    state.add(id, path, dataset);
-
-    Ok(metadata)
+        rpc_default_height: georef::rpc_default_height(dataset),
+        suggest_overviews: overview::should_suggest_overviews(dataset, &path),
+        rgb_bands: tagged_rgb_bands(dataset),
+        path,
+    })
 }
 
 /// Set the terrain used to project an RPC raster: a DEM file, a constant

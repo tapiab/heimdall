@@ -9,7 +9,7 @@ use commands::georef::{apply_georeference, calculate_transformation};
 use commands::raster::{
     build_overviews, close_dataset, get_band_profile, get_histogram, get_image_statistics,
     get_raster_stats, get_raw_tile, get_region_statistics, open_raster, query_pixel_value,
-    query_pixel_value_at_pixel, set_rpc_elevation, use_online_dem,
+    query_pixel_value_at_pixel, reload_raster, set_rpc_elevation, use_online_dem,
 };
 use commands::stac::{
     browse_static_collection, connect_stac_api, fetch_stac_resource, fetch_stac_thumbnail,
@@ -129,6 +129,7 @@ fn main() {
             read_config,
             write_config,
             open_raster,
+            reload_raster,
             get_raw_tile,
             set_rpc_elevation,
             build_overviews,
