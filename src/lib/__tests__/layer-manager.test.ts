@@ -906,3 +906,16 @@ describe('LayerManager - Layer Panel', () => {
     });
   });
 });
+
+describe('defaultRgbBands', () => {
+  it('uses the color-tagged bands when the file tags R, G and B', async () => {
+    const { defaultRgbBands } = await import('../layer-manager/raster-handler');
+    expect(defaultRgbBands([4, 3, 2])).toEqual({ r: 4, g: 3, b: 2 });
+  });
+
+  it('falls back to bands 1, 2, 3 without tags', async () => {
+    const { defaultRgbBands } = await import('../layer-manager/raster-handler');
+    expect(defaultRgbBands(null)).toEqual({ r: 1, g: 2, b: 3 });
+    expect(defaultRgbBands(undefined)).toEqual({ r: 1, g: 2, b: 3 });
+  });
+});

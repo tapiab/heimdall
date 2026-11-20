@@ -4,7 +4,9 @@ use crate::gdal::analysis::{self, RegionStatistics};
 use crate::gdal::dataset_cache::DatasetCache;
 use crate::gdal::georef::{self, GeorefMethod};
 use crate::gdal::image_stats::{self, ImageStatistics, Percentiles};
-use crate::gdal::tile_extractor::{extract_raw_pixel_tile, extract_raw_tile, TileRequest};
+use crate::gdal::tile_extractor::{
+    color_interpretation, extract_raw_pixel_tile, extract_raw_tile, TileRequest,
+};
 use crate::gdal::{online_dem, overview};
 use gdal::spatial_ref::{CoordTransform, SpatialRef};
 use gdal::Dataset;
@@ -35,6 +37,8 @@ pub struct RasterMetadata {
     pub rpc_default_height: Option<f64>, // RPC HEIGHT_OFF, used when no DEM/override is set
     #[serde(default)]
     pub suggest_overviews: bool, // large local raster without overviews: offer to build them
+    #[serde(default)]
+    pub rgb_bands: Option<[usize; 3]>, // 1-indexed bands tagged Red/Green/Blue, if all three are
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -227,6 +231,24 @@ fn transform_bounds_to_4326(
 }
 
 /// Compute statistics for all bands
+/// Bands tagged Red, Green and Blue by their color interpretation, in that
+/// order (1-indexed). `None` unless all three are tagged: a multispectral file
+/// often stores them out of order (e.g. B, G, R after an untagged band).
+pub(crate) fn tagged_rgb_bands(dataset: &Dataset) -> Option<[usize; 3]> {
+    use gdal::raster::ColorInterpretation::{BlueBand, GreenBand, RedBand};
+    let find = |wanted| {
+        (1..=dataset.raster_count()).find(|&i| {
+            dataset
+                .rasterband(i)
+                .ok()
+                .and_then(|band| color_interpretation(&band))
+                .as_ref()
+                == Some(&wanted)
+        })
+    };
+    Some([find(RedBand)?, find(GreenBand)?, find(BlueBand)?])
+}
+
 fn compute_band_stats(dataset: &Dataset) -> Vec<BandStats> {
     let band_count = dataset.raster_count();
     let mut stats = Vec::new();
@@ -310,6 +332,7 @@ pub async fn open_raster(
         georef_method: method,
         rpc_default_height: georef::rpc_default_height(&dataset),
         suggest_overviews: overview::should_suggest_overviews(&dataset, &path),
+        rgb_bands: tagged_rgb_bands(&dataset),
     };
 
     state.add(id, path, dataset);
@@ -998,6 +1021,39 @@ pub async fn query_pixel_value_at_pixel(
 mod tests {
     use super::*;
 
+    fn tagged_dataset(tags: Vec<gdal::raster::ColorInterpretation>) -> Dataset {
+        let driver = gdal::DriverManager::get_driver_by_name("MEM").unwrap();
+        let ds = driver
+            .create_with_band_type::<u8, _>("", 4, 4, tags.len())
+            .unwrap();
+        for (i, tag) in tags.into_iter().enumerate() {
+            ds.rasterband(i + 1)
+                .unwrap()
+                .set_color_interpretation(tag)
+                .unwrap();
+        }
+        ds
+    }
+
+    #[test]
+    fn test_tagged_rgb_bands_follow_color_interpretation() {
+        use gdal::raster::ColorInterpretation::*;
+        // Multispectral layout: untagged band first, then B, G, R
+        let ds = tagged_dataset(vec![Undefined, BlueBand, GreenBand, RedBand]);
+        assert_eq!(tagged_rgb_bands(&ds), Some([4, 3, 2]));
+        let ds = tagged_dataset(vec![RedBand, GreenBand, BlueBand]);
+        assert_eq!(tagged_rgb_bands(&ds), Some([1, 2, 3]));
+    }
+
+    #[test]
+    fn test_tagged_rgb_bands_none_unless_all_three_tagged() {
+        use gdal::raster::ColorInterpretation::*;
+        let ds = tagged_dataset(vec![Undefined, Undefined, Undefined]);
+        assert_eq!(tagged_rgb_bands(&ds), None);
+        let ds = tagged_dataset(vec![GrayIndex, GreenBand, BlueBand]);
+        assert_eq!(tagged_rgb_bands(&ds), None);
+    }
+
     #[test]
     fn test_histogram_bins_uniform_distribution() {
         let values: Vec<f64> = (0..100).map(|i| i as f64).collect();
@@ -1022,9 +1078,7 @@ mod tests {
 
         // When range is 0, all values go in first bin
         assert_eq!(counts[0], 100);
-        for i in 1..10 {
-            assert_eq!(counts[i], 0);
-        }
+        assert_eq!(counts[1..], [0; 9]);
 
         // Bin edges should all be the same value
         for edge in &bin_edges {
