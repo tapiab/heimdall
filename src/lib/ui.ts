@@ -851,8 +851,8 @@ export function setupUI(options: SetupUIOptions): void {
     if (e.key === 'g' && !e.ctrlKey && !e.metaKey && !e.altKey) {
       toggleGeoreferenceTool();
     }
-    // S to toggle split view
-    if (e.key === 's' && !e.ctrlKey && !e.metaKey && !e.altKey) {
+    // W to toggle split view (swipe)
+    if (e.key === 'w' && !e.ctrlKey && !e.metaKey && !e.altKey) {
       toggleSplitViewMode();
     }
     // / to focus location search
@@ -954,7 +954,8 @@ function showShortcutsHelp(): void {
         <div class="shortcut"><kbd>R</kbd> Reset rotation</div>
         <div class="shortcut"><kbd>B</kbd> Cycle basemap</div>
         <div class="shortcut"><kbd>T</kbd> Toggle 3D terrain</div>
-        <div class="shortcut"><kbd>S</kbd> Toggle split view</div>
+        <div class="shortcut"><kbd>S</kbd> Region statistics</div>
+        <div class="shortcut"><kbd>W</kbd> Toggle split view</div>
         <div class="shortcut"><kbd>/</kbd> Focus location search</div>
         <div class="shortcut"><kbd>L</kbd> Toggle layer panel</div>
         <div class="shortcut"><kbd>D</kbd> Toggle display panel</div>

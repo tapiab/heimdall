@@ -132,7 +132,8 @@ Press <kbd>?</kbd> in the app for the full list.
 |                         |                   | <kbd>G</kbd>   | Georeference      | <kbd>H</kbd>       | Histogram               |
 |                         |                   | <kbd>C</kbd>   | STAC browser      | <kbd>V</kbd>       | Toggle layer visibility |
 |                         |                   | <kbd>/</kbd>   | Location search   | <kbd>Shift+A</kbd> | Attribute table         |
-|                         |                   | <kbd>Esc</kbd> | Cancel / close    | <kbd>Del</kbd>     | Remove layer            |
+|                         |                   | <kbd>W</kbd>   | Split view        | <kbd>Del</kbd>     | Remove layer            |
+|                         |                   | <kbd>Esc</kbd> | Cancel / close    |                    |                         |
 
 ## STAC browser
 
