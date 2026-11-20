@@ -304,20 +304,20 @@ pub async fn reload_raster(
 fn raster_metadata(dataset: &Dataset, id: String, path: String) -> Result<RasterMetadata, String> {
     let (width, height) = dataset.raster_size();
     let bands = dataset.raster_count();
-    let method = georef::georef_method(&dataset);
+    let method = georef::georef_method(dataset);
     let georeferenced = method != GeorefMethod::None;
 
     let (bounds, native_bounds, pixel_size) = if method == GeorefMethod::Rpc {
         // RPC footprint is already lon/lat; pixel size is an approximate GSD in degrees.
-        let bounds = georef::rpc_geo_bounds(&dataset)?;
+        let bounds = georef::rpc_geo_bounds(dataset)?;
         let pixel_size = [
             (bounds[2] - bounds[0]) / width as f64,
             (bounds[3] - bounds[1]) / height as f64,
         ];
         (bounds, bounds, pixel_size)
     } else if georeferenced {
-        let native_bounds = calculate_native_bounds(&dataset)?;
-        let bounds = transform_bounds_to_4326(&dataset, native_bounds)?;
+        let native_bounds = calculate_native_bounds(dataset)?;
+        let bounds = transform_bounds_to_4326(dataset, native_bounds)?;
         let gt = dataset
             .geo_transform()
             .map_err(|e| format!("Failed to get geotransform: {}", e))?;
@@ -348,7 +348,7 @@ fn raster_metadata(dataset: &Dataset, id: String, path: String) -> Result<Raster
         band_stats,
         is_georeferenced: georeferenced,
         georef_method: method,
-        rpc_default_height: georef::rpc_default_height(&dataset),
+        rpc_default_height: georef::rpc_default_height(dataset),
         suggest_overviews: overview::should_suggest_overviews(dataset, &path),
         rgb_bands: tagged_rgb_bands(dataset),
         path,

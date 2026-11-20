@@ -977,7 +977,8 @@ export function refreshLayerTiles(manager: LayerManagerInterface, id: string): v
 
   // Force map to reload tiles - update tiles URL with cache buster
   const source = manager.mapManager.map.getSource(sourceId) as
-    maplibregl.RasterTileSource | undefined;
+    | maplibregl.RasterTileSource
+    | undefined;
   if (source) {
     const cacheBuster = Date.now();
     source.setTiles([`${protocolName}://{z}/{x}/{y}?v=${cacheBuster}`]);
